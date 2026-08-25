@@ -1,4 +1,4 @@
 // Configuração Pública do Supabase
-// Chaves públicas conforme especificação
-export const SUPABASE_URL = "https://kpocevugbgjvylwcswdd.supabase.co";
-export const SUPABASE_PUBLISHABLE_KEY = "sb_publishable_KC1tclcPrifxYLUzluQYrA_bNta-bvS";
+// Conectado ao banco fornecido pelo usuário
+export const SUPABASE_URL = "https://fuoklimoidmoxarwslrt.supabase.co";
+export const SUPABASE_PUBLISHABLE_KEY = "sb_publishable_N3brAylcWL2cEeYb3lGPCg_3OsGYmW_";

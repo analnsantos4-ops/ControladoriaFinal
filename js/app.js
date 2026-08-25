@@ -36,11 +36,25 @@ async function initApp() {
     }
   });
 
+  // Limpa caches antigos do navegador
+  if ('caches' in window) {
+    caches.keys().then((names) => {
+      names.forEach((name) => {
+        if (!name.includes('v3.0.0')) {
+          caches.delete(name);
+        }
+      });
+    });
+  }
+
   // Registra Service Worker se disponível
   if ('serviceWorker' in navigator) {
     navigator.serviceWorker
       .register('/sw.js')
-      .then(() => console.log('Service Worker registrado com sucesso'))
+      .then((reg) => {
+        reg.update();
+        console.log('Service Worker registrado com sucesso');
+      })
       .catch((err) => console.warn('Service Worker registration failed:', err));
   }
 
