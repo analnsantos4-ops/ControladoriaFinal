@@ -1,6 +1,7 @@
 // Mecanismo de Conferência de Estoque, Validades e Auditoria por Corredor
 import { LOCATIONS, SETORS, CORRIDORS, formatDateBR, parseDateBRtoISO, formatNumber, triggerHaptic, playBeep } from './utils.js';
 import { getProductExpirations, getLatestCountsForExpiration, saveInventoryCounts, saveProductExpiration, saveSession, getActiveSession, clearActiveSession, getAllProducts, getProductById } from './db.js';
+import { triggerSyncNow } from './sync.js';
 import { showToast, showView, openPhotoModal } from './ui.js';
 import { formatSingleProductWhatsApp, formatMultipleProductsWhatsApp, openWhatsAppExportModal } from './whatsapp.js';
 
@@ -358,6 +359,9 @@ export async function confirmConference() {
     triggerHaptic(100);
     playBeep('success');
     showToast('✓ Conferência salva com sucesso!', 'success');
+
+    // Dispara sincronização em segundo plano para o Supabase
+    triggerSyncNow().catch((e) => console.warn('Sync background error:', e));
 
     // Abre Modal de Sucesso com o fluxo contínuo "BIPAR PRÓXIMO"
     showConferenceSavedModal(currentAuditingProduct, currentSelectedExpiration, result.total);

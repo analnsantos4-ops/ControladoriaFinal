@@ -4,7 +4,7 @@ import '../style.css';
 // Orquestrador Principal do Aplicativo Controladoria - Ana Luiza
 import { isAuthenticated, verifyCode, logout } from './auth.js';
 import { initDB, getProductByBarcode, getProductById, searchProducts, getAllProducts, getProductExpirations, getLatestCountsForExpiration, clearAllDatabaseData } from './db.js';
-import { initSyncEngine, registerSyncStatusListener, wipeSupabaseCloudData } from './sync.js';
+import { initSyncEngine, registerSyncStatusListener, wipeSupabaseCloudData, triggerSyncNow } from './sync.js';
 import { showView, showToast, setupButtonFeedbacks, openPhotoModal } from './ui.js';
 import { startCameraScanner, stopCameraScanner, toggleTorch, switchCamera } from './scanner.js';
 import { renderDashboard } from './dashboard.js';
@@ -26,17 +26,6 @@ async function initApp() {
     console.error('Falha ao inicializar IndexedDB:', e);
   }
 
-  // Purga definitiva de produtos de teste no celular e no Supabase
-  if (localStorage.getItem('test_products_cleared_v1') !== 'true') {
-    try {
-      await clearAllDatabaseData();
-      await wipeSupabaseCloudData();
-      localStorage.setItem('test_products_cleared_v1', 'true');
-    } catch (err) {
-      console.warn('Erro ao purgar dados de teste:', err);
-    }
-  }
-
   // Inicializa motor de sincronização Supabase
   initSyncEngine();
   registerSyncStatusListener((status) => {
@@ -44,6 +33,19 @@ async function initApp() {
     if (badge) {
       badge.textContent = status.label;
       badge.className = `sync-badge ${status.className}`;
+      badge.title = status.lastError ? `Detalhes: ${status.lastError} (Toque para tentar novamente)` : 'Toque para sincronizar com a nuvem';
+    }
+  });
+
+  // Listener para sincronização manual ao tocar no badge de status
+  document.getElementById('sync-status-badge')?.addEventListener('click', async () => {
+    showToast('↻ Sincronizando com a Nuvem Supabase...', 'info', 2000);
+    try {
+      await triggerSyncNow();
+      showToast('✓ Sincronização concluída!', 'success', 2000);
+      await renderDashboard();
+    } catch (e) {
+      showToast('⚠ Erro ao sincronizar.', 'warning');
     }
   });
 

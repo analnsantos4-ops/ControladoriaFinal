@@ -1,6 +1,7 @@
 // Gerenciamento de Produtos, Cadastro, Foto e Detalhes
 import { SETORS, CORRIDORS, LOCATIONS, compressImage, formatNumber, formatDateBR, parseDateBRtoISO, getTodayISO } from './utils.js';
 import { getProductByBarcode, getProductById, saveProduct, saveProductExpiration, saveInventoryCounts, getProductExpirations, getLatestCountsForExpiration, getHistoryForProduct, getLocationHistoryForProduct, deleteProduct, deleteProductExpiration } from './db.js';
+import { triggerSyncNow } from './sync.js';
 import { showToast, showView, openPhotoModal, promptSecurityPin } from './ui.js';
 import { openConferenceForProduct } from './inventory.js';
 import { formatSingleProductWhatsApp, formatMultipleProductsWhatsApp, openWhatsAppExportModal } from './whatsapp.js';
@@ -153,6 +154,9 @@ export async function saveNewProduct() {
 
       await saveInventoryCounts(savedProd.id, expiration.id, locationCounts);
     }
+
+    // Dispara envio imediato para a nuvem Supabase em segundo plano
+    triggerSyncNow().catch((e) => console.warn('Sync background error:', e));
 
     // Abre diretamente a conferência do produto ou exibe sucesso
     openConferenceForProduct(savedProd);
@@ -426,6 +430,7 @@ export async function openProductDetailView(productId) {
         async () => {
           showToast('Apagando produto...', 'sync', 1500);
           await deleteProduct(product.id);
+          triggerSyncNow().catch((e) => console.warn('Sync background error:', e));
           showToast('✓ Produto apagado com sucesso!', 'success', 2500);
           window.dispatchEvent(new CustomEvent('refresh-dashboard-trigger'));
           showView('view-dashboard');
@@ -458,6 +463,7 @@ export async function openProductDetailView(productId) {
           async () => {
             showToast('Apagando validade...', 'sync', 1500);
             await deleteProductExpiration(expId);
+            triggerSyncNow().catch((e) => console.warn('Sync background error:', e));
             showToast('✓ Validade apagada!', 'success', 2000);
             openProductDetailView(product.id);
           }
