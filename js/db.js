@@ -63,11 +63,6 @@ export function initDB() {
     request.onsuccess = async (event) => {
       const db = event.target.result;
       dbInstance = db;
-      try {
-        await seedInitialDataIfEmpty(db);
-      } catch (err) {
-        console.warn('Erro na verificação de seed inicial:', err);
-      }
       resolve(db);
     };
 
@@ -847,174 +842,26 @@ export async function markQueueItemSynced(id) {
 }
 
 // ----------------------------------------------------
-// SEED INICIAL COM PRODUTOS REAIS PARA TESTE
+// ZERAR / LIMPAR BANCO DE DADOS (IndexedDB e Supabase)
 // ----------------------------------------------------
 
-async function seedInitialDataIfEmpty(db) {
-  const count = await new Promise((resolve) => {
+export async function clearAllDatabaseData() {
+  const db = await initDB();
+  return new Promise((resolve, reject) => {
     try {
-      const tx = db.transaction('products', 'readonly');
-      const store = tx.objectStore('products');
-      const countReq = store.count();
-      countReq.onsuccess = () => resolve(countReq.result || 0);
-      countReq.onerror = () => resolve(0);
-    } catch (e) {
-      resolve(0);
-    }
-  });
-
-  if (count > 0) return;
-
-  const formatDate = (daysOffset) => {
-    const d = new Date();
-    d.setDate(d.getDate() + daysOffset);
-    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
-  };
-
-  const initialProducts = [
-    {
-      id: 'prod_1',
-      barcode: '7896253401809',
-      name: 'BISCOITO RANCHEIRO 90G',
-      image: '',
-      sector: 'MERCEARIA',
-      corridor: 'CORREDOR 03',
-      expirations: [
-        { id: 'exp_1_1', date: formatDate(3), locations: { 'DEPÓSITO': 50, 'PRATELEIRA': 100 } },
-        { id: 'exp_1_2', date: formatDate(34), locations: { 'DEPÓSITO': 80, 'PRATELEIRA': 210, 'ILHA': 30 } }
-      ]
-    },
-    {
-      id: 'prod_2',
-      barcode: '7891000100103',
-      name: 'LEITE ITAMBÉ INTEGRAL 1L',
-      image: '',
-      sector: 'MERCEARIA',
-      corridor: 'CORREDOR 03',
-      expirations: [
-        { id: 'exp_2_1', date: formatDate(5), locations: { 'DEPÓSITO': 120, 'GELADEIRA': 80, 'PRATELEIRA': 120 } }
-      ]
-    },
-    {
-      id: 'prod_3',
-      barcode: '7896253402509',
-      name: 'ROSQUINHA RANCHEIRO COCO 500G',
-      image: '',
-      sector: 'MERCEARIA',
-      corridor: 'CORREDOR 03',
-      expirations: [
-        { id: 'exp_3_1', date: formatDate(12), locations: { 'DEPÓSITO': 1000, 'PRATELEIRA': 500, 'ILHA': 148 } }
-      ]
-    },
-    {
-      id: 'prod_4',
-      barcode: '7896001200331',
-      name: 'AZEITE DE OLIVA EXTRA VIRGEM 500ML',
-      image: '',
-      sector: 'MERCEARIA',
-      corridor: 'CORREDOR 04',
-      expirations: [
-        { id: 'exp_4_1', date: formatDate(-2), locations: { 'PRATELEIRA': 18 } },
-        { id: 'exp_4_2', date: formatDate(25), locations: { 'DEPÓSITO': 45, 'PRATELEIRA': 60 } }
-      ]
-    },
-    {
-      id: 'prod_5',
-      barcode: '7891025100014',
-      name: 'ALHO NACIONAL ROXO GRANEL (KG)',
-      image: '',
-      sector: 'ALHO',
-      corridor: 'CORREDOR 01',
-      expirations: [
-        { id: 'exp_5_1', date: formatDate(8), locations: { 'ILHA': 65, 'DEPÓSITO': 80 } }
-      ]
-    },
-    {
-      id: 'prod_6',
-      barcode: '7891038501234',
-      name: 'SABÃO EM PÓ OMO LAVAGEM PERFEITA 1.6KG',
-      image: '',
-      sector: 'LIMPEZA',
-      corridor: 'CORREDOR 08',
-      expirations: [
-        { id: 'exp_6_1', date: formatDate(180), locations: { 'DEPÓSITO': 150, 'PRATELEIRA': 90 } }
-      ]
-    },
-    {
-      id: 'prod_7',
-      barcode: '7896004000123',
-      name: 'VINHO TINTO SECO RESERVADO 750ML',
-      image: '',
-      sector: 'BEBIDAS',
-      corridor: 'ADEGA',
-      expirations: [
-        { id: 'exp_7_1', date: formatDate(240), locations: { 'PRATELEIRA': 42, 'DEPÓSITO': 60 } }
-      ]
-    },
-    {
-      id: 'prod_8',
-      barcode: '7891000300456',
-      name: 'SHAMPOO SEDA CERAMIDAS 325ML',
-      image: '',
-      sector: 'PERFUMARIA',
-      corridor: 'CORREDOR 06',
-      expirations: [
-        { id: 'exp_8_1', date: formatDate(-10), locations: { 'PRATELEIRA': 12 } },
-        { id: 'exp_8_2', date: formatDate(45), locations: { 'DEPÓSITO': 36, 'PRATELEIRA': 24 } }
-      ]
-    }
-  ];
-
-  return new Promise((resolve) => {
-    try {
-      const tx = db.transaction(['products', 'product_expirations', 'inventory_counts'], 'readwrite');
-      const prodStore = tx.objectStore('products');
-      const expStore = tx.objectStore('product_expirations');
-      const countStore = tx.objectStore('inventory_counts');
-
-      const nowIso = new Date().toISOString();
-
-      initialProducts.forEach((p) => {
-        prodStore.put({
-          id: p.id,
-          barcode: p.barcode,
-          name: p.name,
-          image: p.image,
-          sector: p.sector,
-          corridor: p.corridor,
-          created_at: nowIso,
-          updated_at: nowIso
-        });
-
-        p.expirations.forEach((e) => {
-          expStore.put({
-            id: e.id,
-            product_id: p.id,
-            expiration_date: e.date,
-            created_at: nowIso,
-            updated_at: nowIso
-          });
-
-          Object.entries(e.locations).forEach(([loc, qty]) => {
-            countStore.put({
-              id: generateId(),
-              product_id: p.id,
-              expiration_id: e.id,
-              count_session_id: null,
-              location_type: loc,
-              quantity: qty,
-              counted_at: nowIso,
-              created_at: nowIso,
-              updated_at: nowIso
-            });
-          });
-        });
+      const stores = ['products', 'product_expirations', 'inventory_counts', 'count_sessions', 'sync_queue'];
+      const tx = db.transaction(stores, 'readwrite');
+      stores.forEach((storeName) => {
+        tx.objectStore(storeName).clear();
       });
-
-      tx.oncomplete = () => resolve();
-      tx.onerror = () => resolve();
-    } catch (e) {
-      resolve();
+      tx.oncomplete = () => {
+        localStorage.removeItem('active_audit_session');
+        resolve(true);
+      };
+      tx.onerror = (e) => reject(e.target.error);
+    } catch (err) {
+      reject(err);
     }
   });
 }
+

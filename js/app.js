@@ -3,8 +3,8 @@ import '../style.css';
 
 // Orquestrador Principal do Aplicativo Controladoria - Ana Luiza
 import { isAuthenticated, verifyCode, logout } from './auth.js';
-import { initDB, getProductByBarcode, getProductById, searchProducts, getAllProducts, getProductExpirations, getLatestCountsForExpiration } from './db.js';
-import { initSyncEngine, registerSyncStatusListener } from './sync.js';
+import { initDB, getProductByBarcode, getProductById, searchProducts, getAllProducts, getProductExpirations, getLatestCountsForExpiration, clearAllDatabaseData } from './db.js';
+import { initSyncEngine, registerSyncStatusListener, wipeSupabaseCloudData } from './sync.js';
 import { showView, showToast, setupButtonFeedbacks, openPhotoModal } from './ui.js';
 import { startCameraScanner, stopCameraScanner, toggleTorch, switchCamera } from './scanner.js';
 import { renderDashboard } from './dashboard.js';
@@ -24,6 +24,17 @@ async function initApp() {
     await initDB();
   } catch (e) {
     console.error('Falha ao inicializar IndexedDB:', e);
+  }
+
+  // Purga definitiva de produtos de teste no celular e no Supabase
+  if (localStorage.getItem('test_products_cleared_v1') !== 'true') {
+    try {
+      await clearAllDatabaseData();
+      await wipeSupabaseCloudData();
+      localStorage.setItem('test_products_cleared_v1', 'true');
+    } catch (err) {
+      console.warn('Erro ao purgar dados de teste:', err);
+    }
   }
 
   // Inicializa motor de sincronização Supabase
@@ -167,6 +178,74 @@ function setupEventListeners() {
   // [ 🏢 CONFERIR POR CORREDOR ]
   document.getElementById('btn-dash-corridor')?.addEventListener('click', () => {
     openCorridorAuditView();
+  });
+
+  // [ 🗑️ ZERAR BASE DE DADOS COM CONFIRMAÇÃO DE SENHA 2009 ]
+  const wipeModal = document.getElementById('modal-wipe-confirm');
+  const wipePinInput = document.getElementById('input-wipe-pin');
+  const wipePinError = document.getElementById('wipe-pin-error');
+  const btnDashWipe = document.getElementById('btn-dash-wipe-db');
+  const btnCancelWipe = document.getElementById('btn-cancel-wipe');
+  const btnConfirmWipe = document.getElementById('btn-confirm-wipe');
+  const wipeBackdrop = document.getElementById('modal-wipe-backdrop');
+
+  btnDashWipe?.addEventListener('click', () => {
+    if (wipeModal) {
+      if (wipePinInput) wipePinInput.value = '';
+      if (wipePinError) wipePinError.style.display = 'none';
+      wipeModal.classList.add('open');
+      setTimeout(() => wipePinInput?.focus(), 150);
+    }
+  });
+
+  const closeWipeModal = () => {
+    wipeModal?.classList.remove('open');
+    if (wipePinInput) wipePinInput.value = '';
+    if (wipePinError) wipePinError.style.display = 'none';
+  };
+
+  btnCancelWipe?.addEventListener('click', closeWipeModal);
+  wipeBackdrop?.addEventListener('click', closeWipeModal);
+
+  btnConfirmWipe?.addEventListener('click', async () => {
+    const pin = wipePinInput?.value?.trim();
+    if (pin !== '2009') {
+      if (wipePinError) {
+        wipePinError.style.display = 'block';
+        wipePinError.textContent = 'Senha incorreta! Digite 2009.';
+      }
+      if (wipePinInput) {
+        wipePinInput.value = '';
+        wipePinInput.focus();
+      }
+      return;
+    }
+
+    closeWipeModal();
+    showToast('Zerando banco de dados local e nuvem...', 'info', 3000);
+
+    try {
+      await clearAllDatabaseData();
+      await wipeSupabaseCloudData();
+      
+      // Limpa dados de cache locais
+      localStorage.clear();
+      sessionStorage.clear();
+      localStorage.setItem('auth_user', 'Ana Luiza');
+      localStorage.setItem('test_products_cleared_v1', 'true');
+
+      await renderDashboard();
+      showToast('✓ Banco de dados 100% zerado!', 'success', 3000);
+    } catch (e) {
+      console.error(e);
+      showToast('Erro ao zerar base de dados.', 'error');
+    }
+  });
+
+  wipePinInput?.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') {
+      btnConfirmWipe?.click();
+    }
   });
 
   // Botões de Exportação WhatsApp nos Headers

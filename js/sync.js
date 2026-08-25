@@ -147,6 +147,22 @@ export async function pullFromSupabase() {
   }
 }
 
+// Limpa todos os dados de teste no Supabase
+export async function wipeSupabaseCloudData() {
+  if (!SUPABASE_URL || !SUPABASE_PUBLISHABLE_KEY) return false;
+  const headers = getSupabaseHeaders();
+  try {
+    await fetch(`${SUPABASE_URL}/rest/v1/inventory_counts?id=neq.none`, { method: 'DELETE', headers });
+    await fetch(`${SUPABASE_URL}/rest/v1/product_expirations?id=neq.none`, { method: 'DELETE', headers });
+    await fetch(`${SUPABASE_URL}/rest/v1/count_sessions?id=neq.none`, { method: 'DELETE', headers });
+    await fetch(`${SUPABASE_URL}/rest/v1/products?id=neq.none`, { method: 'DELETE', headers });
+    return true;
+  } catch (e) {
+    console.warn('Erro ao limpar Supabase:', e);
+    return false;
+  }
+}
+
 // Inicializa motor de sincronização contínua
 export function initSyncEngine() {
   if (typeof window !== 'undefined') {

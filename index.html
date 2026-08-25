@@ -989,7 +989,50 @@
           <!-- Preenchido via dashboard.js -->
         </div>
       </section>
+
+      <!-- Botão para Zerar Banco de Dados -->
+      <div style="margin-top: 10px; padding-top: 16px; border-top: 1px solid #2a2a30; text-align: center;">
+        <button type="button" id="btn-dash-wipe-db" class="btn-secondary" style="color: #ef4444; border-color: rgba(239, 68, 68, 0.4); font-size: 0.85rem;">
+          🗑️ Zerar Base de Dados (Limpar Tudo)
+        </button>
+      </div>
     </main>
+  </div>
+
+  <!-- Modal de Confirmação com Senha para Zerar Base de Dados -->
+  <div id="modal-wipe-confirm" class="custom-modal">
+    <div class="modal-backdrop" id="modal-wipe-backdrop"></div>
+    <div class="modal-card" style="padding: 24px; text-align: center; max-width: 400px;">
+      <div style="font-size: 2.4rem; margin-bottom: 8px;">⚠️</div>
+      <h3 style="font-size: 1.2rem; font-weight: 800; color: #ef4444; margin-bottom: 6px;">Zerar Banco de Dados</h3>
+      <p style="font-size: 0.9rem; color: #a1a1aa; margin-bottom: 16px; line-height: 1.4;">
+        Esta ação apagará <strong>todos os produtos e contagens</strong> do celular e da nuvem Supabase.<br>
+        Para confirmar, digite a senha <strong>2009</strong>:
+      </p>
+      
+      <div class="form-group" style="margin-bottom: 14px;">
+        <input
+          type="password"
+          id="input-wipe-pin"
+          class="form-input"
+          inputmode="numeric"
+          pattern="[0-9]*"
+          maxlength="6"
+          placeholder="Digite a senha (2009)"
+          style="text-align: center; font-size: 1.3rem; letter-spacing: 4px; font-weight: 800; border-color: #ef4444;"
+        />
+        <span id="wipe-pin-error" style="color: #ef4444; font-size: 0.85rem; font-weight: 700; margin-top: 6px; display: none;">
+          Senha incorreta! Digite 2009.
+        </span>
+      </div>
+
+      <div style="display: flex; gap: 10px; margin-top: 16px;">
+        <button type="button" id="btn-cancel-wipe" class="btn-secondary" style="flex: 1;">Cancelar</button>
+        <button type="button" id="btn-confirm-wipe" class="btn-primary" style="flex: 1; background: #ef4444; color: #fff;">
+          Zerar Tudo
+        </button>
+      </div>
+    </div>
   </div>
 
   <!-- ========================================== -->
