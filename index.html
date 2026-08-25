@@ -1,0 +1,532 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
+  <title>CONTROLADORIA — ANA LUIZA</title>
+  <meta name="description" content="Aplicativo de Conferência de Estoque e Validades" />
+  <meta name="theme-color" content="#050505" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+  <meta name="apple-mobile-web-app-title" content="Controladoria" />
+  <link rel="manifest" href="/manifest.webmanifest" />
+  <link rel="stylesheet" href="/style.css" />
+  <style>
+    /* Critical Inline CSS para carregamento instantâneo sem flashes */
+    html, body {
+      background-color: #050505 !important;
+      color: #f4f4f5 !important;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      margin: 0;
+      padding: 0;
+      min-height: 100vh;
+    }
+    .app-view {
+      display: none !important;
+    }
+    .app-view.active {
+      display: block !important;
+    }
+    .hidden {
+      display: none !important;
+    }
+  </style>
+</head>
+<body>
+
+  <!-- ========================================== -->
+  <!-- 1. TELA DE LOGIN (Código 2009) -->
+  <!-- ========================================== -->
+  <div id="view-login" class="app-view active">
+    <div class="login-container">
+      <div class="login-brand-box">
+        <h1 class="brand-title">CONTROLADORIA</h1>
+        <h2 class="brand-subtitle">ANA LUIZA</h2>
+        <div class="brand-divider"></div>
+      </div>
+
+      <div class="login-card">
+        <div class="login-header-icon">🔐</div>
+        <h3 class="login-card-title">ACESSO AO SISTEMA</h3>
+        <p class="login-card-subtitle">Digite seu código de acesso:</p>
+
+        <form id="form-login" autocomplete="off">
+          <div class="pin-input-wrapper">
+            <input
+              type="password"
+              id="login-pin-input"
+              class="login-pin-field"
+              maxlength="4"
+              inputmode="numeric"
+              placeholder="••••"
+              autocomplete="one-time-code"
+              required
+            />
+          </div>
+
+          <div id="login-error-msg" class="login-error-text hidden">⚠ Código incorreto.</div>
+
+          <!-- Teclado Numérico Virtual para Facilitar no Celular -->
+          <div class="virtual-numpad">
+            <button type="button" class="btn-numpad" data-val="1">1</button>
+            <button type="button" class="btn-numpad" data-val="2">2</button>
+            <button type="button" class="btn-numpad" data-val="3">3</button>
+            <button type="button" class="btn-numpad" data-val="4">4</button>
+            <button type="button" class="btn-numpad" data-val="5">5</button>
+            <button type="button" class="btn-numpad" data-val="6">6</button>
+            <button type="button" class="btn-numpad" data-val="7">7</button>
+            <button type="button" class="btn-numpad" data-val="8">8</button>
+            <button type="button" class="btn-numpad" data-val="9">9</button>
+            <button type="button" class="btn-numpad btn-numpad-action" data-val="clear">C</button>
+            <button type="button" class="btn-numpad" data-val="0">0</button>
+            <button type="button" class="btn-numpad btn-numpad-action" data-val="backspace">⌫</button>
+          </div>
+
+          <button type="submit" id="btn-login-submit" class="btn-primary btn-block">
+            ENTRAR
+          </button>
+        </form>
+      </div>
+    </div>
+  </div>
+
+  <!-- ========================================== -->
+  <!-- 2. TELA INICIAL / DASHBOARD -->
+  <!-- ========================================== -->
+  <div id="view-dashboard" class="app-view">
+    <!-- Top Header Bar -->
+    <header class="app-top-bar">
+      <div class="top-bar-left">
+        <span class="app-name-tag">CONTROLADORIA</span>
+      </div>
+      <div class="top-bar-right">
+        <span id="sync-status-badge" class="sync-badge status-offline">● Offline</span>
+        <button id="btn-header-logout" class="btn-icon-link" title="Sair">Sair</button>
+      </div>
+    </header>
+
+    <main class="dashboard-main-content">
+      <!-- Saudação e Data Automática -->
+      <section class="dash-greeting-section">
+        <h1 id="dashboard-greeting" class="dash-greeting-title">Olá, Ana Luiza! 👋</h1>
+        <p id="dashboard-date" class="dash-greeting-date">Hoje é terça-feira, 25 de agosto de 2026.</p>
+      </section>
+
+      <!-- Mensagem Automática Curta e Inteligente -->
+      <div class="dash-smart-message" id="dashboard-smart-msg">
+        <span class="msg-icon">💡</span>
+        <span class="msg-text">Carregando situação do estoque...</span>
+      </div>
+
+      <!-- Sessão de Conferência em Andamento (se houver) -->
+      <div id="dashboard-active-session-banner" class="hidden"></div>
+
+      <!-- Ações Rápidas -->
+      <section class="dash-quick-actions">
+        <button type="button" id="btn-dash-scan" class="action-card hero-action-card">
+          <span class="action-card-icon">📷</span>
+          <span class="action-card-label">CONFERIR</span>
+          <span class="action-card-hint">Bipar código de barras</span>
+        </button>
+
+        <div class="secondary-actions-grid">
+          <button type="button" id="btn-dash-search" class="action-card sub-action-card">
+            <span class="action-card-icon">🔎</span>
+            <span class="action-card-label">CONSULTAR</span>
+          </button>
+          <button type="button" id="btn-dash-expirations" class="action-card sub-action-card">
+            <span class="action-card-icon">⚠</span>
+            <span class="action-card-label">VENCIMENTOS</span>
+          </button>
+          <button type="button" id="btn-dash-wa-import" class="action-card sub-action-card action-card-whatsapp">
+            <span class="action-card-icon">💬</span>
+            <span class="action-card-label">IMPORTAR DO WHATSAPP</span>
+          </button>
+          <button type="button" id="btn-dash-corridor" class="action-card sub-action-card">
+            <span class="action-card-icon">🏢</span>
+            <span class="action-card-label">CONFERIR POR CORREDOR</span>
+          </button>
+        </div>
+      </section>
+
+      <!-- Dashboard Inteligente - Métricas -->
+      <section class="dash-metrics-section">
+        <h3 class="section-title">SITUAÇÃO GERAL</h3>
+        <div class="metrics-grid">
+          <!-- Vencidos -->
+          <div class="metric-card metric-expired" id="card-metric-expired">
+            <div class="metric-card-header">
+              <span class="metric-indicator red">🔴</span>
+              <span class="metric-title">VENCIDOS</span>
+            </div>
+            <div class="metric-numbers">
+              <span class="metric-prods" id="metric-expired-prods">0 produtos</span>
+              <span class="metric-units" id="metric-expired-units">0 unidades</span>
+            </div>
+          </div>
+
+          <!-- Até 15 dias -->
+          <div class="metric-card metric-15d" id="card-metric-15d">
+            <div class="metric-card-header">
+              <span class="metric-indicator orange">🟠</span>
+              <span class="metric-title">ATÉ 15 DIAS</span>
+            </div>
+            <div class="metric-numbers">
+              <span class="metric-prods" id="metric-15d-prods">0 produtos</span>
+              <span class="metric-units" id="metric-15d-units">0 unidades</span>
+            </div>
+          </div>
+
+          <!-- Até 30 dias -->
+          <div class="metric-card metric-30d" id="card-metric-30d">
+            <div class="metric-card-header">
+              <span class="metric-indicator yellow">🟡</span>
+              <span class="metric-title">ATÉ 30 DIAS</span>
+            </div>
+            <div class="metric-numbers">
+              <span class="metric-prods" id="metric-30d-prods">0 produtos</span>
+              <span class="metric-units" id="metric-30d-units">0 unidades</span>
+            </div>
+          </div>
+
+          <!-- Cadastrados -->
+          <div class="metric-card metric-total" id="card-metric-total">
+            <div class="metric-card-header">
+              <span class="metric-indicator green">🟢</span>
+              <span class="metric-title">PRODUTOS CADASTRADOS</span>
+            </div>
+            <div class="metric-numbers">
+              <span class="metric-prods" id="metric-total-prods">0 produtos</span>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- Próximos Vencimentos -->
+      <section class="dash-upcoming-section">
+        <div class="section-header-row">
+          <h3 class="section-title">PRÓXIMOS VENCIMENTOS</h3>
+        </div>
+        <div id="dashboard-upcoming-list" class="upcoming-cards-container">
+          <!-- Preenchido via dashboard.js -->
+        </div>
+      </section>
+    </main>
+  </div>
+
+  <!-- ========================================== -->
+  <!-- 3. TELA DO SCANNER / LEITURA DE CÓDIGO -->
+  <!-- ========================================== -->
+  <div id="view-scanner" class="app-view">
+    <header class="app-top-bar">
+      <button type="button" id="btn-scanner-back" class="btn-back">← Voltar</button>
+      <span class="top-bar-title">ESCANEAR PRODUTO</span>
+      <div class="scanner-controls-top">
+        <button type="button" id="btn-scanner-torch" class="btn-icon-control" title="Lanterna">⚡</button>
+        <button type="button" id="btn-scanner-switch" class="btn-icon-control" title="Alternar Câmera">🔄</button>
+      </div>
+    </header>
+
+    <div class="scanner-viewport-container">
+      <video id="scanner-video" playsinline autoplay muted></video>
+      <div class="scanner-overlay">
+        <div class="scanner-target-box">
+          <div class="scanner-laser-line"></div>
+          <span class="target-corner top-left"></span>
+          <span class="target-corner top-right"></span>
+          <span class="target-corner bottom-left"></span>
+          <span class="target-corner bottom-right"></span>
+        </div>
+        <p class="scanner-instruction-text">Aponte a câmera para o código de barras</p>
+      </div>
+    </div>
+
+    <!-- Digitar Código Manualmente -->
+    <div class="scanner-manual-box">
+      <div class="manual-box-label">Ou digite o código de barras:</div>
+      <form id="form-manual-barcode" class="manual-barcode-form">
+        <input
+          type="text"
+          id="manual-barcode-input"
+          class="form-input form-input-lg"
+          placeholder="Ex: 7896253401809"
+          inputmode="numeric"
+        />
+        <button type="submit" class="btn-primary">PESQUISAR</button>
+      </form>
+    </div>
+  </div>
+
+  <!-- ========================================== -->
+  <!-- 4. TELA DE CONFERÊNCIA DE PRODUTO -->
+  <!-- ========================================== -->
+  <div id="view-conference" class="app-view">
+    <header class="app-top-bar">
+      <button type="button" id="btn-conf-back" class="btn-back">← Voltar</button>
+      <span class="top-bar-title">CONFERÊNCIA</span>
+      <div style="width: 50px;"></div>
+    </header>
+
+    <main class="conference-main-content">
+      <!-- Cabeçalho Compacto do Produto -->
+      <div id="conf-product-header"></div>
+
+      <!-- Seletor de Validade -->
+      <div id="conf-expirations-container"></div>
+
+      <!-- Alerta de Data Já Cadastrada (se houver) -->
+      <div id="conf-previous-count-alert" class="hidden"></div>
+
+      <!-- Seção de Contagem dos 8 Locais -->
+      <div id="conf-counting-section" class="hidden">
+        <div class="conf-section-box">
+          <div class="section-label-header">CONTAGEM FÍSICA POR LOCAL</div>
+          <div id="conf-location-inputs-grid" class="locations-inputs-grid">
+            <!-- 8 Locais: Depósito, Geladeira, Prateleira, Ponta de Gôndola, Orelha, Ilha, Carrinho, Frente de Loja -->
+          </div>
+        </div>
+
+        <!-- Tabela de Comparação Ao Vivo -->
+        <div id="conf-comparison-card"></div>
+
+        <!-- Botão Principal de Confirmação -->
+        <div class="conference-actions-sticky">
+          <button type="button" id="btn-conf-confirm" class="btn-primary btn-hero-action">
+            CONFIRMAR CONFERÊNCIA
+          </button>
+        </div>
+      </div>
+    </main>
+  </div>
+
+  <!-- ========================================== -->
+  <!-- 5. TELA DE CADASTRO DE NOVO PRODUTO -->
+  <!-- ========================================== -->
+  <div id="view-product-new" class="app-view">
+    <header class="app-top-bar">
+      <button type="button" id="btn-new-prod-back" class="btn-back">← Voltar</button>
+      <span class="top-bar-title">NOVO PRODUTO</span>
+      <div style="width: 50px;"></div>
+    </header>
+
+    <main class="new-product-main-content">
+      <form id="form-new-product" autocomplete="off">
+        <div class="form-group">
+          <label for="new-product-barcode">Código de Barras:</label>
+          <input type="text" id="new-product-barcode" class="form-input form-input-lg" placeholder="789XXXXXXXXX" required />
+        </div>
+
+        <div class="form-group">
+          <label for="new-product-name">Nome do Produto:</label>
+          <input type="text" id="new-product-name" class="form-input" placeholder="Ex: BISCOITO RANCHEIRO 90G" required />
+        </div>
+
+        <!-- Foto do Produto -->
+        <div class="form-group">
+          <label>Foto do Produto (Opcional):</label>
+          <div class="photo-upload-row">
+            <div class="photo-preview-thumb-box">
+              <div id="new-product-img-placeholder" class="photo-placeholder-box">
+                <span>SEM FOTO</span>
+              </div>
+              <div id="new-product-img-preview-container" class="hidden">
+                <img id="new-product-img-preview" src="" alt="Preview" class="photo-preview-img" />
+              </div>
+            </div>
+            <div class="photo-upload-buttons">
+              <button type="button" id="btn-new-photo-camera" class="btn-secondary-mini">
+                📷 Tirar Foto
+              </button>
+              <button type="button" id="btn-new-photo-gallery" class="btn-secondary-mini">
+                🖼️ Galeria
+              </button>
+              <input type="file" id="file-camera-new" accept="image/*" capture="environment" class="hidden" />
+              <input type="file" id="file-gallery-new" accept="image/*" class="hidden" />
+            </div>
+          </div>
+        </div>
+
+        <!-- Setor e Corredor -->
+        <div class="form-row-2col">
+          <div class="form-group">
+            <label for="new-product-sector">Setor:</label>
+            <select id="new-product-sector" class="form-select"></select>
+          </div>
+          <div class="form-group">
+            <label for="new-product-corridor">Corredor:</label>
+            <select id="new-product-corridor" class="form-select"></select>
+          </div>
+        </div>
+
+        <!-- Data de Validade Inicial -->
+        <div class="form-group">
+          <label for="new-product-exp-date">Data de Validade (Opcional):</label>
+          <input type="date" id="new-product-exp-date" class="form-input" />
+        </div>
+
+        <!-- Contagem Inicial -->
+        <div class="conf-section-box">
+          <div class="section-label-header">CONTAGEM INICIAL</div>
+          <div class="locations-inputs-grid compact-grid">
+            <div class="loc-mini-card">
+              <label for="new-count-0">DEPÓSITO:</label>
+              <input type="number" id="new-count-0" class="new-count-input form-input" value="0" min="0" />
+            </div>
+            <div class="loc-mini-card">
+              <label for="new-count-1">GELADEIRA:</label>
+              <input type="number" id="new-count-1" class="new-count-input form-input" value="0" min="0" />
+            </div>
+            <div class="loc-mini-card">
+              <label for="new-count-2">PRATELEIRA:</label>
+              <input type="number" id="new-count-2" class="new-count-input form-input" value="0" min="0" />
+            </div>
+            <div class="loc-mini-card">
+              <label for="new-count-3">PONTA DE GÔNDOLA:</label>
+              <input type="number" id="new-count-3" class="new-count-input form-input" value="0" min="0" />
+            </div>
+            <div class="loc-mini-card">
+              <label for="new-count-4">ORELHA:</label>
+              <input type="number" id="new-count-4" class="new-count-input form-input" value="0" min="0" />
+            </div>
+            <div class="loc-mini-card">
+              <label for="new-count-5">ILHA:</label>
+              <input type="number" id="new-count-5" class="new-count-input form-input" value="0" min="0" />
+            </div>
+            <div class="loc-mini-card">
+              <label for="new-count-6">CARRINHO:</label>
+              <input type="number" id="new-count-6" class="new-count-input form-input" value="0" min="0" />
+            </div>
+            <div class="loc-mini-card">
+              <label for="new-count-7">FRENTE DE LOJA:</label>
+              <input type="number" id="new-count-7" class="new-count-input form-input" value="0" min="0" />
+            </div>
+          </div>
+
+          <div class="new-product-total-bar">
+            <span>TOTAL:</span>
+            <strong id="new-product-total-display">0</strong>
+          </div>
+        </div>
+
+        <div class="form-actions-bottom">
+          <button type="button" id="btn-new-prod-save" class="btn-primary btn-hero-action">
+            CADASTRAR E SALVAR
+          </button>
+        </div>
+      </form>
+    </main>
+  </div>
+
+  <!-- ========================================== -->
+  <!-- 6. TELA DE DETALHES DO PRODUTO -->
+  <!-- ========================================== -->
+  <div id="view-product-detail" class="app-view">
+    <header class="app-top-bar">
+      <button type="button" id="btn-detail-back" class="btn-back">← Início</button>
+      <span class="top-bar-title">DETALHES DO PRODUTO</span>
+      <div style="width: 50px;"></div>
+    </header>
+
+    <main id="product-detail-content" class="product-detail-main-content">
+      <!-- Preenchido dinamicamente via products.js -->
+    </main>
+  </div>
+
+  <!-- ========================================== -->
+  <!-- 7. TELA DE CONFERÊNCIA POR CORREDOR -->
+  <!-- ========================================== -->
+  <div id="view-corridor-audit" class="app-view">
+    <header class="app-top-bar">
+      <button type="button" id="btn-corridor-audit-back" class="btn-back">← Início</button>
+      <span class="top-bar-title">CONFERIR CORREDOR</span>
+      <button type="button" id="btn-corridor-wa-export" class="btn-topbar-action btn-topbar-wa" title="Exportar Corredor para WhatsApp">
+        📲 WhatsApp
+      </button>
+    </header>
+
+    <main class="corridor-audit-main-content">
+      <!-- Seletor de Setor e Corredor -->
+      <div class="corridor-filter-selectors">
+        <div class="filter-col">
+          <label for="corridor-audit-sector-select">SETOR:</label>
+          <select id="corridor-audit-sector-select" class="form-select"></select>
+        </div>
+        <div class="filter-col">
+          <label for="corridor-audit-corridor-select">CORREDOR:</label>
+          <select id="corridor-audit-corridor-select" class="form-select"></select>
+        </div>
+      </div>
+
+      <!-- Barra e Contadores de Progresso -->
+      <div id="corridor-audit-progress-box"></div>
+
+      <!-- Lista de Produtos do Corredor -->
+      <div id="corridor-audit-list" class="corridor-audit-products-list"></div>
+    </main>
+  </div>
+
+  <!-- ========================================== -->
+  <!-- 8. TELA DE CONSULTA / BUSCA -->
+  <!-- ========================================== -->
+  <div id="view-search" class="app-view">
+    <header class="app-top-bar">
+      <button type="button" id="btn-search-back" class="btn-back">← Início</button>
+      <span class="top-bar-title">CONSULTAR PRODUTOS</span>
+      <div style="width: 50px;"></div>
+    </header>
+
+    <main class="search-main-content">
+      <div class="search-input-wrapper">
+        <span class="search-icon">🔎</span>
+        <input
+          type="text"
+          id="search-query-input"
+          class="form-input form-input-lg"
+          placeholder="Buscar por nome ou código..."
+          autocomplete="off"
+        />
+      </div>
+
+      <!-- Filtros Rápidos -->
+      <div class="search-filters-row">
+        <select id="search-sector-filter" class="form-select form-select-sm"></select>
+        <select id="search-corridor-filter" class="form-select form-select-sm"></select>
+      </div>
+
+      <div class="search-results-header">
+        <span id="search-results-count" class="results-count-text">0 produtos</span>
+      </div>
+
+      <div id="search-results-list" class="search-results-container"></div>
+    </main>
+  </div>
+
+  <!-- ========================================== -->
+  <!-- 9. TELA DE VENCIMENTOS E ALERTAS -->
+  <!-- ========================================== -->
+  <div id="view-expirations" class="app-view">
+    <header class="app-top-bar">
+      <button type="button" id="btn-exp-back" class="btn-back">← Início</button>
+      <span class="top-bar-title">VENCIMENTOS</span>
+      <button type="button" id="btn-expirations-wa-export" class="btn-topbar-action btn-topbar-wa" title="Exportar Lista para WhatsApp">
+        📲 WhatsApp
+      </button>
+    </header>
+
+    <main class="expirations-main-content">
+      <!-- Abas de Filtro de Vencimento -->
+      <div class="expirations-filter-tabs">
+        <button type="button" class="btn-exp-filter-tab active" data-filter="ALL">Todos</button>
+        <button type="button" class="btn-exp-filter-tab filter-red" data-filter="EXPIRED">🔴 Vencidos</button>
+        <button type="button" class="btn-exp-filter-tab filter-orange" data-filter="15_DAYS">🟠 Até 15d</button>
+        <button type="button" class="btn-exp-filter-tab filter-yellow" data-filter="30_DAYS">🟡 Até 30d</button>
+      </div>
+
+      <div id="expirations-list-container" class="expirations-list-container"></div>
+    </main>
+  </div>
+
+  <!-- Script Principal com Módulos ES6 -->
+  <script type="module" src="/js/app.js"></script>
+</body>
+</html>

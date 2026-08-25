@@ -1,0 +1,630 @@
+// Importa Estilos Globais
+import '../style.css';
+
+// Orquestrador Principal do Aplicativo Controladoria - Ana Luiza
+import { isAuthenticated, verifyCode, logout } from './auth.js';
+import { initDB, getProductByBarcode, getProductById, searchProducts, getAllProducts, getProductExpirations, getLatestCountsForExpiration } from './db.js';
+import { initSyncEngine, registerSyncStatusListener } from './sync.js';
+import { showView, showToast, setupButtonFeedbacks, openPhotoModal } from './ui.js';
+import { startCameraScanner, stopCameraScanner, toggleTorch, switchCamera } from './scanner.js';
+import { renderDashboard } from './dashboard.js';
+import { openNewProductView, saveNewProduct, handleProductImageFile, openProductDetailView, updateNewProductTotalCalculation, populateSectorAndCorridorSelects } from './products.js';
+import { openConferenceForProduct, confirmConference, openCorridorAuditView, loadCorridorAuditProducts, exportCurrentCorridorWhatsApp } from './inventory.js';
+import { SETORS, CORRIDORS, formatDateBR, formatNumber, getDaysUntilExpiration } from './utils.js';
+import { openWhatsAppImportModal, formatMultipleProductsWhatsApp, openWhatsAppExportModal } from './whatsapp.js';
+
+let torchState = false;
+
+// Inicialização da Aplicação
+async function initApp() {
+  setupButtonFeedbacks();
+
+  // Inicializa Banco IndexedDB
+  try {
+    await initDB();
+  } catch (e) {
+    console.error('Falha ao inicializar IndexedDB:', e);
+  }
+
+  // Inicializa motor de sincronização Supabase
+  initSyncEngine();
+  registerSyncStatusListener((status) => {
+    const badge = document.getElementById('sync-status-badge');
+    if (badge) {
+      badge.textContent = status.label;
+      badge.className = `sync-badge ${status.className}`;
+    }
+  });
+
+  // Registra Service Worker se disponível
+  if ('serviceWorker' in navigator) {
+    navigator.serviceWorker
+      .register('/sw.js')
+      .then(() => console.log('Service Worker registrado com sucesso'))
+      .catch((err) => console.warn('Service Worker registration failed:', err));
+  }
+
+  // Verifica Autenticação
+  if (isAuthenticated()) {
+    showDashboardView();
+  } else {
+    showLoginView();
+  }
+
+  // Configura todos os Event Listeners da Interface
+  setupEventListeners();
+}
+
+// Configura Tela de Login
+function showLoginView() {
+  const pinInput = document.getElementById('login-pin-input');
+  if (pinInput) {
+    pinInput.value = '';
+    pinInput.focus();
+  }
+  const errorMsg = document.getElementById('login-error-msg');
+  if (errorMsg) errorMsg.classList.add('hidden');
+
+  showView('view-login');
+}
+
+// Configura Tela de Dashboard
+async function showDashboardView() {
+  await renderDashboard();
+  showView('view-dashboard');
+}
+
+// Configuração dos Event Listeners
+function setupEventListeners() {
+  // --------------------------------------------------
+  // 1. LOGIN
+  // --------------------------------------------------
+  const loginForm = document.getElementById('form-login');
+  const pinInput = document.getElementById('login-pin-input');
+  const loginError = document.getElementById('login-error-msg');
+
+  if (loginForm) {
+    loginForm.addEventListener('submit', (e) => {
+      e.preventDefault();
+      const code = pinInput ? pinInput.value : '';
+      if (verifyCode(code)) {
+        if (loginError) loginError.classList.add('hidden');
+        showDashboardView();
+        showToast('✓ Bem-vinda, Ana Luiza!', 'success', 2000);
+      } else {
+        if (loginError) {
+          loginError.textContent = '⚠ Código incorreto.';
+          loginError.classList.remove('hidden');
+        }
+        if (pinInput) {
+          pinInput.value = '';
+          pinInput.focus();
+        }
+      }
+    });
+  }
+
+  // Teclado virtual numérico na tela de login
+  document.querySelectorAll('.btn-numpad').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      const val = btn.getAttribute('data-val');
+      if (pinInput) {
+        if (val === 'clear') {
+          pinInput.value = '';
+        } else if (val === 'backspace') {
+          pinInput.value = pinInput.value.slice(0, -1);
+        } else if (pinInput.value.length < 4) {
+          pinInput.value += val;
+        }
+      }
+    });
+  });
+
+  // Logout
+  document.getElementById('btn-header-logout')?.addEventListener('click', () => {
+    logout();
+    showLoginView();
+    showToast('Sessão encerrada', 'info', 1500);
+  });
+
+  // --------------------------------------------------
+  // 2. DASHBOARD - AÇÕES RÁPIDAS
+  // --------------------------------------------------
+  // [ 📷 CONFERIR ] - Botão Principal
+  document.getElementById('btn-dash-scan')?.addEventListener('click', () => {
+    openScannerView();
+  });
+
+  // [ 🔎 CONSULTAR ]
+  document.getElementById('btn-dash-search')?.addEventListener('click', () => {
+    openSearchView();
+  });
+
+  // [ ⚠ VENCIMENTOS ]
+  document.getElementById('btn-dash-expirations')?.addEventListener('click', () => {
+    openExpirationsView();
+  });
+
+  // [ 💬 IMPORTAR DO WHATSAPP ]
+  document.getElementById('btn-dash-wa-import')?.addEventListener('click', () => {
+    openWhatsAppImportModal();
+  });
+
+  // [ 🏢 CONFERIR POR CORREDOR ]
+  document.getElementById('btn-dash-corridor')?.addEventListener('click', () => {
+    openCorridorAuditView();
+  });
+
+  // Botões de Exportação WhatsApp nos Headers
+  document.getElementById('btn-expirations-wa-export')?.addEventListener('click', async () => {
+    await exportCurrentExpirationsWhatsApp();
+  });
+
+  document.getElementById('btn-corridor-wa-export')?.addEventListener('click', async () => {
+    const secSelect = document.getElementById('corridor-audit-sector-select');
+    const corSelect = document.getElementById('corridor-audit-corridor-select');
+    const sector = secSelect ? secSelect.value : 'MERCEARIA';
+    const corridor = corSelect ? corSelect.value : 'CORREDOR 01';
+    await exportCurrentCorridorWhatsApp(sector, corridor);
+  });
+
+  // Listener para atualização de Dashboard
+  window.addEventListener('refresh-dashboard-trigger', async () => {
+    await renderDashboard();
+  });
+
+  // Cartões de métricas clicáveis para filtrar vencimentos
+  document.getElementById('card-metric-expired')?.addEventListener('click', () => {
+    openExpirationsView('EXPIRED');
+  });
+  document.getElementById('card-metric-15d')?.addEventListener('click', () => {
+    openExpirationsView('15_DAYS');
+  });
+  document.getElementById('card-metric-30d')?.addEventListener('click', () => {
+    openExpirationsView('30_DAYS');
+  });
+  document.getElementById('card-metric-total')?.addEventListener('click', () => {
+    openSearchView();
+  });
+
+  // --------------------------------------------------
+  // 3. SCANNER
+  // --------------------------------------------------
+  document.getElementById('btn-scanner-back')?.addEventListener('click', () => {
+    stopCameraScanner();
+    showDashboardView();
+  });
+
+  document.getElementById('btn-scanner-torch')?.addEventListener('click', async () => {
+    torchState = !torchState;
+    const ok = await toggleTorch(torchState);
+    if (!ok) torchState = !torchState;
+  });
+
+  document.getElementById('btn-scanner-switch')?.addEventListener('click', () => {
+    const videoEl = document.getElementById('scanner-video');
+    if (videoEl) {
+      switchCamera(videoEl, onBarcodeDetected);
+    }
+  });
+
+  // Busca manual no scanner
+  const formManualBarcode = document.getElementById('form-manual-barcode');
+  if (formManualBarcode) {
+    formManualBarcode.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const codeInput = document.getElementById('manual-barcode-input');
+      const code = codeInput ? codeInput.value.trim() : '';
+      if (code) {
+        stopCameraScanner();
+        await onBarcodeDetected(code);
+      }
+    });
+  }
+
+  // --------------------------------------------------
+  // 4. CONFERÊNCIA
+  // --------------------------------------------------
+  document.getElementById('btn-conf-back')?.addEventListener('click', () => {
+    showDashboardView();
+  });
+
+  document.getElementById('btn-conf-confirm')?.addEventListener('click', () => {
+    confirmConference();
+  });
+
+  // --------------------------------------------------
+  // 5. NOVO PRODUTO
+  // --------------------------------------------------
+  document.getElementById('btn-new-prod-back')?.addEventListener('click', () => {
+    showDashboardView();
+  });
+
+  document.getElementById('btn-new-prod-save')?.addEventListener('click', () => {
+    saveNewProduct();
+  });
+
+  // Input de fotos para novo produto
+  const fileCameraNew = document.getElementById('file-camera-new');
+  const fileGalleryNew = document.getElementById('file-gallery-new');
+
+  document.getElementById('btn-new-photo-camera')?.addEventListener('click', () => {
+    fileCameraNew?.click();
+  });
+  document.getElementById('btn-new-photo-gallery')?.addEventListener('click', () => {
+    fileGalleryNew?.click();
+  });
+
+  fileCameraNew?.addEventListener('change', (e) => {
+    if (e.target.files && e.target.files[0]) {
+      handleProductImageFile(e.target.files[0], false);
+    }
+  });
+  fileGalleryNew?.addEventListener('change', (e) => {
+    if (e.target.files && e.target.files[0]) {
+      handleProductImageFile(e.target.files[0], false);
+    }
+  });
+
+  // Inputs de contagem na tela de novo produto
+  document.querySelectorAll('.new-count-input').forEach((input) => {
+    input.addEventListener('input', () => {
+      updateNewProductTotalCalculation();
+    });
+  });
+
+  // --------------------------------------------------
+  // 6. CONFERÊNCIA POR CORREDOR
+  // --------------------------------------------------
+  document.getElementById('btn-corridor-audit-back')?.addEventListener('click', () => {
+    showDashboardView();
+  });
+
+  document.getElementById('corridor-audit-sector-select')?.addEventListener('change', (e) => {
+    const sec = e.target.value;
+    const cor = document.getElementById('corridor-audit-corridor-select')?.value || 'CORREDOR 01';
+    loadCorridorAuditProducts(sec, cor);
+  });
+
+  document.getElementById('corridor-audit-corridor-select')?.addEventListener('change', (e) => {
+    const cor = e.target.value;
+    const sec = document.getElementById('corridor-audit-sector-select')?.value || 'MERCEARIA';
+    loadCorridorAuditProducts(sec, cor);
+  });
+
+  // --------------------------------------------------
+  // 7. CONSULTA / BUSCA
+  // --------------------------------------------------
+  document.getElementById('btn-search-back')?.addEventListener('click', () => {
+    showDashboardView();
+  });
+
+  const searchInput = document.getElementById('search-query-input');
+  const searchSectorSelect = document.getElementById('search-sector-filter');
+  const searchCorridorSelect = document.getElementById('search-corridor-filter');
+
+  const executeSearch = async () => {
+    const query = searchInput ? searchInput.value : '';
+    const sector = searchSectorSelect ? searchSectorSelect.value : 'TODOS';
+    const corridor = searchCorridorSelect ? searchCorridorSelect.value : 'TODOS';
+    await renderSearchResults(query, sector, corridor);
+  };
+
+  searchInput?.addEventListener('input', executeSearch);
+  searchSectorSelect?.addEventListener('change', executeSearch);
+  searchCorridorSelect?.addEventListener('change', executeSearch);
+
+  // --------------------------------------------------
+  // 8. TELA DE VENCIMENTOS
+  // --------------------------------------------------
+  document.getElementById('btn-exp-back')?.addEventListener('click', () => {
+    showDashboardView();
+  });
+
+  document.querySelectorAll('.btn-exp-filter-tab').forEach((tab) => {
+    tab.addEventListener('click', () => {
+      document.querySelectorAll('.btn-exp-filter-tab').forEach((t) => t.classList.remove('active'));
+      tab.classList.add('active');
+      const filterType = tab.getAttribute('data-filter');
+      renderExpirationsList(filterType);
+    });
+  });
+
+  // Custom Event Listeners
+  window.addEventListener('start-scanner-trigger', () => {
+    openScannerView();
+  });
+
+  window.addEventListener('refresh-dashboard-trigger', () => {
+    renderDashboard();
+  });
+}
+
+// ----------------------------------------------------
+// FLUXO DO SCANNER E DETECÇÃO DE CÓDIGO
+// ----------------------------------------------------
+export async function openScannerView() {
+  showView('view-scanner');
+  const videoEl = document.getElementById('scanner-video');
+  const manualInput = document.getElementById('manual-barcode-input');
+  if (manualInput) manualInput.value = '';
+
+  if (videoEl) {
+    const res = await startCameraScanner(videoEl, onBarcodeDetected);
+    if (!res.success) {
+      showToast(res.error || 'Câmera não disponível', 'warning');
+      manualInput?.focus();
+    }
+  }
+}
+
+// Callback executado imediatamente após o bip
+export async function onBarcodeDetected(barcode) {
+  if (!barcode) return;
+  const cleanCode = barcode.trim();
+
+  // 1. Pesquisa no IndexedDB primeiro (Ultra rápido / offline)
+  showToast(`Bipado: ${cleanCode}`, 'info', 1000);
+  const existingProduct = await getProductByBarcode(cleanCode);
+
+  if (existingProduct) {
+    // SIM → ABRIR PRODUTO PARA CONFERÊNCIA
+    openConferenceForProduct(existingProduct);
+  } else {
+    // NÃO → CADASTRAR PRODUTO COM CÓDIGO PREENCHIDO
+    openNewProductView(cleanCode);
+  }
+}
+
+// ----------------------------------------------------
+// TELA DE CONSULTA / BUSCA
+// ----------------------------------------------------
+export async function openSearchView() {
+  populateSearchFilters();
+  const searchInput = document.getElementById('search-query-input');
+  if (searchInput) searchInput.value = '';
+  await renderSearchResults('', 'TODOS', 'TODOS');
+  showView('view-search');
+}
+
+function populateSearchFilters() {
+  const secEl = document.getElementById('search-sector-filter');
+  const corEl = document.getElementById('search-corridor-filter');
+
+  if (secEl) {
+    secEl.innerHTML = `<option value="TODOS">TODOS OS SETORES</option>` + SETORS.map((s) => `<option value="${s}">${s}</option>`).join('');
+  }
+  if (corEl) {
+    corEl.innerHTML = `<option value="TODOS">TODOS OS CORREDORES</option>` + CORRIDORS.map((c) => `<option value="${c}">${c}</option>`).join('');
+  }
+}
+
+async function renderSearchResults(query, sector, corridor) {
+  const results = await searchProducts(query, sector, corridor);
+  const container = document.getElementById('search-results-list');
+  const countDisplay = document.getElementById('search-results-count');
+
+  if (countDisplay) {
+    countDisplay.textContent = `${results.length} ${results.length === 1 ? 'produto encontrado' : 'produtos encontrados'}`;
+  }
+
+  if (!container) return;
+
+  if (results.length === 0) {
+    container.innerHTML = `
+      <div class="empty-search-card">
+        <p>Nenhum produto encontrado para os filtros selecionados.</p>
+        <button type="button" class="btn-primary-mini" id="btn-search-add-new">+ Cadastrar Novo Produto</button>
+      </div>
+    `;
+    document.getElementById('btn-search-add-new')?.addEventListener('click', () => {
+      openNewProductView();
+    });
+    return;
+  }
+
+  container.innerHTML = results
+    .map((p) => {
+      return `
+      <div class="search-result-card" data-prodid="${p.id}">
+        <div class="search-thumb-col">
+          ${
+            p.image
+              ? `<img src="${p.image}" alt="" class="compact-prod-thumb" />`
+              : `<div class="photo-placeholder-mini">FOTO</div>`
+          }
+        </div>
+        <div class="search-info-col">
+          <h4 class="search-prod-name">${p.name}</h4>
+          <span class="search-barcode">${p.barcode}</span>
+          <div class="search-loc-tags">
+            <span class="loc-badge sector">${p.sector}</span>
+            <span class="loc-badge corridor">${p.corridor}</span>
+          </div>
+        </div>
+        <div class="search-action-col">
+          <button type="button" class="btn-search-view" data-prodid="${p.id}">Ver</button>
+        </div>
+      </div>
+    `;
+    })
+    .join('');
+
+  container.querySelectorAll('.search-result-card').forEach((card) => {
+    card.addEventListener('click', (e) => {
+      const prodId = card.getAttribute('data-prodid');
+      openProductDetailView(prodId);
+    });
+  });
+}
+
+// ----------------------------------------------------
+// TELA DE VENCIMENTOS
+// ----------------------------------------------------
+export async function openExpirationsView(initialFilter = 'ALL') {
+  document.querySelectorAll('.btn-exp-filter-tab').forEach((tab) => {
+    tab.classList.toggle('active', tab.getAttribute('data-filter') === initialFilter);
+  });
+  await renderExpirationsList(initialFilter);
+  showView('view-expirations');
+}
+
+async function renderExpirationsList(filterType = 'ALL') {
+  const products = await getAllProducts();
+  const container = document.getElementById('expirations-list-container');
+  if (!container) return;
+
+  const productMap = {};
+  products.forEach((p) => (productMap[p.id] = p));
+
+  const items = [];
+
+  for (const p of products) {
+    const exps = await getProductExpirations(p.id);
+    for (const exp of exps) {
+      const latest = await getLatestCountsForExpiration(exp.id);
+      const days = getDaysUntilExpiration(exp.expiration_date);
+
+      let category = 'OK';
+      if (days < 0) category = 'EXPIRED';
+      else if (days <= 15) category = '15_DAYS';
+      else if (days <= 30) category = '30_DAYS';
+
+      let include = false;
+      if (filterType === 'ALL') include = true;
+      else if (filterType === 'EXPIRED' && category === 'EXPIRED') include = true;
+      else if (filterType === '15_DAYS' && (category === 'EXPIRED' || category === '15_DAYS')) include = true;
+      else if (filterType === '30_DAYS' && (category === 'EXPIRED' || category === '15_DAYS' || category === '30_DAYS')) include = true;
+
+      if (include) {
+        items.push({
+          product: p,
+          expiration: exp,
+          daysUntil: days,
+          category,
+          units: latest.total
+        });
+      }
+    }
+  }
+
+  // Ordena por dias até vencer (mais críticos primeiro)
+  items.sort((a, b) => a.daysUntil - b.daysUntil);
+
+  if (items.length === 0) {
+    container.innerHTML = `<div class="empty-exp-state">Nenhum produto encontrado neste filtro.</div>`;
+    return;
+  }
+
+  container.innerHTML = items
+    .map((item) => {
+      let badgeClass = 'tag-normal';
+      let tagText = `${item.daysUntil} dias`;
+
+      if (item.daysUntil < 0) {
+        badgeClass = 'tag-expired';
+        tagText = `VENCIDO HÁ ${Math.abs(item.daysUntil)} DIAS`;
+      } else if (item.daysUntil <= 15) {
+        badgeClass = 'tag-urgent';
+        tagText = item.daysUntil === 0 ? 'VENCE HOJE' : `VENCE EM ${item.daysUntil} DIAS`;
+      } else if (item.daysUntil <= 30) {
+        badgeClass = 'tag-warning';
+        tagText = `VENCE EM ${item.daysUntil} DIAS`;
+      }
+
+      return `
+      <div class="exp-alert-card ${item.category.toLowerCase()}" data-prodid="${item.product.id}" data-expid="${item.expiration.id}">
+        <div class="exp-alert-thumb-col">
+          ${
+            item.product.image
+              ? `<img src="${item.product.image}" alt="" class="compact-prod-thumb" />`
+              : `<div class="photo-placeholder-mini">FOTO</div>`
+          }
+        </div>
+        <div class="exp-alert-info-col">
+          <h4 class="exp-alert-name">${item.product.name}</h4>
+          <div class="exp-alert-meta">
+            <span class="exp-alert-date">📅 ${formatDateBR(item.expiration.expiration_date)}</span>
+            <span class="exp-badge ${badgeClass}">${tagText}</span>
+          </div>
+          <div class="exp-alert-loc-row">
+            <span>${item.product.sector} · ${item.product.corridor}</span>
+            <span>Estoque: <strong>${formatNumber(item.units)} un</strong></span>
+          </div>
+        </div>
+        <div class="exp-alert-action-col">
+          <button type="button" class="btn-audit-item">Conferir</button>
+        </div>
+      </div>
+    `;
+    })
+    .join('');
+
+  container.querySelectorAll('.exp-alert-card').forEach((card) => {
+    card.addEventListener('click', async () => {
+      const prodId = card.getAttribute('data-prodid');
+      const expId = card.getAttribute('data-expid');
+      const prod = await getProductById(prodId);
+      if (prod) {
+        openConferenceForProduct(prod, expId);
+      }
+    });
+  });
+}
+
+// Exporta todos os itens de vencimentos exibidos para o WhatsApp
+async function exportCurrentExpirationsWhatsApp() {
+  const activeTab = document.querySelector('.btn-exp-filter-tab.active');
+  const filterType = activeTab ? activeTab.getAttribute('data-filter') : 'ALL';
+
+  const products = await getAllProducts();
+  const exportItems = [];
+
+  for (const p of products) {
+    const exps = await getProductExpirations(p.id);
+    for (const exp of exps) {
+      const latest = await getLatestCountsForExpiration(exp.id);
+      const days = getDaysUntilExpiration(exp.expiration_date);
+
+      let category = 'OK';
+      if (days < 0) category = 'EXPIRED';
+      else if (days <= 15) category = '15_DAYS';
+      else if (days <= 30) category = '30_DAYS';
+
+      let include = false;
+      if (filterType === 'ALL') include = true;
+      else if (filterType === 'EXPIRED' && category === 'EXPIRED') include = true;
+      else if (filterType === '15_DAYS' && (category === 'EXPIRED' || category === '15_DAYS')) include = true;
+      else if (filterType === '30_DAYS' && (category === 'EXPIRED' || category === '15_DAYS' || category === '30_DAYS')) include = true;
+
+      if (include) {
+        exportItems.push({
+          name: p.name,
+          barcode: p.barcode,
+          expirationDateBR: formatDateBR(exp.expiration_date),
+          quantity: latest.total,
+          daysUntil: days
+        });
+      }
+    }
+  }
+
+  if (exportItems.length === 0) {
+    showToast('Nenhum item na lista para exportar.', 'warning');
+    return;
+  }
+
+  exportItems.sort((a, b) => a.daysUntil - b.daysUntil);
+
+  let filterLabel = 'TODOS OS VENCIMENTOS';
+  if (filterType === 'EXPIRED') filterLabel = 'PRODUTOS VENCIDOS';
+  else if (filterType === '15_DAYS') filterLabel = 'VENCIMENTOS ATÉ 15 DIAS';
+  else if (filterType === '30_DAYS') filterLabel = 'VENCIMENTOS ATÉ 30 DIAS';
+
+  const formatted = formatMultipleProductsWhatsApp(exportItems, filterLabel);
+  openWhatsAppExportModal(formatted, `Exportar: ${filterLabel}`);
+}
+
+// Inicia no carregamento do DOM
+document.addEventListener('DOMContentLoaded', initApp);
+
