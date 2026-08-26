@@ -1,18 +1,18 @@
-// Sistema de Autenticação Rápida - Código 2009
+// Sistema de Autenticação Rápida - Código 2002
 import { triggerHaptic, playBeep } from './utils.js';
 
-const ACCESS_CODE = '2009';
+const ACCESS_CODE = '2002';
 const SESSION_KEY = 'ana_luiza_auth_token';
 
 export function isAuthenticated() {
-  return sessionStorage.getItem(SESSION_KEY) === 'authenticated_session_2009';
+  return sessionStorage.getItem(SESSION_KEY) === 'authenticated_session_2002';
 }
 
 export function verifyCode(code) {
   if (!code) return false;
   const cleanCode = code.toString().trim();
   if (cleanCode === ACCESS_CODE) {
-    sessionStorage.setItem(SESSION_KEY, 'authenticated_session_2009');
+    sessionStorage.setItem(SESSION_KEY, 'authenticated_session_2002');
     playBeep('success');
     triggerHaptic(50);
     return true;

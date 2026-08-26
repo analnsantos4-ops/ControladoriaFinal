@@ -182,7 +182,7 @@ function setupEventListeners() {
     openCorridorAuditView();
   });
 
-  // [ 🗑️ ZERAR BASE DE DADOS COM CONFIRMAÇÃO DE SENHA 2009 ]
+  // [ 🗑️ ZERAR BASE DE DADOS COM CONFIRMAÇÃO DE SENHA 2002 ]
   const wipeModal = document.getElementById('modal-wipe-confirm');
   const wipePinInput = document.getElementById('input-wipe-pin');
   const wipePinError = document.getElementById('wipe-pin-error');
@@ -211,10 +211,10 @@ function setupEventListeners() {
 
   btnConfirmWipe?.addEventListener('click', async () => {
     const pin = wipePinInput?.value?.trim();
-    if (pin !== '2009') {
+    if (pin !== '2002') {
       if (wipePinError) {
         wipePinError.style.display = 'block';
-        wipePinError.textContent = 'Senha incorreta! Digite 2009.';
+        wipePinError.textContent = 'Senha incorreta! Digite 2002.';
       }
       if (wipePinInput) {
         wipePinInput.value = '';
@@ -856,6 +856,18 @@ async function exportCurrentExpirationsWhatsApp() {
   const formatted = formatMultipleProductsWhatsApp(exportItems, filterLabel);
   openWhatsAppExportModal(formatted, `Exportar: ${filterLabel}`);
 }
+
+// Ouvintes globais para atualização reativa dos dados vindos do Supabase
+window.addEventListener('supabase-data-updated', async () => {
+  const currentView = getActiveView();
+  if (currentView === 'view-dashboard') {
+    await renderDashboard();
+  }
+});
+
+window.addEventListener('refresh-dashboard-trigger', async () => {
+  await renderDashboard();
+});
 
 // Inicia no carregamento do DOM
 document.addEventListener('DOMContentLoaded', initApp);

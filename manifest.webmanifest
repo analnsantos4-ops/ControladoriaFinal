@@ -1,7 +1,7 @@
 {
-  "name": "Controladoria — Ana Luiza",
-  "short_name": "Controladoria",
-  "description": "Aplicativo de Conferência de Estoque e Validades",
+  "name": "VALIX — Controladoria & Validades",
+  "short_name": "VALIX",
+  "description": "Aplicativo de Conferência de Estoque, Validades e Auditoria — Ana Luiza",
   "start_url": "/",
   "display": "standalone",
   "background_color": "#050505",

@@ -395,11 +395,14 @@ export async function openProductDetailView(productId) {
         <button type="button" class="btn-primary" id="btn-detail-make-conference">
           [ 📷 FAZER CONFERÊNCIA ]
         </button>
+        <button type="button" class="btn-secondary" id="btn-detail-edit-product" style="border-color: rgba(56, 189, 248, 0.5); color: #38bdf8; font-weight: 800;">
+          ✏️ EDITAR PRODUTO (NOME, FOTO, CÓDIGO)
+        </button>
         <button type="button" class="btn-secondary" id="btn-detail-back">
-          VOLTAR
+          VOLTAR AO INÍCIO
         </button>
         <button type="button" class="btn-danger-outline" id="btn-detail-delete-product">
-          🗑️ APAGAR PRODUTO (SENHA 2009)
+          🗑️ APAGAR PRODUTO (SENHA 2002)
         </button>
       </div>
     `;
@@ -407,6 +410,10 @@ export async function openProductDetailView(productId) {
     // Event listeners
     document.getElementById('btn-detail-make-conference')?.addEventListener('click', () => {
       openConferenceForProduct(product);
+    });
+
+    document.getElementById('btn-detail-edit-product')?.addEventListener('click', () => {
+      openEditProductModal(product);
     });
 
     document.getElementById('btn-detail-back')?.addEventListener('click', () => {
@@ -422,7 +429,7 @@ export async function openProductDetailView(productId) {
       openWhatsAppExportModal(formatted, `Exportar ${product.name}`);
     });
 
-    // Apagar Produto Inteiro (Senha 2009)
+    // Apagar Produto Inteiro (Senha 2002)
     document.getElementById('btn-detail-delete-product')?.addEventListener('click', () => {
       promptSecurityPin(
         'APAGAR PRODUTO',
@@ -452,7 +459,7 @@ export async function openProductDetailView(productId) {
       });
     });
 
-    // Mini buttons para APAGAR data específica (Senha 2009)
+    // Mini buttons para APAGAR data específica (Senha 2002)
     document.querySelectorAll('.btn-delete-date-mini').forEach((btn) => {
       btn.addEventListener('click', (e) => {
         const expId = e.currentTarget.getAttribute('data-expid');
@@ -473,4 +480,223 @@ export async function openProductDetailView(productId) {
   }
 
   showView('view-product-detail');
+}
+
+// ----------------------------------------------------
+// MODAL DE EDIÇÃO DE PRODUTO (NOME, FOTO, CÓDIGO DE BARRAS, LOCAL)
+// ----------------------------------------------------
+export function openEditProductModal(product) {
+  let editModal = document.getElementById('modal-edit-product');
+  if (!editModal) {
+    editModal = document.createElement('div');
+    editModal.id = 'modal-edit-product';
+    editModal.className = 'custom-modal';
+    document.body.appendChild(editModal);
+  }
+
+  let editedImage = product.image || '';
+
+  editModal.innerHTML = `
+    <div class="modal-backdrop" id="modal-edit-backdrop"></div>
+    <div class="modal-card" style="max-width: 460px; max-height: 90vh; overflow-y: auto; padding: 18px;">
+      <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 12px;">
+        <div style="display: flex; align-items: center; gap: 8px;">
+          <span style="font-size: 1.3rem;">✏️</span>
+          <h3 style="font-size: 1.05rem; font-weight: 800; color: #f4f4f5; margin: 0;">Editar Produto</h3>
+        </div>
+        <button type="button" id="btn-close-edit-modal" class="btn-icon-control" style="font-size: 1rem; width: 32px; height: 32px;">✕</button>
+      </div>
+
+      <form id="form-edit-product-modal" autocomplete="off" style="display: flex; flex-direction: column; gap: 12px;">
+        <!-- Foto do Produto -->
+        <div class="form-group" style="margin-bottom: 4px;">
+          <label style="font-size: 0.8rem; font-weight: 700; color: #a1a1aa; display: block; margin-bottom: 6px;">
+            Fotografia do Produto:
+          </label>
+          <div style="display: flex; align-items: center; gap: 12px; background: #18181b; padding: 10px; border-radius: 8px; border: 1px solid #27272a;">
+            <div id="edit-modal-photo-preview-box" style="width: 72px; height: 72px; border-radius: 6px; overflow: hidden; background: #09090b; border: 1px solid #3f3f46; display: flex; align-items: center; justify-content: center; flex-shrink: 0;">
+              ${
+                editedImage
+                  ? `<img id="edit-modal-img" src="${editedImage}" alt="Foto" style="width: 100%; height: 100%; object-fit: cover;" />`
+                  : `<span id="edit-modal-no-photo" style="font-size: 0.68rem; color: #71717a; font-weight: 700;">SEM FOTO</span>`
+              }
+            </div>
+            <div style="display: flex; flex-direction: column; gap: 6px; flex: 1;">
+              <div style="display: flex; gap: 6px;">
+                <button type="button" id="btn-edit-photo-camera" class="btn-secondary-mini" style="flex: 1; height: 32px; font-size: 0.76rem;">
+                  📷 Câmera
+                </button>
+                <button type="button" id="btn-edit-photo-gallery" class="btn-secondary-mini" style="flex: 1; height: 32px; font-size: 0.76rem;">
+                  🖼️ Galeria
+                </button>
+              </div>
+              <button type="button" id="btn-edit-photo-remove" class="btn-secondary-mini" style="height: 28px; font-size: 0.72rem; color: #ef4444; border-color: rgba(239, 68, 68, 0.3);">
+                🗑️ Remover Foto
+              </button>
+              <input type="file" id="file-camera-edit" accept="image/*" capture="environment" class="hidden" />
+              <input type="file" id="file-gallery-edit" accept="image/*" class="hidden" />
+            </div>
+          </div>
+        </div>
+
+        <!-- Código de Barras -->
+        <div class="form-group" style="margin-bottom: 2px;">
+          <label for="edit-prod-barcode" style="font-size: 0.8rem; font-weight: 700; color: #a1a1aa; display: block; margin-bottom: 4px;">
+            Código de Barras:
+          </label>
+          <input
+            type="text"
+            id="edit-prod-barcode"
+            class="form-input"
+            value="${product.barcode || ''}"
+            required
+            style="font-family: monospace; font-size: 1.05rem; font-weight: 700; color: #10b981;"
+          />
+        </div>
+
+        <!-- Nome do Produto -->
+        <div class="form-group" style="margin-bottom: 2px;">
+          <label for="edit-prod-name" style="font-size: 0.8rem; font-weight: 700; color: #a1a1aa; display: block; margin-bottom: 4px;">
+            Nome do Produto:
+          </label>
+          <input
+            type="text"
+            id="edit-prod-name"
+            class="form-input"
+            value="${product.name || ''}"
+            required
+            style="text-transform: uppercase; font-weight: 700;"
+          />
+        </div>
+
+        <!-- Setor e Corredor -->
+        <div class="form-row-2col" style="display: grid; grid-template-columns: 1fr 1fr; gap: 8px;">
+          <div class="form-group">
+            <label for="edit-prod-sector" style="font-size: 0.8rem; font-weight: 700; color: #a1a1aa; display: block; margin-bottom: 4px;">Setor:</label>
+            <select id="edit-prod-sector" class="form-select"></select>
+          </div>
+          <div class="form-group">
+            <label for="edit-prod-corridor" style="font-size: 0.8rem; font-weight: 700; color: #a1a1aa; display: block; margin-bottom: 4px;">Corredor:</label>
+            <select id="edit-prod-corridor" class="form-select"></select>
+          </div>
+        </div>
+
+        <!-- Botões de Ação -->
+        <div style="display: flex; gap: 8px; margin-top: 8px;">
+          <button type="button" id="btn-cancel-edit" class="btn-secondary" style="flex: 1; height: 42px;">
+            Cancelar
+          </button>
+          <button type="submit" id="btn-save-edit" class="btn-primary" style="flex: 1.5; height: 42px; background: #10b981; color: #022c22; font-weight: 800;">
+            ✓ SALVAR ALTERAÇÕES
+          </button>
+        </div>
+      </form>
+    </div>
+  `;
+
+  editModal.classList.add('open');
+
+  // Popula Setor e Corredor com valores selecionados
+  populateSectorAndCorridorSelects('edit-prod-sector', 'edit-prod-corridor');
+  const sectorEl = document.getElementById('edit-prod-sector');
+  const corridorEl = document.getElementById('edit-prod-corridor');
+  if (sectorEl) sectorEl.value = product.sector || 'MERCEARIA';
+  if (corridorEl) corridorEl.value = product.corridor || 'CORREDOR 01';
+
+  // Gerenciamento de foto na edição
+  const fileCamera = document.getElementById('file-camera-edit');
+  const fileGallery = document.getElementById('file-gallery-edit');
+  const previewBox = document.getElementById('edit-modal-photo-preview-box');
+
+  const updateModalPhotoPreview = (imgData) => {
+    editedImage = imgData;
+    if (previewBox) {
+      if (imgData) {
+        previewBox.innerHTML = `<img id="edit-modal-img" src="${imgData}" alt="Foto" style="width: 100%; height: 100%; object-fit: cover;" />`;
+      } else {
+        previewBox.innerHTML = `<span style="font-size: 0.68rem; color: #71717a; font-weight: 700;">SEM FOTO</span>`;
+      }
+    }
+  };
+
+  document.getElementById('btn-edit-photo-camera')?.addEventListener('click', () => fileCamera?.click());
+  document.getElementById('btn-edit-photo-gallery')?.addEventListener('click', () => fileGallery?.click());
+  document.getElementById('btn-edit-photo-remove')?.addEventListener('click', () => {
+    updateModalPhotoPreview('');
+    showToast('Foto removida', 'info', 1500);
+  });
+
+  const handleEditFile = async (e) => {
+    const file = e.target?.files?.[0];
+    if (!file) return;
+    try {
+      showToast('Processando foto...', 'sync', 1000);
+      const compressed = await compressImage(file, 600, 600, 0.72);
+      updateModalPhotoPreview(compressed);
+      showToast('✓ Foto atualizada', 'success', 1500);
+    } catch (err) {
+      console.error(err);
+      showToast('Erro ao processar imagem', 'warning');
+    }
+  };
+
+  fileCamera?.addEventListener('change', handleEditFile);
+  fileGallery?.addEventListener('change', handleEditFile);
+
+  const closeEditModal = () => editModal.classList.remove('open');
+  document.getElementById('btn-close-edit-modal')?.addEventListener('click', closeEditModal);
+  document.getElementById('modal-edit-backdrop')?.addEventListener('click', closeEditModal);
+  document.getElementById('btn-cancel-edit')?.addEventListener('click', closeEditModal);
+
+  // Submissão do Form de Edição
+  document.getElementById('form-edit-product-modal')?.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const barcode = document.getElementById('edit-prod-barcode')?.value?.trim() || '';
+    const name = document.getElementById('edit-prod-name')?.value?.trim() || '';
+    const sector = sectorEl?.value || 'MERCEARIA';
+    const corridor = corridorEl?.value || 'CORREDOR 01';
+
+    if (!barcode) {
+      showToast('Código de barras é obrigatório', 'warning');
+      return;
+    }
+    if (!name) {
+      showToast('Nome do produto é obrigatório', 'warning');
+      return;
+    }
+
+    // Se o código de barras mudou, valida se não existe outro produto com o novo código
+    if (barcode !== product.barcode) {
+      const existingWithBarcode = await getProductByBarcode(barcode);
+      if (existingWithBarcode && existingWithBarcode.id !== product.id) {
+        showToast('⚠ Este código de barras já pertence a outro produto!', 'warning', 4000);
+        return;
+      }
+    }
+
+    try {
+      showToast('Salvando alterações...', 'sync', 1500);
+
+      const updatedProduct = await saveProduct({
+        id: product.id,
+        barcode,
+        name: name.toUpperCase(),
+        image: editedImage,
+        sector,
+        corridor,
+        created_at: product.created_at || new Date().toISOString()
+      });
+
+      closeEditModal();
+      triggerSyncNow().catch((err) => console.warn('Sync error:', err));
+      showToast('✓ Produto atualizado com sucesso!', 'success', 2500);
+
+      // Atualiza a tela de detalhes aberta e o dashboard
+      window.dispatchEvent(new CustomEvent('refresh-dashboard-trigger'));
+      openProductDetailView(updatedProduct.id);
+    } catch (err) {
+      console.error('Erro ao editar produto:', err);
+      showToast(`⚠ Erro ao salvar: ${err.message || err}`, 'warning', 3000);
+    }
+  });
 }

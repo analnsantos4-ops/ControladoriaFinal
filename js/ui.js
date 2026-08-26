@@ -200,7 +200,7 @@ export function promptSecurityPin(actionTitle, actionWarning, onConfirmed) {
   form?.addEventListener('submit', (e) => {
     e.preventDefault();
     const entered = pinField ? pinField.value.trim() : '';
-    if (entered === '2009') {
+    if (entered === '2002') {
       modal.classList.remove('open');
       if (typeof onConfirmed === 'function') {
         onConfirmed();

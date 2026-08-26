@@ -184,6 +184,7 @@ function cleanPayloadForSupabase(tableName, payload) {
       name: String(clean.name || '').toUpperCase(),
       sector: String(clean.sector || 'MERCEARIA'),
       corridor: String(clean.corridor || 'CORREDOR 01'),
+      image: clean.image ? String(clean.image) : null,
       created_at: clean.created_at || new Date().toISOString(),
       updated_at: clean.updated_at || new Date().toISOString()
     };
@@ -405,6 +406,12 @@ export async function pullFromSupabase() {
     const expirations = expRes.ok ? await expRes.json() : [];
     const counts = countRes.ok ? await countRes.json() : [];
 
+    const localProducts = await getAllFromStore('products');
+    const localProductMap = {};
+    localProducts.forEach((lp) => {
+      localProductMap[lp.id] = lp;
+    });
+
     // Mescla no IndexedDB local preservando fotos salvas localmente
     const db = await initDB();
     const tx = db.transaction(['products', 'product_expirations', 'inventory_counts'], 'readwrite');
@@ -413,24 +420,31 @@ export async function pullFromSupabase() {
     const countStore = tx.objectStore('inventory_counts');
 
     for (const p of products) {
-      // Preserva imagem local se o Supabase não tiver
-      const existingReq = prodStore.get(p.id);
-      existingReq.onsuccess = () => {
-        const local = existingReq.result;
-        if (local && local.image && !p.image) {
-          p.image = local.image;
-        }
-        prodStore.put(p);
-      };
+      const local = localProductMap[p.id];
+      if (local && local.image && !p.image) {
+        p.image = local.image;
+      }
+      prodStore.put(p);
     }
-    for (const e of expirations) expStore.put(e);
-    for (const c of counts) countStore.put(c);
+    for (const e of expirations) {
+      expStore.put(e);
+    }
+    for (const c of counts) {
+      countStore.put(c);
+    }
 
     lastSyncError = null;
     lastSyncErrorCode = null;
 
     return new Promise((resolve) => {
-      tx.oncomplete = () => resolve(true);
+      tx.oncomplete = () => {
+        if (typeof window !== 'undefined') {
+          window.dispatchEvent(new CustomEvent('supabase-data-updated', {
+            detail: { productsCount: products.length, countsCount: counts.length }
+          }));
+        }
+        resolve(true);
+      };
       tx.onerror = () => resolve(false);
     });
   } catch (err) {
