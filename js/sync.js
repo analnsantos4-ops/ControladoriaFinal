@@ -181,17 +181,40 @@ function cleanPayloadForSupabase(tableName, payload) {
   const clean = { ...payload };
 
   if (tableName === 'products') {
-    return {
-      id: String(clean.id || ''),
-      barcode: String(clean.barcode || ''),
-      name: String(clean.name || '').toUpperCase(),
-      sector: String(clean.sector || 'MERCEARIA'),
-      corridor: String(clean.corridor || 'CORREDOR 01'),
-      image: clean.image ? String(clean.image) : null,
-      created_at: clean.created_at || new Date().toISOString(),
-      updated_at: clean.updated_at || new Date().toISOString()
-    };
-  }
+  return {
+    id: String(clean.id || ''),
+    barcode: String(clean.barcode || ''),
+    name: String(clean.name || '').toUpperCase(),
+
+    sector: String(clean.sector || 'MERCEARIA'),
+    corridor: String(clean.corridor || 'CORREDOR 01'),
+
+    image: clean.image ? String(clean.image) : null,
+
+    total_quantity: Number(clean.total_quantity) || 0,
+
+    deposit_qty: Number(clean.deposit_qty) || 0,
+    fridge_qty: Number(clean.fridge_qty) || 0,
+    shelf_qty: Number(clean.shelf_qty) || 0,
+    gondola_end_qty: Number(clean.gondola_end_qty) || 0,
+    ear_qty: Number(clean.ear_qty) || 0,
+    island_qty: Number(clean.island_qty) || 0,
+    cart_qty: Number(clean.cart_qty) || 0,
+    checkout_qty: Number(clean.checkout_qty) || 0,
+
+    last_expiration_date:
+      clean.last_expiration_date || null,
+
+    last_count_date:
+      clean.last_count_date || null,
+
+    created_at:
+      clean.created_at || new Date().toISOString(),
+
+    updated_at:
+      clean.updated_at || new Date().toISOString()
+  };
+}
 
   if (tableName === 'product_expirations') {
     return {
