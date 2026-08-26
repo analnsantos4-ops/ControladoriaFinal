@@ -145,24 +145,25 @@ export async function saveNewProduct() {
       totalInitialCount += qty;
     });
 
-    // Se informou data de validade OU se informou qualquer contagem > 0
-    if (expDate || totalInitialCount > 0) {
-      let finalExpDate = expDate;
-      if (!finalExpDate) {
-        finalExpDate = getTodayISO();
-      } else if (finalExpDate.includes('/')) {
-        finalExpDate = parseDateBRtoISO(finalExpDate);
-      }
-
-      const { expiration } = await saveProductExpiration(savedProd.id, finalExpDate);
-      await saveInventoryCounts(savedProd.id, expiration.id, locationCounts);
+    // Garante que o registro de validade e as contagens dos locais sejam SEMPRE gravados no banco
+    let finalExpDate = expDate ? expDate.trim() : '';
+    if (!finalExpDate) {
+      finalExpDate = getTodayISO();
+    } else if (finalExpDate.includes('/')) {
+      finalExpDate = parseDateBRtoISO(finalExpDate);
     }
+
+    const { expiration } = await saveProductExpiration(savedProd.id, finalExpDate);
+    await saveInventoryCounts(savedProd.id, expiration.id, locationCounts);
+
+    // Atualiza estatísticas do dashboard imediatamente
+    window.dispatchEvent(new CustomEvent('refresh-dashboard-trigger'));
 
     // Dispara envio imediato para a nuvem Supabase em segundo plano
     triggerSyncNow().catch((e) => console.warn('Sync background error:', e));
 
-    // Abre diretamente a conferência do produto ou exibe sucesso
-    openConferenceForProduct(savedProd);
+    // Abre diretamente a conferência do produto já com a data e contagens carregadas
+    openConferenceForProduct(savedProd, expiration.id);
   } catch (error) {
     console.error('Erro ao salvar produto:', error);
     if (error.existingProduct) {
@@ -595,13 +596,18 @@ export function openEditProductModal(product) {
         </div>
 
         <!-- Botões de Ação -->
-        <div style="display: flex; gap: 8px; margin-top: 8px;">
-          <button type="button" id="btn-cancel-edit" class="btn-secondary" style="flex: 1; height: 42px;">
-            Cancelar
+        <div style="display: flex; flex-direction: column; gap: 8px; margin-top: 8px;">
+          <button type="button" id="btn-edit-go-conference" class="btn-secondary" style="height: 40px; border-color: rgba(16, 185, 129, 0.4); color: #10b981; font-weight: 700;">
+            📦 CONFERIR / AJUSTAR QUANTIDADES DE ESTOQUE
           </button>
-          <button type="submit" id="btn-save-edit" class="btn-primary" style="flex: 1.5; height: 42px; background: #10b981; color: #022c22; font-weight: 800;">
-            ✓ SALVAR ALTERAÇÕES
-          </button>
+          <div style="display: flex; gap: 8px;">
+            <button type="button" id="btn-cancel-edit" class="btn-secondary" style="flex: 1; height: 42px;">
+              Cancelar
+            </button>
+            <button type="submit" id="btn-save-edit" class="btn-primary" style="flex: 1.5; height: 42px; background: #10b981; color: #022c22; font-weight: 800;">
+              ✓ SALVAR ALTERAÇÕES
+            </button>
+          </div>
         </div>
       </form>
     </div>
@@ -660,6 +666,11 @@ export function openEditProductModal(product) {
   document.getElementById('btn-close-edit-modal')?.addEventListener('click', closeEditModal);
   document.getElementById('modal-edit-backdrop')?.addEventListener('click', closeEditModal);
   document.getElementById('btn-cancel-edit')?.addEventListener('click', closeEditModal);
+
+  document.getElementById('btn-edit-go-conference')?.addEventListener('click', () => {
+    closeEditModal();
+    openConferenceForProduct(product);
+  });
 
   // Submissão do Form de Edição
   document.getElementById('form-edit-product-modal')?.addEventListener('submit', async (e) => {

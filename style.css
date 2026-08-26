@@ -863,10 +863,28 @@ button {
   overflow: hidden;
 }
 
+#scanner-reader-box {
+  width: 100% !important;
+  height: 100% !important;
+  position: relative;
+  overflow: hidden;
+  background: #000;
+}
+
+#scanner-reader-box video,
 #scanner-video {
-  width: 100%;
-  height: 100%;
-  object-fit: cover;
+  width: 100% !important;
+  height: 100% !important;
+  object-fit: cover !important;
+  display: block;
+}
+
+#scanner-reader-box img {
+  display: none !important;
+}
+
+#scanner-reader-box__scan_region {
+  min-height: 100% !important;
 }
 
 .scanner-overlay {

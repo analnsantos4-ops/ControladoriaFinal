@@ -115,7 +115,7 @@ function getSupabaseHeaders(prefer = 'resolution=merge-duplicates') {
   };
 }
 
-// Testa a saúde da conexão diretamente com a API do Supabase
+// Testa a saúde da conexão diretamente com a API do Supabase em todas as tabelas
 export async function checkSupabaseHealth() {
   if (!SUPABASE_URL || !SUPABASE_PUBLISHABLE_KEY) {
     return {
@@ -127,36 +127,39 @@ export async function checkSupabaseHealth() {
 
   try {
     const headers = getSupabaseHeaders('return=minimal');
-    const res = await fetch(`${SUPABASE_URL}/rest/v1/products?select=id&limit=1`, {
-      method: 'GET',
-      headers
-    });
+    const [pRes, eRes, cRes] = await Promise.all([
+      fetch(`${SUPABASE_URL}/rest/v1/products?select=id&limit=1`, { method: 'GET', headers }),
+      fetch(`${SUPABASE_URL}/rest/v1/product_expirations?select=id&limit=1`, { method: 'GET', headers }),
+      fetch(`${SUPABASE_URL}/rest/v1/inventory_counts?select=id&limit=1`, { method: 'GET', headers })
+    ]);
 
-    if (res.ok) {
+    const failedRes = [pRes, eRes, cRes].find((r) => !r.ok);
+
+    if (!failedRes) {
       lastSyncError = null;
       lastSyncErrorCode = null;
       notifyStatus();
       return {
         connected: true,
-        message: 'Conectado com sucesso ao Supabase!',
-        status: res.status
+        message: 'Conectado com sucesso ao Supabase (3 tabelas ativas: produtos, validades e estoque)!',
+        status: 200
       };
     }
 
-    const errorBody = await res.text();
+    const errorBody = await failedRes.text();
     let parsedError = {};
     try {
       parsedError = JSON.parse(errorBody);
     } catch (_) {}
 
-    lastSyncError = parsedError.message || errorBody || `Status ${res.status}`;
-    lastSyncErrorCode = parsedError.code || String(res.status);
+    lastSyncError = parsedError.message || errorBody || `Status ${failedRes.status}`;
+    lastSyncErrorCode = parsedError.code || String(failedRes.status);
     notifyStatus();
 
     return {
       connected: false,
-      status: res.status,
-      code: parsedError.code || String(res.status),
+      status: failedRes.status,
+      code: parsedError.code || String(failedRes.status),
       message: parsedError.message || errorBody,
       hint: parsedError.hint || null
     };

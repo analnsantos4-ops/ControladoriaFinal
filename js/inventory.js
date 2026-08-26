@@ -54,9 +54,16 @@ export async function openConferenceForProduct(product, preselectedExpirationId 
 
 // Renderiza seletor de validades existentes ou nova validade
 async function renderExpirationSelector(productId, preselectedExpirationId = null) {
-  const expirations = await getProductExpirations(productId);
+  let expirations = await getProductExpirations(productId);
   const container = document.getElementById('conf-expirations-container');
   if (!container) return;
+
+  // Se o produto não tiver nenhuma validade ainda, cria uma validade padrão (Hoje)
+  if (expirations.length === 0) {
+    const today = getTodayISO();
+    const createdExp = await saveProductExpiration(productId, today);
+    expirations = [createdExp.expiration];
+  }
 
   let html = `
     <div class="conf-section-box">
@@ -64,16 +71,14 @@ async function renderExpirationSelector(productId, preselectedExpirationId = nul
       <div class="exp-dates-chips-grid">
   `;
 
-  if (expirations.length > 0) {
-    expirations.forEach((exp) => {
-      const isSelected = preselectedExpirationId ? exp.id === preselectedExpirationId : false;
-      html += `
-        <button type="button" class="btn-exp-chip ${isSelected ? 'selected' : ''}" data-expid="${exp.id}" data-date="${exp.expiration_date}">
-          📅 ${formatDateBR(exp.expiration_date)}
-        </button>
-      `;
-    });
-  }
+  expirations.forEach((exp) => {
+    const isSelected = preselectedExpirationId ? exp.id === preselectedExpirationId : false;
+    html += `
+      <button type="button" class="btn-exp-chip ${isSelected ? 'selected' : ''}" data-expid="${exp.id}" data-date="${exp.expiration_date}">
+        📅 ${formatDateBR(exp.expiration_date)}
+      </button>
+    `;
+  });
 
   html += `
         <button type="button" class="btn-exp-chip btn-add-new-date" id="btn-show-new-date-input">
@@ -132,19 +137,23 @@ async function renderExpirationSelector(productId, preselectedExpirationId = nul
     await selectExpirationForCounting(res.expiration, !res.isNew);
   });
 
-  // Se houver pré-selecionada ou validades, seleciona a primeira por padrão
+  // Seleciona a validade alvo ou a primeira por padrão para liberar imediatamente os campos de contagem
+  let targetExp = null;
   if (preselectedExpirationId) {
-    const target = expirations.find((e) => e.id === preselectedExpirationId);
-    if (target) {
-      selectExpirationForCounting(target);
-    }
-  } else if (expirations.length === 1) {
-    const firstChip = container.querySelector('.btn-exp-chip:not(.btn-add-new-date)');
-    firstChip?.classList.add('selected');
-    selectExpirationForCounting(expirations[0]);
-  } else {
-    // Esconde contagem até selecionar data
-    document.getElementById('conf-counting-section')?.classList.add('hidden');
+    targetExp = expirations.find((e) => e.id === preselectedExpirationId);
+  }
+  if (!targetExp && expirations.length > 0) {
+    targetExp = expirations[0];
+  }
+
+  if (targetExp) {
+    const allChips = container.querySelectorAll('.btn-exp-chip:not(.btn-add-new-date)');
+    allChips.forEach((c) => {
+      if (c.getAttribute('data-expid') === targetExp.id) {
+        c.classList.add('selected');
+      }
+    });
+    await selectExpirationForCounting(targetExp);
   }
 }
 
@@ -340,9 +349,21 @@ export function updateComparisonCard() {
 
 // Confirma e salva a conferência
 export async function confirmConference() {
-  if (!currentAuditingProduct || !currentSelectedExpiration) {
-    showToast('⚠ Selecione a data de validade', 'warning');
+  if (!currentAuditingProduct) {
+    showToast('⚠ Nenhum produto selecionado para conferência', 'warning');
     return;
+  }
+
+  if (!currentSelectedExpiration) {
+    // Tenta obter ou criar uma validade padrão para garantir que a contagem seja salva no banco
+    const exps = await getProductExpirations(currentAuditingProduct.id);
+    if (exps && exps.length > 0) {
+      currentSelectedExpiration = exps[0];
+    } else {
+      const today = getTodayISO();
+      const res = await saveProductExpiration(currentAuditingProduct.id, today);
+      currentSelectedExpiration = res.expiration;
+    }
   }
 
   const currentCounts = {};
@@ -366,7 +387,8 @@ export async function confirmConference() {
     playBeep('success');
     showToast('✓ Conferência salva com sucesso!', 'success');
 
-    // Dispara sincronização em segundo plano para o Supabase
+    // Atualiza dashboard e dispara sincronização em segundo plano para o Supabase
+    window.dispatchEvent(new CustomEvent('refresh-dashboard-trigger'));
     triggerSyncNow().catch((e) => console.warn('Sync background error:', e));
 
     // Abre Modal de Sucesso com o fluxo contínuo "BIPAR PRÓXIMO"

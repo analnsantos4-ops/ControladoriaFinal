@@ -1578,9 +1578,11 @@
       </div>
     </header>
 
-    <div class="scanner-viewport-container">
-      <video id="scanner-video" playsinline autoplay muted></video>
-      <div class="scanner-overlay">
+    <div class="scanner-viewport-container" id="scanner-viewport-container">
+      <div id="scanner-reader-box" style="width: 100%; height: 100%; position: relative; overflow: hidden; background: #000;">
+        <video id="scanner-video" playsinline autoplay muted style="width: 100%; height: 100%; object-fit: cover;"></video>
+      </div>
+      <div class="scanner-overlay" style="pointer-events: none;">
         <div class="scanner-target-box">
           <div class="scanner-laser-line"></div>
           <span class="target-corner top-left"></span>

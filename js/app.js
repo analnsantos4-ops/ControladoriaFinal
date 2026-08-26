@@ -433,11 +433,8 @@ function setupEventListeners() {
     if (!ok) torchState = !torchState;
   });
 
-  document.getElementById('btn-scanner-switch')?.addEventListener('click', () => {
-    const videoEl = document.getElementById('scanner-video');
-    if (videoEl) {
-      switchCamera(videoEl, onBarcodeDetected);
-    }
+  document.getElementById('btn-scanner-switch')?.addEventListener('click', async () => {
+    await switchCamera('scanner-reader-box', onBarcodeDetected);
   });
 
   // Busca manual no scanner
@@ -577,16 +574,13 @@ function setupEventListeners() {
 // ----------------------------------------------------
 export async function openScannerView() {
   showView('view-scanner');
-  const videoEl = document.getElementById('scanner-video');
   const manualInput = document.getElementById('manual-barcode-input');
   if (manualInput) manualInput.value = '';
 
-  if (videoEl) {
-    const res = await startCameraScanner(videoEl, onBarcodeDetected);
-    if (!res.success) {
-      showToast(res.error || 'Câmera não disponível', 'warning');
-      manualInput?.focus();
-    }
+  const res = await startCameraScanner('scanner-reader-box', onBarcodeDetected);
+  if (!res.success) {
+    showToast(res.error || 'Câmera não disponível', 'warning');
+    manualInput?.focus();
   }
 }
 
@@ -655,32 +649,49 @@ async function renderSearchResults(query, sector, corridor) {
     return;
   }
 
-  container.innerHTML = results
-    .map((p) => {
+  // Calcula estoque total de cada produto para exibição rica na busca
+  const cardsHtml = await Promise.all(
+    results.map(async (p) => {
+      let totalStock = 0;
+      let expCount = 0;
+      try {
+        const exps = await getProductExpirations(p.id);
+        expCount = exps.length;
+        for (const exp of exps) {
+          const counts = await getLatestCountsForExpiration(exp.id);
+          totalStock += counts.total || 0;
+        }
+      } catch (_) {}
+
       return `
-      <div class="search-result-card" data-prodid="${p.id}">
-        <div class="search-thumb-col">
-          ${
-            p.image
-              ? `<img src="${p.image}" alt="" class="compact-prod-thumb" />`
-              : `<div class="photo-placeholder-mini">FOTO</div>`
-          }
-        </div>
-        <div class="search-info-col">
-          <h4 class="search-prod-name">${p.name}</h4>
-          <span class="search-barcode">${p.barcode}</span>
-          <div class="search-loc-tags">
-            <span class="loc-badge sector">${p.sector}</span>
-            <span class="loc-badge corridor">${p.corridor}</span>
+        <div class="search-result-card" data-prodid="${p.id}">
+          <div class="search-thumb-col">
+            ${
+              p.image
+                ? `<img src="${p.image}" alt="" class="compact-prod-thumb" />`
+                : `<div class="photo-placeholder-mini">FOTO</div>`
+            }
+          </div>
+          <div class="search-info-col">
+            <h4 class="search-prod-name">${p.name}</h4>
+            <span class="search-barcode">${p.barcode}</span>
+            <div class="search-loc-tags">
+              <span class="loc-badge sector">${p.sector}</span>
+              <span class="loc-badge corridor">${p.corridor}</span>
+              <span class="loc-badge" style="background: rgba(16, 185, 129, 0.15); color: #10b981; border: 1px solid rgba(16, 185, 129, 0.3); font-weight: 800;">
+                📦 ${formatNumber(totalStock)} un.
+              </span>
+            </div>
+          </div>
+          <div class="search-action-col">
+            <button type="button" class="btn-search-view" data-prodid="${p.id}">Ver</button>
           </div>
         </div>
-        <div class="search-action-col">
-          <button type="button" class="btn-search-view" data-prodid="${p.id}">Ver</button>
-        </div>
-      </div>
-    `;
+      `;
     })
-    .join('');
+  );
+
+  container.innerHTML = cardsHtml.join('');
 
   container.querySelectorAll('.search-result-card').forEach((card) => {
     card.addEventListener('click', (e) => {
