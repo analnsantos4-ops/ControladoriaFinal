@@ -152,7 +152,7 @@ export async function searchProducts(searchTerm = '', sectorFilter = '', corrido
   });
 }
 
-// Salva ou atualiza produto garantindo código de barras ÚNICO
+// Salva ou atualiza produto garantindo código de barras ÚNICO e mantendo quantidades
 export async function saveProduct(product) {
   if (!product.barcode) {
     throw new Error('Código de barras é obrigatório.');
@@ -167,14 +167,40 @@ export async function saveProduct(product) {
   }
 
   const now = new Date().toISOString();
+  const existing = product.id ? await getProductById(product.id) : null;
+
+  const depositQty = Number(product.deposit_qty !== undefined ? product.deposit_qty : (existing?.deposit_qty || 0));
+  const fridgeQty = Number(product.fridge_qty !== undefined ? product.fridge_qty : (existing?.fridge_qty || 0));
+  const shelfQty = Number(product.shelf_qty !== undefined ? product.shelf_qty : (existing?.shelf_qty || 0));
+  const gondolaEndQty = Number(product.gondola_end_qty !== undefined ? product.gondola_end_qty : (existing?.gondola_end_qty || 0));
+  const earQty = Number(product.ear_qty !== undefined ? product.ear_qty : (existing?.ear_qty || 0));
+  const islandQty = Number(product.island_qty !== undefined ? product.island_qty : (existing?.island_qty || 0));
+  const cartQty = Number(product.cart_qty !== undefined ? product.cart_qty : (existing?.cart_qty || 0));
+  const checkoutQty = Number(product.checkout_qty !== undefined ? product.checkout_qty : (existing?.checkout_qty || 0));
+
+  const totalQty = product.total_quantity !== undefined
+    ? Number(product.total_quantity)
+    : (depositQty + fridgeQty + shelfQty + gondolaEndQty + earQty + islandQty + cartQty + checkoutQty);
+
   const productData = {
     id: product.id || generateId(),
     barcode: product.barcode.trim(),
     name: product.name ? product.name.trim() : '',
-    image: product.image || '',
-    sector: product.sector || 'MERCEARIA',
-    corridor: product.corridor || 'CORREDOR 01',
-    created_at: product.created_at || now,
+    image: product.image !== undefined ? product.image : (existing?.image || ''),
+    sector: product.sector || existing?.sector || 'MERCEARIA',
+    corridor: product.corridor || existing?.corridor || 'CORREDOR 01',
+    total_quantity: totalQty,
+    deposit_qty: depositQty,
+    fridge_qty: fridgeQty,
+    shelf_qty: shelfQty,
+    gondola_end_qty: gondolaEndQty,
+    ear_qty: earQty,
+    island_qty: islandQty,
+    cart_qty: cartQty,
+    checkout_qty: checkoutQty,
+    last_expiration_date: product.last_expiration_date || existing?.last_expiration_date || null,
+    last_count_date: product.last_count_date || existing?.last_count_date || now,
+    created_at: product.created_at || existing?.created_at || now,
     updated_at: now
   };
 
@@ -190,7 +216,7 @@ export async function saveProduct(product) {
       // Adiciona na fila de sincronização
       syncStore.add({
         id: generateId(),
-        operation: product.id ? 'UPSERT' : 'INSERT',
+        operation: 'UPSERT',
         table_name: 'products',
         record_id: productData.id,
         payload: productData,
@@ -498,7 +524,7 @@ export async function getLatestCountsForExpiration(expirationId) {
   });
 }
 
-// Salva uma nova rodada de conferência para um produto e validade
+// Salva uma nova rodada de conferência para um produto e validade, atualizando também a tabela de produtos
 export async function saveInventoryCounts(productId, expirationId, locationCounts, sessionId = null) {
   const now = new Date().toISOString();
   const db = await initDB();
@@ -506,9 +532,23 @@ export async function saveInventoryCounts(productId, expirationId, locationCount
   const countRecords = [];
   let totalCount = 0;
 
+  const locQtyMap = {
+    'DEPÓSITO': 0,
+    'GELADEIRA': 0,
+    'PRATELEIRA': 0,
+    'PONTA DE GÔNDOLA': 0,
+    'ORELHA': 0,
+    'ILHA': 0,
+    'CARRINHO': 0,
+    'FRENTE DE LOJA': 0
+  };
+
   Object.entries(locationCounts).forEach(([locationType, qty]) => {
     const quantity = Number(qty) || 0;
     totalCount += quantity;
+    if (locQtyMap[locationType] !== undefined) {
+      locQtyMap[locationType] = quantity;
+    }
     countRecords.push({
       id: generateId(),
       product_id: productId,
@@ -524,10 +564,12 @@ export async function saveInventoryCounts(productId, expirationId, locationCount
 
   return new Promise((resolve, reject) => {
     try {
-      const tx = db.transaction(['inventory_counts', 'sync_queue'], 'readwrite');
+      const tx = db.transaction(['products', 'inventory_counts', 'sync_queue'], 'readwrite');
+      const prodStore = tx.objectStore('products');
       const countStore = tx.objectStore('inventory_counts');
       const syncStore = tx.objectStore('sync_queue');
 
+      // 1. Salva os registros em inventory_counts
       countRecords.forEach((record) => {
         countStore.add(record);
         syncStore.add({
@@ -541,10 +583,162 @@ export async function saveInventoryCounts(productId, expirationId, locationCount
         });
       });
 
+      // 2. Atualiza o produto pai com os totais e locais diretamente
+      const prodReq = prodStore.get(productId);
+      prodReq.onsuccess = () => {
+        if (prodReq.result) {
+          const prod = prodReq.result;
+          prod.total_quantity = totalCount;
+          prod.deposit_qty = locQtyMap['DEPÓSITO'] || 0;
+          prod.fridge_qty = locQtyMap['GELADEIRA'] || 0;
+          prod.shelf_qty = locQtyMap['PRATELEIRA'] || 0;
+          prod.gondola_end_qty = locQtyMap['PONTA DE GÔNDOLA'] || 0;
+          prod.ear_qty = locQtyMap['ORELHA'] || 0;
+          prod.island_qty = locQtyMap['ILHA'] || 0;
+          prod.cart_qty = locQtyMap['CARRINHO'] || 0;
+          prod.checkout_qty = locQtyMap['FRENTE DE LOJA'] || 0;
+          prod.last_count_date = now;
+          prod.updated_at = now;
+
+          prodStore.put(prod);
+
+          syncStore.add({
+            id: generateId(),
+            operation: 'UPSERT',
+            table_name: 'products',
+            record_id: prod.id,
+            payload: prod,
+            created_at: now,
+            synced: 0
+          });
+        }
+      };
+
       tx.oncomplete = () => resolve({ total: totalCount, countDate: now });
       tx.onerror = (e) => reject(e.target.error);
     } catch (e) {
       reject(e);
+    }
+  });
+}
+
+// Salva Produto, Validade e Contagem em UMA ÚNICA transação atômica
+export async function saveCompleteProductWithCounts({ product, expirationDate, locationCounts }) {
+  const now = new Date().toISOString();
+  const db = await initDB();
+
+  let deposit = Number(locationCounts['DEPÓSITO'] || 0);
+  let fridge = Number(locationCounts['GELADEIRA'] || 0);
+  let shelf = Number(locationCounts['PRATELEIRA'] || 0);
+  let gondola = Number(locationCounts['PONTA DE GÔNDOLA'] || 0);
+  let ear = Number(locationCounts['ORELHA'] || 0);
+  let island = Number(locationCounts['ILHA'] || 0);
+  let cart = Number(locationCounts['CARRINHO'] || 0);
+  let checkout = Number(locationCounts['FRENTE DE LOJA'] || 0);
+  let totalQty = deposit + fridge + shelf + gondola + ear + island + cart + checkout;
+
+  const productId = product.id || generateId();
+  const expirationId = generateId();
+
+  const productData = {
+    id: productId,
+    barcode: product.barcode.trim(),
+    name: product.name ? product.name.trim().toUpperCase() : '',
+    image: product.image || '',
+    sector: product.sector || 'MERCEARIA',
+    corridor: product.corridor || 'CORREDOR 01',
+    total_quantity: totalQty,
+    deposit_qty: deposit,
+    fridge_qty: fridge,
+    shelf_qty: shelf,
+    gondola_end_qty: gondola,
+    ear_qty: ear,
+    island_qty: island,
+    cart_qty: cart,
+    checkout_qty: checkout,
+    last_expiration_date: expirationDate || null,
+    last_count_date: now,
+    created_at: product.created_at || now,
+    updated_at: now
+  };
+
+  const expirationData = {
+    id: expirationId,
+    product_id: productId,
+    expiration_date: expirationDate || getTodayISO(),
+    created_at: now,
+    updated_at: now
+  };
+
+  const countRecords = Object.entries(locationCounts).map(([loc, qty]) => ({
+    id: generateId(),
+    product_id: productId,
+    expiration_id: expirationId,
+    count_session_id: null,
+    location_type: loc,
+    quantity: Number(qty) || 0,
+    counted_at: now,
+    created_at: now,
+    updated_at: now
+  }));
+
+  return new Promise((resolve, reject) => {
+    try {
+      const tx = db.transaction(['products', 'product_expirations', 'inventory_counts', 'sync_queue'], 'readwrite');
+      const prodStore = tx.objectStore('products');
+      const expStore = tx.objectStore('product_expirations');
+      const countStore = tx.objectStore('inventory_counts');
+      const syncStore = tx.objectStore('sync_queue');
+
+      // 1. Salva Produto
+      prodStore.put(productData);
+      syncStore.add({
+        id: generateId(),
+        operation: 'UPSERT',
+        table_name: 'products',
+        record_id: productId,
+        payload: productData,
+        created_at: now,
+        synced: 0
+      });
+
+      // 2. Salva Validade
+      expStore.put(expirationData);
+      syncStore.add({
+        id: generateId(),
+        operation: 'INSERT',
+        table_name: 'product_expirations',
+        record_id: expirationId,
+        payload: expirationData,
+        created_at: now,
+        synced: 0
+      });
+
+      // 3. Salva Contagens dos 8 Locais
+      countRecords.forEach((cnt) => {
+        countStore.add(cnt);
+        syncStore.add({
+          id: generateId(),
+          operation: 'INSERT',
+          table_name: 'inventory_counts',
+          record_id: cnt.id,
+          payload: cnt,
+          created_at: now,
+          synced: 0
+        });
+      });
+
+      tx.oncomplete = () => {
+        resolve({
+          product: productData,
+          expiration: expirationData,
+          counts: countRecords,
+          total: totalQty
+        });
+      };
+      tx.onerror = (e) => reject(e.target.error);
+    } catch (err) {
+      reject(err);
     }
   });
 }
@@ -668,7 +862,7 @@ export async function getDashboardMetrics() {
     const product = productMap[exp.product_id];
     if (!product) return;
 
-    const units = expirationTotals[exp.id] !== undefined ? expirationTotals[exp.id] : 0;
+    let units = expirationTotals[exp.id] !== undefined ? expirationTotals[exp.id] : (Number(product.total_quantity) || 0);
     const days = getDaysUntilExpiration(exp.expiration_date);
 
     if (days < 0) {

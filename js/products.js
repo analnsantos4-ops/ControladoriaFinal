@@ -1,6 +1,6 @@
 // Gerenciamento de Produtos, Cadastro, Foto e Detalhes
 import { SETORS, CORRIDORS, LOCATIONS, compressImage, formatNumber, formatDateBR, parseDateBRtoISO, getTodayISO } from './utils.js';
-import { getProductByBarcode, getProductById, saveProduct, saveProductExpiration, saveInventoryCounts, getProductExpirations, getLatestCountsForExpiration, getHistoryForProduct, getLocationHistoryForProduct, deleteProduct, deleteProductExpiration } from './db.js';
+import { getProductByBarcode, getProductById, saveProduct, saveProductExpiration, saveInventoryCounts, saveCompleteProductWithCounts, getProductExpirations, getLatestCountsForExpiration, getHistoryForProduct, getLocationHistoryForProduct, deleteProduct, deleteProductExpiration } from './db.js';
 import { triggerSyncNow } from './sync.js';
 import { showToast, showView, openPhotoModal, promptSecurityPin } from './ui.js';
 import { openConferenceForProduct } from './inventory.js';
@@ -90,7 +90,7 @@ export async function handleProductImageFile(file, isEdit = false) {
   }
 }
 
-// Salva o novo produto com validações estritas
+// Salva o novo produto com validações estritas e persistência garantida
 export async function saveNewProduct() {
   const barcodeInput = document.getElementById('new-product-barcode');
   const nameInput = document.getElementById('new-product-name');
@@ -124,28 +124,16 @@ export async function saveNewProduct() {
   }
 
   try {
-    // 1. Salva o produto
-    const savedProd = await saveProduct({
-      barcode,
-      name: name.toUpperCase(),
-      image: currentProductImage,
-      sector,
-      corridor
-    });
+    showToast('Salvando produto e estoque...', 'sync', 1500);
 
-    showToast('✓ Produto cadastrado!', 'success');
-
-    // 2. Coleta contagens dos 8 locais
+    // 1. Coleta contagens dos 8 locais
     const locationCounts = {};
-    let totalInitialCount = 0;
     LOCATIONS.forEach((loc, idx) => {
       const input = document.getElementById(`new-count-${idx}`);
       const qty = input ? Number(input.value) || 0 : 0;
       locationCounts[loc] = qty;
-      totalInitialCount += qty;
     });
 
-    // Garante que o registro de validade e as contagens dos locais sejam SEMPRE gravados no banco
     let finalExpDate = expDate ? expDate.trim() : '';
     if (!finalExpDate) {
       finalExpDate = getTodayISO();
@@ -153,17 +141,29 @@ export async function saveNewProduct() {
       finalExpDate = parseDateBRtoISO(finalExpDate);
     }
 
-    const { expiration } = await saveProductExpiration(savedProd.id, finalExpDate);
-    await saveInventoryCounts(savedProd.id, expiration.id, locationCounts);
+    // 2. Gravação completa atômica em IndexedDB + fila de sincronização
+    const result = await saveCompleteProductWithCounts({
+      product: {
+        barcode,
+        name: name.toUpperCase(),
+        image: currentProductImage,
+        sector,
+        corridor
+      },
+      expirationDate: finalExpDate,
+      locationCounts
+    });
+
+    showToast('✓ Produto e quantidades gravados!', 'success', 2500);
 
     // Atualiza estatísticas do dashboard imediatamente
     window.dispatchEvent(new CustomEvent('refresh-dashboard-trigger'));
 
-    // Dispara envio imediato para a nuvem Supabase em segundo plano
+    // Dispara envio para Supabase em segundo plano
     triggerSyncNow().catch((e) => console.warn('Sync background error:', e));
 
-    // Abre diretamente a conferência do produto já com a data e contagens carregadas
-    openConferenceForProduct(savedProd, expiration.id);
+    // Abre diretamente os detalhes do produto ou conferência
+    openConferenceForProduct(result.product, result.expiration.id);
   } catch (error) {
     console.error('Erro ao salvar produto:', error);
     if (error.existingProduct) {
@@ -259,8 +259,21 @@ export async function openProductDetailView(productId) {
     exp.unitsTotal = latest.total;
     totalStock += latest.total;
     Object.entries(latest.countsByLocation).forEach(([loc, qty]) => {
-      locationSums[loc] = (locationSums[loc] || 0) + qty;
+      locationSums[loc] = (locationSums[loc] || 0) + Number(qty);
     });
+  }
+
+  // Se não houver contagens em inventory_counts, utiliza os valores gravados no próprio produto
+  if (totalStock === 0 && Number(product.total_quantity) > 0) {
+    totalStock = Number(product.total_quantity) || 0;
+    locationSums['DEPÓSITO'] = Number(product.deposit_qty) || 0;
+    locationSums['GELADEIRA'] = Number(product.fridge_qty) || 0;
+    locationSums['PRATELEIRA'] = Number(product.shelf_qty) || 0;
+    locationSums['PONTA DE GÔNDOLA'] = Number(product.gondola_end_qty) || 0;
+    locationSums['ORELHA'] = Number(product.ear_qty) || 0;
+    locationSums['ILHA'] = Number(product.island_qty) || 0;
+    locationSums['CARRINHO'] = Number(product.cart_qty) || 0;
+    locationSums['FRENTE DE LOJA'] = Number(product.checkout_qty) || 0;
   }
 
   // Renderiza no container
@@ -497,9 +510,9 @@ export async function openProductDetailView(productId) {
 }
 
 // ----------------------------------------------------
-// MODAL DE EDIÇÃO DE PRODUTO (NOME, FOTO, CÓDIGO DE BARRAS, LOCAL)
+// MODAL DE EDIÇÃO DE PRODUTO (NOME, FOTO, CÓDIGO DE BARRAS, LOCAL E QUANTIDADES)
 // ----------------------------------------------------
-export function openEditProductModal(product) {
+export async function openEditProductModal(product) {
   let editModal = document.getElementById('modal-edit-product');
   if (!editModal) {
     editModal = document.createElement('div');
@@ -510,13 +523,36 @@ export function openEditProductModal(product) {
 
   let editedImage = product.image || '';
 
+  // Carrega validades e contagens atuais
+  const expirations = await getProductExpirations(product.id);
+  const primaryExp = expirations.length > 0 ? expirations[0] : null;
+  let currentLocCounts = {
+    'DEPÓSITO': Number(product.deposit_qty) || 0,
+    'GELADEIRA': Number(product.fridge_qty) || 0,
+    'PRATELEIRA': Number(product.shelf_qty) || 0,
+    'PONTA DE GÔNDOLA': Number(product.gondola_end_qty) || 0,
+    'ORELHA': Number(product.ear_qty) || 0,
+    'ILHA': Number(product.island_qty) || 0,
+    'CARRINHO': Number(product.cart_qty) || 0,
+    'FRENTE DE LOJA': Number(product.checkout_qty) || 0
+  };
+
+  if (primaryExp) {
+    const latest = await getLatestCountsForExpiration(primaryExp.id);
+    if (latest.hasPreviousCount) {
+      currentLocCounts = { ...currentLocCounts, ...latest.countsByLocation };
+    }
+  }
+
+  const initialTotal = Object.values(currentLocCounts).reduce((a, b) => a + Number(b || 0), 0);
+
   editModal.innerHTML = `
     <div class="modal-backdrop" id="modal-edit-backdrop"></div>
-    <div class="modal-card" style="max-width: 460px; max-height: 90vh; overflow-y: auto; padding: 18px;">
+    <div class="modal-card" style="max-width: 480px; max-height: 90vh; overflow-y: auto; padding: 18px;">
       <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 12px;">
         <div style="display: flex; align-items: center; gap: 8px;">
           <span style="font-size: 1.3rem;">✏️</span>
-          <h3 style="font-size: 1.05rem; font-weight: 800; color: #f4f4f5; margin: 0;">Editar Produto</h3>
+          <h3 style="font-size: 1.05rem; font-weight: 800; color: #f4f4f5; margin: 0;">Editar Produto e Estoque</h3>
         </div>
         <button type="button" id="btn-close-edit-modal" class="btn-icon-control" style="font-size: 1rem; width: 32px; height: 32px;">✕</button>
       </div>
@@ -595,10 +631,38 @@ export function openEditProductModal(product) {
           </div>
         </div>
 
+        <!-- Ajuste Rápido de Quantidades por Local -->
+        <div style="background: #18181b; padding: 10px; border-radius: 8px; border: 1px solid #27272a; margin-top: 4px;">
+          <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
+            <span style="font-size: 0.78rem; font-weight: 800; color: #38bdf8; text-transform: uppercase;">
+              📊 Quantidades por Local:
+            </span>
+            <span style="font-size: 0.78rem; font-weight: 800; color: #10b981;">
+              Total: <strong id="edit-modal-total-display">${initialTotal}</strong> un.
+            </span>
+          </div>
+          <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 6px;">
+            ${LOCATIONS.map((loc, idx) => `
+              <div style="display: flex; align-items: center; justify-content: space-between; background: #09090b; padding: 4px 8px; border-radius: 6px; border: 1px solid #27272a;">
+                <span style="font-size: 0.7rem; color: #a1a1aa; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 90px;" title="${loc}">${loc}</span>
+                <input
+                  type="number"
+                  min="0"
+                  id="edit-loc-count-${idx}"
+                  data-location="${loc}"
+                  class="form-input edit-loc-input"
+                  value="${currentLocCounts[loc] || 0}"
+                  style="width: 54px; height: 28px; text-align: center; font-weight: 700; font-size: 0.85rem; padding: 0 4px;"
+                />
+              </div>
+            `).join('')}
+          </div>
+        </div>
+
         <!-- Botões de Ação -->
         <div style="display: flex; flex-direction: column; gap: 8px; margin-top: 8px;">
           <button type="button" id="btn-edit-go-conference" class="btn-secondary" style="height: 40px; border-color: rgba(16, 185, 129, 0.4); color: #10b981; font-weight: 700;">
-            📦 CONFERIR / AJUSTAR QUANTIDADES DE ESTOQUE
+            📦 ABRIR TELA DE CONFERÊNCIA COMPLETA
           </button>
           <div style="display: flex; gap: 8px;">
             <button type="button" id="btn-cancel-edit" class="btn-secondary" style="flex: 1; height: 42px;">
@@ -614,6 +678,21 @@ export function openEditProductModal(product) {
   `;
 
   editModal.classList.add('open');
+
+  // Recalculo do total ao vivo no modal de edição
+  const updateModalTotal = () => {
+    let tot = 0;
+    LOCATIONS.forEach((loc, idx) => {
+      const el = document.getElementById(`edit-loc-count-${idx}`);
+      if (el) tot += Number(el.value) || 0;
+    });
+    const totDisplay = document.getElementById('edit-modal-total-display');
+    if (totDisplay) totDisplay.textContent = formatNumber(tot);
+  };
+
+  LOCATIONS.forEach((loc, idx) => {
+    document.getElementById(`edit-loc-count-${idx}`)?.addEventListener('input', updateModalTotal);
+  });
 
   // Popula Setor e Corredor com valores selecionados
   populateSectorAndCorridorSelects('edit-prod-sector', 'edit-prod-corridor');
@@ -701,6 +780,16 @@ export function openEditProductModal(product) {
     try {
       showToast('Salvando alterações...', 'sync', 1500);
 
+      // Coleta os valores atualizados dos 8 locais
+      const newLocCounts = {};
+      let updatedTotal = 0;
+      LOCATIONS.forEach((loc, idx) => {
+        const inp = document.getElementById(`edit-loc-count-${idx}`);
+        const q = inp ? Number(inp.value) || 0 : 0;
+        newLocCounts[loc] = q;
+        updatedTotal += q;
+      });
+
       const updatedProduct = await saveProduct({
         id: product.id,
         barcode,
@@ -708,12 +797,29 @@ export function openEditProductModal(product) {
         image: editedImage,
         sector,
         corridor,
+        total_quantity: updatedTotal,
+        deposit_qty: newLocCounts['DEPÓSITO'] || 0,
+        fridge_qty: newLocCounts['GELADEIRA'] || 0,
+        shelf_qty: newLocCounts['PRATELEIRA'] || 0,
+        gondola_end_qty: newLocCounts['PONTA DE GÔNDOLA'] || 0,
+        ear_qty: newLocCounts['ORELHA'] || 0,
+        island_qty: newLocCounts['ILHA'] || 0,
+        cart_qty: newLocCounts['CARRINHO'] || 0,
+        checkout_qty: newLocCounts['FRENTE DE LOJA'] || 0,
         created_at: product.created_at || new Date().toISOString()
       });
 
+      // Salva contagens no registro de validade se existir ou cria um
+      let targetExpId = primaryExp ? primaryExp.id : null;
+      if (!targetExpId) {
+        const { expiration } = await saveProductExpiration(product.id, getTodayISO());
+        targetExpId = expiration.id;
+      }
+      await saveInventoryCounts(product.id, targetExpId, newLocCounts);
+
       closeEditModal();
       triggerSyncNow().catch((err) => console.warn('Sync error:', err));
-      showToast('✓ Produto atualizado com sucesso!', 'success', 2500);
+      showToast('✓ Produto e estoque atualizados!', 'success', 2500);
 
       // Atualiza a tela de detalhes aberta e o dashboard
       window.dispatchEvent(new CustomEvent('refresh-dashboard-trigger'));

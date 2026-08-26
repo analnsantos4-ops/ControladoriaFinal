@@ -9,21 +9,26 @@ let currentCameraFacing = 'environment'; // 'environment' = traseira, 'user' = f
 let activeTorchState = false;
 let fallbackStream = null;
 let fallbackAnimationId = null;
+let zxingReaderInstance = null;
 
-// Formatos suportados para leitura ágil de produtos de varejo
-const SUPPORTED_FORMATS = [
+// Formatos suportados para leitura ágil de produtos de varejo (1D e 2D)
+const ALL_BARCODE_FORMATS = [
   Html5QrcodeSupportedFormats.EAN_13,
   Html5QrcodeSupportedFormats.EAN_8,
   Html5QrcodeSupportedFormats.CODE_128,
   Html5QrcodeSupportedFormats.CODE_39,
+  Html5QrcodeSupportedFormats.CODE_93,
   Html5QrcodeSupportedFormats.UPC_A,
   Html5QrcodeSupportedFormats.UPC_E,
+  Html5QrcodeSupportedFormats.UPC_EAN_EXTENSION,
   Html5QrcodeSupportedFormats.ITF,
-  Html5QrcodeSupportedFormats.QR_CODE
+  Html5QrcodeSupportedFormats.CODABAR,
+  Html5QrcodeSupportedFormats.QR_CODE,
+  Html5QrcodeSupportedFormats.DATA_MATRIX
 ];
 
 /**
- * Inicia o scanner de código de barras na câmera
+ * Inicia o scanner de código de barras na câmera com resiliência multi-engine
  * @param {HTMLElement|string} containerElementOrId 
  * @param {Function} onDetectedCallback 
  */
@@ -36,32 +41,34 @@ export async function startCameraScanner(containerElementOrId, onDetectedCallbac
     ? containerElementOrId
     : (containerElementOrId?.id || 'scanner-reader-box');
 
-  // Garante que o elemento container exista no DOM
-  let containerEl = document.getElementById(containerId);
-  if (!containerEl) {
-    containerEl = document.getElementById('scanner-reader-box');
-  }
+  let containerEl = document.getElementById(containerId) || document.getElementById('scanner-reader-box');
 
   if (containerEl) {
     containerEl.innerHTML = '';
   }
 
-  // 1. TENTA PRIMEIRO VIA HTML5-QRCODE (Nativo + WebCam + AutoFocus)
+  // Aguarda 60ms para garantir que o container DOM esteja visível e com dimensões calculadas
+  await new Promise((r) => setTimeout(r, 60));
+
+  if (!isScanning) return { success: false };
+
+  // =========================================================================
+  // MOTOR 1: Html5Qrcode (Autofocus + BarcodeDetector nativo + WebCam Stream)
+  // =========================================================================
   try {
     html5QrCode = new Html5Qrcode(containerId, {
-      formatsToSupport: SUPPORTED_FORMATS,
+      formatsToSupport: ALL_BARCODE_FORMATS,
       verbose: false,
       useBarCodeDetectorIfSupported: true
     });
 
     const cameraConfig = { facingMode: currentCameraFacing };
     const scanConfig = {
-      fps: 20,
+      fps: 24,
       qrbox: (viewfinderWidth, viewfinderHeight) => {
-        // Caixa de leitura proporcional para códigos de barra 1D
-        const width = Math.min(Math.floor(viewfinderWidth * 0.88), 340);
-        const height = Math.min(Math.floor(viewfinderHeight * 0.46), 180);
-        return { width: Math.max(width, 220), height: Math.max(height, 120) };
+        const width = Math.min(Math.floor(viewfinderWidth * 0.90), 360);
+        const height = Math.min(Math.floor(viewfinderHeight * 0.50), 200);
+        return { width: Math.max(width, 240), height: Math.max(height, 130) };
       },
       aspectRatio: undefined,
       disableFlip: false
@@ -76,32 +83,49 @@ export async function startCameraScanner(containerElementOrId, onDetectedCallbac
         }
       },
       () => {
-        // Frame sem código detectado (normal)
+        // Frame sem código detectado (normal durante varredura)
       }
     );
 
     return { success: true };
   } catch (html5Error) {
-    console.warn('Html5Qrcode start failed, attempting fallback stream scanner:', html5Error);
+    console.warn('Html5Qrcode primário não iniciou, usando fallback direto de câmera:', html5Error);
+    if (html5QrCode) {
+      try {
+        html5QrCode.clear();
+      } catch (_) {}
+      html5QrCode = null;
+    }
   }
 
-  // 2. FALLBACK DIRETO VIA GETUSERMEDIA + ZXING / NATIVE BARCODE DETECTOR
-  try {
-    const videoEl = document.getElementById('scanner-video');
-    if (!videoEl && containerEl) {
-      containerEl.innerHTML = '<video id="scanner-video" playsinline autoplay muted style="width: 100%; height: 100%; object-fit: cover;"></video>';
-    }
-    const targetVideo = document.getElementById('scanner-video');
+  if (!isScanning) return { success: false };
 
+  // =========================================================================
+  // MOTOR 2: Fallback Direto via getUserMedia + BarcodeDetector Nativo / ZXing
+  // =========================================================================
+  try {
+    if (!containerEl) {
+      containerEl = document.getElementById('scanner-viewport-container');
+    }
+    if (!containerEl) {
+      throw new Error('Container do scanner não disponível');
+    }
+
+    containerEl.innerHTML = `
+      <video id="scanner-direct-video" playsinline autoplay muted style="width: 100%; height: 100%; object-fit: cover; display: block;"></video>
+    `;
+
+    const targetVideo = document.getElementById('scanner-direct-video');
     if (!targetVideo) {
-      throw new Error('Elemento de vídeo não encontrado para o scanner.');
+      throw new Error('Elemento de vídeo não pôde ser criado.');
     }
 
     const constraints = {
       video: {
         facingMode: { ideal: currentCameraFacing },
         width: { min: 640, ideal: 1280 },
-        height: { min: 480, ideal: 720 }
+        height: { min: 480, ideal: 720 },
+        focusMode: { ideal: 'continuous' }
       },
       audio: false
     };
@@ -109,88 +133,78 @@ export async function startCameraScanner(containerElementOrId, onDetectedCallbac
     fallbackStream = await navigator.mediaDevices.getUserMedia(constraints);
     targetVideo.srcObject = fallbackStream;
     targetVideo.setAttribute('playsinline', 'true');
+    targetVideo.setAttribute('autoplay', 'true');
+    targetVideo.setAttribute('muted', 'true');
     await targetVideo.play();
 
-    // Cria leitor ZXing e detector nativo se disponível
-    const zxingReader = new BrowserMultiFormatReader();
+    // 1. Detector nativo do navegador se presente
     let nativeDetector = null;
     if ('BarcodeDetector' in window) {
       try {
-        const formats = await window.BarcodeDetector.getSupportedFormats();
+        const supported = await window.BarcodeDetector.getSupportedFormats();
         nativeDetector = new window.BarcodeDetector({
-          formats: formats.length > 0 ? formats : ['ean_13', 'ean_8', 'upc_a', 'upc_e', 'code_128', 'code_39', 'qr_code']
+          formats: supported && supported.length > 0 ? supported : ['ean_13', 'ean_8', 'upc_a', 'upc_e', 'code_128', 'code_39', 'itf', 'qr_code']
         });
       } catch (_) {}
     }
 
-    const offCanvas = document.createElement('canvas');
-    const offCtx = offCanvas.getContext('2d', { willReadFrequently: true });
+    // 2. ZXing Continuous MultiFormat Reader
+    zxingReaderInstance = new BrowserMultiFormatReader();
 
-    let isBusy = false;
-    const processFrame = async () => {
-      if (!isScanning || !targetVideo || targetVideo.readyState < 2) {
-        if (isScanning) {
-          fallbackAnimationId = requestAnimationFrame(processFrame);
-        }
-        return;
-      }
+    let isProcessing = false;
+    const processDirectLoop = async () => {
+      if (!isScanning || !targetVideo) return;
 
-      if (!isBusy) {
-        isBusy = true;
-        let detected = null;
+      if (targetVideo.readyState >= 2 && !isProcessing) {
+        isProcessing = true;
+        let foundCode = null;
 
-        // Detector nativo rápido
+        // Tenta BarcodeDetector nativo
         if (nativeDetector) {
           try {
-            const results = await nativeDetector.detect(targetVideo);
-            if (results && results.length > 0 && results[0].rawValue) {
-              detected = results[0].rawValue.trim();
+            const barcodes = await nativeDetector.detect(targetVideo);
+            if (barcodes && barcodes.length > 0 && barcodes[0].rawValue) {
+              foundCode = barcodes[0].rawValue.trim();
             }
           } catch (_) {}
         }
 
-        // ZXing Fallback
-        if (!detected && zxingReader && offCtx) {
-          try {
-            const vw = targetVideo.videoWidth || 640;
-            const vh = targetVideo.videoHeight || 480;
-            if (offCanvas.width !== vw || offCanvas.height !== vh) {
-              offCanvas.width = vw;
-              offCanvas.height = vh;
-            }
-            offCtx.drawImage(targetVideo, 0, 0, vw, vh);
-            const res = zxingReader.decodeFromImage(offCanvas);
-            if (res && res.getText()) {
-              detected = res.getText().trim();
-            }
-          } catch (_) {
-            // ZXing lança exceção em frames sem código
-          }
-        }
-
-        if (detected && isScanning) {
-          handleCodeDetected(detected, onDetectedCallback);
+        if (foundCode && isScanning) {
+          handleCodeDetected(foundCode, onDetectedCallback);
           return;
         }
 
-        isBusy = false;
+        isProcessing = false;
       }
 
       if (isScanning) {
-        fallbackAnimationId = requestAnimationFrame(processFrame);
+        fallbackAnimationId = requestAnimationFrame(processDirectLoop);
       }
     };
 
-    fallbackAnimationId = requestAnimationFrame(processFrame);
+    fallbackAnimationId = requestAnimationFrame(processDirectLoop);
+
+    // Conecta o ZXing para decodificar continuamente o elemento de vídeo
+    try {
+      zxingReaderInstance.decodeFromVideoElementContinuously(targetVideo, (result, err) => {
+        if (result && isScanning) {
+          const text = result.getText();
+          if (text) {
+            handleCodeDetected(text.trim(), onDetectedCallback);
+          }
+        }
+      });
+    } catch (_) {}
+
     return { success: true };
   } catch (finalError) {
-    console.error('Erro final ao inicializar câmera do scanner:', finalError);
+    console.error('Erro ao iniciar câmera no scanner:', finalError);
     isScanning = false;
     return {
       success: false,
       error: finalError.name === 'NotAllowedError'
-        ? 'Permissão de câmera negada. Autorize o acesso nas configurações do navegador.'
-        : 'Não foi possível acessar a câmera do dispositivo.'
+        ? 'Permissão da câmera foi negada. Permita o acesso à câmera nas configurações do navegador.'
+        : 'Câmera não disponível no momento. Digite o código de barras abaixo.'
     };
   }
 }
@@ -205,6 +219,14 @@ export async function stopCameraScanner() {
   if (fallbackAnimationId) {
     cancelAnimationFrame(fallbackAnimationId);
     fallbackAnimationId = null;
+  }
+
+  if (zxingReaderInstance) {
+    try {
+      zxingReaderInstance.reset();
+      zxingReaderInstance.stopContinuousDecode();
+    } catch (_) {}
+    zxingReaderInstance = null;
   }
 
   if (fallbackStream) {
@@ -274,6 +296,8 @@ export async function switchCamera(containerElementOrId, onDetectedCallback) {
  * @param {Function} callback 
  */
 async function handleCodeDetected(barcode, callback) {
+  if (!isScanning) return;
+  isScanning = false;
   await stopCameraScanner();
   triggerHaptic(90);
   playBeep('success');
@@ -281,3 +305,4 @@ async function handleCodeDetected(barcode, callback) {
     callback(barcode);
   }
 }
+
