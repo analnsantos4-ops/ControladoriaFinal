@@ -62,17 +62,23 @@ export async function startCameraScanner(containerElementOrId, onDetectedCallbac
       useBarCodeDetectorIfSupported: true
     });
 
-    const cameraConfig = { facingMode: currentCameraFacing };
-    const scanConfig = {
-      fps: 24,
-      qrbox: (viewfinderWidth, viewfinderHeight) => {
-        const width = Math.min(Math.floor(viewfinderWidth * 0.90), 360);
-        const height = Math.min(Math.floor(viewfinderHeight * 0.50), 200);
-        return { width: Math.max(width, 240), height: Math.max(height, 130) };
-      },
-      aspectRatio: undefined,
-      disableFlip: false
-    };
+    const cameraConfig = { 
+  facingMode: currentCameraFacing,
+  // Adicionamos resolução ideal para melhorar o foco em códigos pequenos
+  width: { ideal: 1280 },
+  height: { ideal: 720 }
+};
+const scanConfig = {
+  fps: 30, // Mais fotos por segundo para não perder o código em movimento
+  qrbox: (viewfinderWidth, viewfinderHeight) => {
+    // Deixamos a caixa mais larga e mais baixa (ideal para códigos de barras deitados)
+    const width = Math.min(Math.floor(viewfinderWidth * 0.85), 450);
+    const height = Math.min(Math.floor(viewfinderHeight * 0.35), 160);
+    return { width: Math.max(width, 260), height: Math.max(height, 100) };
+  },
+  aspectRatio: 1.777778, // Força proporção 16:9 que ajuda a focar em latas e caixas
+  disableFlip: false
+};
 
     await html5QrCode.start(
       cameraConfig,
