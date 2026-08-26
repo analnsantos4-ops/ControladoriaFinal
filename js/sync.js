@@ -20,6 +20,19 @@ CREATE TABLE IF NOT EXISTS public.products (
   sector TEXT DEFAULT 'MERCEARIA',
   corridor TEXT DEFAULT 'CORREDOR 01',
   image TEXT,
+  -- Adicionamos estas linhas para o banco aceitar os números:
+  total_quantity NUMERIC DEFAULT 0,
+  deposit_qty NUMERIC DEFAULT 0,
+  fridge_qty NUMERIC DEFAULT 0,
+  shelf_qty NUMERIC DEFAULT 0,
+  gondola_end_qty NUMERIC DEFAULT 0,
+  ear_qty NUMERIC DEFAULT 0,
+  island_qty NUMERIC DEFAULT 0,
+  cart_qty NUMERIC DEFAULT 0,
+  checkout_qty NUMERIC DEFAULT 0,
+  last_expiration_date TEXT,
+  last_count_date TIMESTAMPTZ,
+  -- Fim das novas colunas
   created_at TIMESTAMPTZ DEFAULT NOW(),
   updated_at TIMESTAMPTZ DEFAULT NOW()
 );
