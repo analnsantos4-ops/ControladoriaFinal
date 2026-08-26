@@ -707,20 +707,40 @@ export async function getDashboardMetrics() {
   // Ordena próximos vencimentos por data mais próxima
   upcomingList.sort((a, b) => a.daysUntil - b.daysUntil);
 
-  // Mensagem automática inteligente e curta
-  let smartMessage = '✓ Tudo tranquilo por enquanto.';
+  // Mensagem automática inteligente e categorizada
+  let smartStatus = 'ok'; // 'danger' | 'warning' | 'ok' | 'info'
+  let smartTitle = 'Estoque em dia';
+  let smartText = 'Nenhum produto vencido ou com validade crítica.';
+  let smartMessage = 'Tudo em dia no estoque.';
   const totalExpired = expiredProductsSet.size;
   const total15Days = upTo15DaysProductsSet.size;
   const total7Days = upTo7DaysProductsSet.size;
 
   if (totalExpired > 0 && total15Days > 0) {
-    smartMessage = `Você tem ${totalExpired} ${totalExpired === 1 ? 'produto vencido' : 'produtos vencidos'} e ${total15Days} ${total15Days === 1 ? 'produto vencendo' : 'produtos vencendo'} nos próximos 15 dias.`;
+    smartStatus = 'danger';
+    smartTitle = 'Atenção Crítica';
+    smartText = `Você possui <strong>${totalExpired} ${totalExpired === 1 ? 'produto vencido' : 'produtos vencidos'}</strong> e <strong>${total15Days}</strong> vencendo nos próximos 15 dias.`;
+    smartMessage = `Você possui ${totalExpired} ${totalExpired === 1 ? 'produto vencido' : 'produtos vencidos'} e ${total15Days} vencendo em até 15 dias.`;
   } else if (totalExpired > 0) {
-    smartMessage = `⚠ Atenção: Você tem ${totalExpired} ${totalExpired === 1 ? 'produto vencido' : 'produtos vencidos'}.`;
+    smartStatus = 'danger';
+    smartTitle = 'Atenção: Vencimento Detectado';
+    smartText = `Você possui <strong>${totalExpired} ${totalExpired === 1 ? 'produto vencido' : 'produtos vencidos'}</strong> que requer ação imediata.`;
+    smartMessage = `Você possui ${totalExpired} ${totalExpired === 1 ? 'produto vencido' : 'produtos vencidos'}.`;
   } else if (total7Days > 0) {
-    smartMessage = `⚠ Atenção: ${total7Days} ${total7Days === 1 ? 'produto vence' : 'produtos vencem'} nos próximos 7 dias.`;
+    smartStatus = 'warning';
+    smartTitle = 'Atenção: Vence em até 7 dias';
+    smartText = `<strong>${total7Days} ${total7Days === 1 ? 'produto vence' : 'produtos vencem'}</strong> nos próximos 7 dias.`;
+    smartMessage = `${total7Days} ${total7Days === 1 ? 'produto vence' : 'produtos vencem'} nos próximos 7 dias.`;
   } else if (total15Days > 0) {
-    smartMessage = `Você tem ${total15Days} ${total15Days === 1 ? 'produto vencendo' : 'produtos vencendo'} nos próximos 15 dias.`;
+    smartStatus = 'warning';
+    smartTitle = 'Atenção: Vence em até 15 dias';
+    smartText = `<strong>${total15Days} ${total15Days === 1 ? 'produto vence' : 'produtos vencem'}</strong> nos próximos 15 dias.`;
+    smartMessage = `${total15Days} ${total15Days === 1 ? 'produto vence' : 'produtos vencem'} nos próximos 15 dias.`;
+  } else if (products.length === 0) {
+    smartStatus = 'info';
+    smartTitle = 'Comece por aqui';
+    smartText = 'Cadastre produtos ou faça a importação do WhatsApp para gerenciar o estoque.';
+    smartMessage = 'Nenhum produto cadastrado no momento.';
   }
 
   return {
@@ -737,6 +757,9 @@ export async function getDashboardMetrics() {
       productsCount: upTo30DaysProductsSet.size,
       unitsCount: upTo30DaysUnits
     },
+    smartStatus,
+    smartTitle,
+    smartText,
     smartMessage,
     upcomingExpirations: upcomingList.slice(0, 10)
   };

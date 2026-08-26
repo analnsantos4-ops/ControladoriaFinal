@@ -1,9 +1,10 @@
 // Módulo de Integração, Importação e Exportação do WhatsApp
 // Controladoria - Ana Luiza
-import { SETORS, CORRIDORS, LOCATIONS, formatDateBR, parseDateBRtoISO, formatNumber, compressImage } from './utils.js';
+import { SETORS, CORRIDORS, LOCATIONS, formatDateBR, parseDateBRtoISO, formatNumber, compressImage, getTodayISO } from './utils.js';
 import { getProductByBarcode, saveProduct, saveProductExpiration, saveInventoryCounts, getProductExpirations, getLatestCountsForExpiration } from './db.js';
 import { showToast, showView } from './ui.js';
 import { openConferenceForProduct } from './inventory.js';
+import { triggerSyncNow } from './sync.js';
 
 // ----------------------------------------------------
 // 1. GERADORES DE TEXTO FORMATADO (PADRÃO WHATSAPP)
@@ -543,18 +544,35 @@ async function saveAllParsedItems(items) {
   for (let i = 0; i < items.length; i++) {
     const item = items[i];
     try {
+      // Lê valores mais atuais dos inputs da tela (caso o usuário tenha editado diretamente)
+      const nameInput = document.querySelector(`.wa-name-input[data-idx="${i}"]`);
+      const barcodeInput = document.querySelector(`.wa-barcode-input[data-idx="${i}"]`);
+      const dateInput = document.querySelector(`.wa-date-input[data-idx="${i}"]`);
+      const qtyInput = document.querySelector(`.wa-qty-input[data-idx="${i}"]`);
+      const locSelect = document.querySelector(`.wa-loc-type-input[data-idx="${i}"]`);
+      const secSelect = document.querySelector(`.wa-sector-input[data-idx="${i}"]`);
+      const corSelect = document.querySelector(`.wa-corridor-input[data-idx="${i}"]`);
+
+      const finalName = (nameInput ? nameInput.value : (item.name || '')).trim().toUpperCase();
+      const finalBarcode = (barcodeInput ? barcodeInput.value : (item.barcode || '')).trim();
+      let finalDate = dateInput ? dateInput.value : (item.isoDate || '');
+      const finalQty = qtyInput ? (Number(qtyInput.value) || 0) : (Number(item.quantity) || 0);
+      const locType = locSelect ? locSelect.value : 'PRATELEIRA';
+      const finalSector = secSelect ? secSelect.value : (item.sector || 'MERCEARIA');
+      const finalCorridor = corSelect ? corSelect.value : (item.corridor || 'CORREDOR 01');
+
       // 1. Salva ou atualiza o produto
       let product = item.existingProduct;
       if (!product) {
-        if (!item.barcode) {
-          throw new Error(`Produto "${item.name}" não possui código de barras.`);
+        if (!finalBarcode) {
+          throw new Error(`Produto "${finalName}" não possui código de barras.`);
         }
         product = await saveProduct({
-          barcode: item.barcode.trim(),
-          name: item.name.trim().toUpperCase(),
+          barcode: finalBarcode,
+          name: finalName,
           image: item.image || '',
-          sector: item.sector || 'MERCEARIA',
-          corridor: item.corridor || 'CORREDOR 01'
+          sector: finalSector,
+          corridor: finalCorridor
         });
       } else {
         // Se já existia, atualiza imagem caso tenha sido adicionada agora
@@ -564,14 +582,18 @@ async function saveAllParsedItems(items) {
         }
       }
 
-      // 2. Se informou data de validade, salva
-      if (item.isoDate) {
-        const { expiration } = await saveProductExpiration(product.id, item.isoDate);
-        const locSelect = document.querySelector(`.wa-loc-type-input[data-idx="${i}"]`);
-        const locType = locSelect ? locSelect.value : 'PRATELEIRA';
+      // 2. Se informou data de validade OU se tem quantidade > 0, salva validade e contagem
+      if (finalDate || finalQty > 0) {
+        if (!finalDate) {
+          finalDate = getTodayISO();
+        } else if (finalDate.includes('/')) {
+          finalDate = parseDateBRtoISO(finalDate);
+        }
+
+        const { expiration } = await saveProductExpiration(product.id, finalDate);
 
         const counts = {};
-        counts[locType] = item.quantity || 0;
+        counts[locType] = finalQty;
 
         await saveInventoryCounts(product.id, expiration.id, counts);
       }
@@ -579,7 +601,7 @@ async function saveAllParsedItems(items) {
       successCount++;
     } catch (err) {
       console.error('Erro ao salvar item importado:', err);
-      errors.push(`${item.name}: ${err.message || 'Erro'}`);
+      errors.push(`${item.name || 'Produto'}: ${err.message || 'Erro'}`);
     }
   }
 
@@ -591,6 +613,9 @@ async function saveAllParsedItems(items) {
   } else {
     showToast(`✓ ${successCount} importados, ${errors.length} falhas`, 'warning', 3500);
   }
+
+  // Dispara envio imediato para a nuvem Supabase em segundo plano
+  triggerSyncNow().catch((e) => console.warn('Sync background error:', e));
 
   // Notifica o app para atualizar telas
   window.dispatchEvent(new CustomEvent('refresh-dashboard-trigger'));

@@ -1,7 +1,7 @@
 // Dashboard Inteligente para Controladoria - Ana Luiza
 import { getGreeting, getFormattedFullDate, formatNumber, formatDateBR } from './utils.js';
-import { getDashboardMetrics, getActiveSession, getProductById } from './db.js';
-import { showView } from './ui.js';
+import { getDashboardMetrics, getActiveSession, clearActiveSession, getProductById } from './db.js';
+import { showView, showToast } from './ui.js';
 import { openConferenceForProduct, openCorridorAuditView } from './inventory.js';
 
 export async function renderDashboard() {
@@ -15,10 +15,37 @@ export async function renderDashboard() {
   // 2. Busca Métricas
   const metrics = await getDashboardMetrics();
 
-  // 3. Mensagem Automática Inteligente
+  // 3. Mensagem Automática Inteligente com Ícone Refinado e Status Visual
   const msgEl = document.getElementById('dashboard-smart-msg');
   if (msgEl) {
-    msgEl.innerHTML = `<span class="msg-icon">💡</span> <span class="msg-text">${metrics.smartMessage}</span>`;
+    const status = metrics.smartStatus || 'ok';
+    msgEl.className = `dash-smart-message smart-theme-${status}`;
+
+    let iconSvg = '';
+    let badgeClass = '';
+    if (status === 'danger') {
+      badgeClass = 'red-badge';
+      iconSvg = `<svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"></circle><line x1="12" y1="8" x2="12" y2="12"></line><line x1="12" y1="16" x2="12.01" y2="16"></line></svg>`;
+    } else if (status === 'warning') {
+      badgeClass = 'orange-badge';
+      iconSvg = `<svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"></path><line x1="12" y1="9" x2="12" y2="13"></line><line x1="12" y1="17" x2="12.01" y2="17"></line></svg>`;
+    } else if (status === 'info') {
+      badgeClass = 'blue-badge';
+      iconSvg = `<svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"></circle><line x1="12" y1="16" x2="12" y2="12"></line><line x1="12" y1="8" x2="12.01" y2="8"></line></svg>`;
+    } else {
+      badgeClass = 'green-badge';
+      iconSvg = `<svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"></path><polyline points="22 4 12 14.01 9 11.01"></polyline></svg>`;
+    }
+
+    msgEl.innerHTML = `
+      <div class="smart-msg-badge-icon ${badgeClass}">
+        ${iconSvg}
+      </div>
+      <div class="smart-msg-text-col">
+        <div class="smart-msg-header-title">${metrics.smartTitle || 'Atenção'}</div>
+        <div class="smart-msg-description">${metrics.smartText || metrics.smartMessage}</div>
+      </div>
+    `;
   }
 
   // 4. Cartões de Métricas
@@ -41,7 +68,7 @@ export async function renderDashboard() {
 
   if (elTotalProds) elTotalProds.textContent = `${metrics.totalProductsCount} ${metrics.totalProductsCount === 1 ? 'produto' : 'produtos'}`;
 
-  // 5. Sessão Ativa de Conferência (se houver)
+  // 5. Sessão Ativa de Conferência (com opção de fechar/encerrar)
   const sessionBanner = document.getElementById('dashboard-active-session-banner');
   const activeSession = getActiveSession();
 
@@ -49,13 +76,23 @@ export async function renderDashboard() {
     if (activeSession) {
       sessionBanner.innerHTML = `
         <div class="active-session-card">
-          <div class="session-info">
-            <span class="session-badge">EM ANDAMENTO</span>
-            <h4 class="session-title">${activeSession.sector} · ${activeSession.corridor}</h4>
+          <div class="session-main-header">
+            <div class="session-info">
+              <span class="session-badge">EM ANDAMENTO</span>
+              <h4 class="session-title">${activeSession.sector} · ${activeSession.corridor}</h4>
+            </div>
+            <button type="button" class="btn-dismiss-session" id="btn-dismiss-session" title="Fechar e encerrar sessão" aria-label="Fechar">
+              ✕
+            </button>
           </div>
-          <button type="button" class="btn-resume-session" id="btn-resume-session">
-            CONTINUAR CONFERÊNCIA →
-          </button>
+          <div class="session-actions-row">
+            <button type="button" class="btn-resume-session" id="btn-resume-session">
+              CONTINUAR CONFERÊNCIA →
+            </button>
+            <button type="button" class="btn-cancel-session-text" id="btn-cancel-session-text">
+              Encerrar Sessão
+            </button>
+          </div>
         </div>
       `;
       sessionBanner.classList.remove('hidden');
@@ -63,6 +100,16 @@ export async function renderDashboard() {
       document.getElementById('btn-resume-session')?.addEventListener('click', () => {
         openCorridorAuditView(activeSession.sector, activeSession.corridor);
       });
+
+      const handleDismiss = () => {
+        clearActiveSession();
+        sessionBanner.innerHTML = '';
+        sessionBanner.classList.add('hidden');
+        showToast('Sessão encerrada.', 'normal', 1200);
+      };
+
+      document.getElementById('btn-dismiss-session')?.addEventListener('click', handleDismiss);
+      document.getElementById('btn-cancel-session-text')?.addEventListener('click', handleDismiss);
     } else {
       sessionBanner.innerHTML = '';
       sessionBanner.classList.add('hidden');
@@ -84,7 +131,7 @@ export async function renderDashboard() {
             tagText = 'VENCIDO';
           } else if (item.daysUntil <= 15) {
             urgencyClass = 'badge-urgent';
-            tagText = `${item.daysUntil} dias`;
+            tagText = item.daysUntil === 0 ? 'HOJE' : `${item.daysUntil} dias`;
           }
 
           return `

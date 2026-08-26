@@ -5,7 +5,7 @@ import '../style.css';
 import { isAuthenticated, verifyCode, logout } from './auth.js';
 import { initDB, getProductByBarcode, getProductById, searchProducts, getAllProducts, getProductExpirations, getLatestCountsForExpiration, clearAllDatabaseData } from './db.js';
 import { initSyncEngine, registerSyncStatusListener, wipeSupabaseCloudData, triggerSyncNow, checkSupabaseHealth, syncAllLocalDataToSupabase, SUPABASE_SETUP_SQL, getSyncStatus } from './sync.js';
-import { showView, showToast, setupButtonFeedbacks, openPhotoModal } from './ui.js';
+import { showView, showToast, setupButtonFeedbacks, openPhotoModal, getActiveView } from './ui.js';
 import { startCameraScanner, stopCameraScanner, toggleTorch, switchCamera } from './scanner.js';
 import { renderDashboard } from './dashboard.js';
 import { openNewProductView, saveNewProduct, handleProductImageFile, openProductDetailView, updateNewProductTotalCalculation, populateSectorAndCorridorSelects } from './products.js';
@@ -753,19 +753,23 @@ async function renderExpirationsList(filterType = 'ALL') {
       let badgeClass = 'tag-normal';
       let tagText = `${item.daysUntil} dias`;
 
+      let cardStatusClass = 'status-ok';
       if (item.daysUntil < 0) {
         badgeClass = 'tag-expired';
+        cardStatusClass = 'status-expired';
         tagText = `VENCIDO HÁ ${Math.abs(item.daysUntil)} DIAS`;
       } else if (item.daysUntil <= 15) {
         badgeClass = 'tag-urgent';
+        cardStatusClass = 'status-15-days';
         tagText = item.daysUntil === 0 ? 'VENCE HOJE' : `VENCE EM ${item.daysUntil} DIAS`;
       } else if (item.daysUntil <= 30) {
         badgeClass = 'tag-warning';
+        cardStatusClass = 'status-30-days';
         tagText = `VENCE EM ${item.daysUntil} DIAS`;
       }
 
       return `
-      <div class="exp-alert-card ${item.category.toLowerCase()}" data-prodid="${item.product.id}" data-expid="${item.expiration.id}">
+      <div class="exp-alert-card ${cardStatusClass}" data-prodid="${item.product.id}" data-expid="${item.expiration.id}">
         <div class="exp-alert-thumb-col">
           ${
             item.product.image

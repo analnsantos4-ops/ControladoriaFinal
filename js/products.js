@@ -135,23 +135,26 @@ export async function saveNewProduct() {
 
     showToast('✓ Produto cadastrado!', 'success');
 
-    // 2. Se informou data de validade, cria a validade e salva as contagens
-    if (expDate) {
-      // Normaliza se for DD/MM/AAAA para ISO
-      if (expDate.includes('/')) {
-        expDate = parseDateBRtoISO(expDate);
+    // 2. Coleta contagens dos 8 locais
+    const locationCounts = {};
+    let totalInitialCount = 0;
+    LOCATIONS.forEach((loc, idx) => {
+      const input = document.getElementById(`new-count-${idx}`);
+      const qty = input ? Number(input.value) || 0 : 0;
+      locationCounts[loc] = qty;
+      totalInitialCount += qty;
+    });
+
+    // Se informou data de validade OU se informou qualquer contagem > 0
+    if (expDate || totalInitialCount > 0) {
+      let finalExpDate = expDate;
+      if (!finalExpDate) {
+        finalExpDate = getTodayISO();
+      } else if (finalExpDate.includes('/')) {
+        finalExpDate = parseDateBRtoISO(finalExpDate);
       }
 
-      const { expiration } = await saveProductExpiration(savedProd.id, expDate);
-
-      // Coleta contagens dos 8 locais
-      const locationCounts = {};
-      LOCATIONS.forEach((loc, idx) => {
-        const input = document.getElementById(`new-count-${idx}`);
-        const qty = input ? Number(input.value) || 0 : 0;
-        locationCounts[loc] = qty;
-      });
-
+      const { expiration } = await saveProductExpiration(savedProd.id, finalExpDate);
       await saveInventoryCounts(savedProd.id, expiration.id, locationCounts);
     }
 
@@ -184,7 +187,13 @@ export function showDuplicateBarcodeModal(existingProduct) {
     <div class="modal-backdrop"></div>
     <div class="modal-card">
       <div class="modal-header-warning">
-        <span class="warning-icon">⚠</span>
+        <span class="smart-msg-badge-icon orange-badge">
+          <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"></path>
+            <line x1="12" y1="9" x2="12" y2="13"></line>
+            <line x1="12" y1="17" x2="12.01" y2="17"></line>
+          </svg>
+        </span>
         <h3 class="modal-title">PRODUTO JÁ CADASTRADO</h3>
       </div>
       <p class="modal-desc">Este código de barras já pertence a um produto no sistema.</p>
@@ -246,6 +255,7 @@ export async function openProductDetailView(productId) {
 
   for (const exp of expirations) {
     const latest = await getLatestCountsForExpiration(exp.id);
+    exp.unitsTotal = latest.total;
     totalStock += latest.total;
     Object.entries(latest.countsByLocation).forEach(([loc, qty]) => {
       locationSums[loc] = (locationSums[loc] || 0) + qty;
@@ -296,7 +306,10 @@ export async function openProductDetailView(productId) {
                   .map((exp) => {
                     return `
                 <div class="exp-item-row">
-                  <span class="exp-date-label">📅 ${formatDateBR(exp.expiration_date)}</span>
+                  <div class="exp-item-info">
+                    <span class="exp-date-label">📅 ${formatDateBR(exp.expiration_date)}</span>
+                    <span class="exp-units-pill">${formatNumber(exp.unitsTotal || 0)} un.</span>
+                  </div>
                   <div class="exp-item-actions">
                     <button type="button" class="btn-count-date-mini" data-expid="${exp.id}" data-prodid="${product.id}">
                       Conferir
