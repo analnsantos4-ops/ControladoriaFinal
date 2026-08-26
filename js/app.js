@@ -4,7 +4,7 @@ import '../style.css';
 // Orquestrador Principal do Aplicativo Controladoria - Ana Luiza
 import { isAuthenticated, verifyCode, logout } from './auth.js';
 import { initDB, getProductByBarcode, getProductById, searchProducts, getAllProducts, getProductExpirations, getLatestCountsForExpiration, clearAllDatabaseData } from './db.js';
-import { initSyncEngine, registerSyncStatusListener, wipeSupabaseCloudData, triggerSyncNow } from './sync.js';
+import { initSyncEngine, registerSyncStatusListener, wipeSupabaseCloudData, triggerSyncNow, checkSupabaseHealth, syncAllLocalDataToSupabase, SUPABASE_SETUP_SQL, getSyncStatus } from './sync.js';
 import { showView, showToast, setupButtonFeedbacks, openPhotoModal } from './ui.js';
 import { startCameraScanner, stopCameraScanner, toggleTorch, switchCamera } from './scanner.js';
 import { renderDashboard } from './dashboard.js';
@@ -247,6 +247,143 @@ function setupEventListeners() {
   wipePinInput?.addEventListener('keydown', (e) => {
     if (e.key === 'Enter') {
       btnConfirmWipe?.click();
+    }
+  });
+
+  // --------------------------------------------------
+  // MODAL DE CONFIGURAÇÃO / DIAGNÓSTICO DO SUPABASE
+  // --------------------------------------------------
+  const supabaseModal = document.getElementById('modal-supabase-setup');
+  const btnDashSupabaseDiag = document.getElementById('btn-dash-supabase-diag');
+  const btnCloseSupabaseModal = document.getElementById('btn-close-supabase-modal');
+  const supabaseBackdrop = document.getElementById('modal-supabase-backdrop');
+  const btnCopySupabaseSql = document.getElementById('btn-copy-supabase-sql');
+  const btnTestSupabaseSync = document.getElementById('btn-test-supabase-sync');
+  const supabaseSqlDisplay = document.getElementById('supabase-sql-code-display');
+  const diagBadge = document.getElementById('supabase-diag-badge');
+  const diagMsg = document.getElementById('supabase-diag-msg');
+
+  if (supabaseSqlDisplay) {
+    supabaseSqlDisplay.value = SUPABASE_SETUP_SQL;
+  }
+
+  async function openSupabaseDiagModal() {
+    if (!supabaseModal) return;
+    supabaseModal.classList.add('open');
+    if (diagBadge) {
+      diagBadge.textContent = 'Testando...';
+      diagBadge.className = 'sync-badge status-syncing';
+    }
+    if (diagMsg) {
+      diagMsg.textContent = 'Verificando permissões com o Supabase...';
+      diagMsg.style.color = '#a1a1aa';
+    }
+
+    const health = await checkSupabaseHealth();
+    updateSupabaseDiagUI(health);
+  }
+
+  function updateSupabaseDiagUI(health) {
+    if (!diagBadge || !diagMsg) return;
+    if (health.connected) {
+      diagBadge.textContent = '✓ Conectado';
+      diagBadge.className = 'sync-badge status-online';
+      diagMsg.style.color = '#10b981';
+      diagMsg.innerHTML = '✓ Conexão estabelecida com sucesso! Tabelas liberadas para sincronização.';
+    } else if (health.code === '42501' || health.message?.includes('permission denied') || health.message?.includes('42501')) {
+      diagBadge.textContent = '⚠ Permissão Bloqueada (42501)';
+      diagBadge.className = 'sync-badge status-offline';
+      diagMsg.style.color = '#f97316';
+      diagMsg.innerHTML = `⚠️ <strong>Permissão Negada no Supabase (Erro 42501)</strong><br>O banco recusou o acesso da chave anônima. Execute o <strong>Script SQL</strong> abaixo no <strong>SQL Editor</strong> do painel Supabase para liberar.`;
+    } else {
+      diagBadge.textContent = `⚠ ${health.code || 'Erro'}`;
+      diagBadge.className = 'sync-badge status-offline';
+      diagMsg.style.color = '#ef4444';
+      diagMsg.innerHTML = `Falha: ${health.message || 'Verifique sua conexão'}`;
+    }
+  }
+
+  const closeSupabaseModal = () => {
+    supabaseModal?.classList.remove('open');
+  };
+
+  btnDashSupabaseDiag?.addEventListener('click', openSupabaseDiagModal);
+  btnCloseSupabaseModal?.addEventListener('click', closeSupabaseModal);
+  supabaseBackdrop?.addEventListener('click', closeSupabaseModal);
+
+  // Copiar SQL
+  btnCopySupabaseSql?.addEventListener('click', async () => {
+    try {
+      if (navigator.clipboard && navigator.clipboard.writeText) {
+        await navigator.clipboard.writeText(SUPABASE_SETUP_SQL);
+      } else if (supabaseSqlDisplay) {
+        supabaseSqlDisplay.select();
+        document.execCommand('copy');
+      }
+      btnCopySupabaseSql.textContent = '✓ SCRIPT SQL COPIADO!';
+      btnCopySupabaseSql.style.background = '#059669';
+      showToast('✓ Script SQL copiado para a área de transferência!', 'success', 2500);
+      setTimeout(() => {
+        if (btnCopySupabaseSql) {
+          btnCopySupabaseSql.textContent = '📋 COPIAR SCRIPT SQL COMPLETO';
+          btnCopySupabaseSql.style.background = '#10b981';
+        }
+      }, 3000);
+    } catch (err) {
+      showToast('Selecione e copie o texto da caixa abaixo.', 'info');
+    }
+  });
+
+  // Testar Conexão & Sincronizar
+  btnTestSupabaseSync?.addEventListener('click', async () => {
+    btnTestSupabaseSync.textContent = '↻ Testando conexão...';
+    btnTestSupabaseSync.disabled = true;
+
+    try {
+      const health = await checkSupabaseHealth();
+      updateSupabaseDiagUI(health);
+
+      if (health.connected) {
+        showToast('✓ Conexão OK! Sincronizando produtos locais...', 'info', 2000);
+        const syncResult = await syncAllLocalDataToSupabase();
+        await triggerSyncNow();
+        await renderDashboard();
+        
+        if (syncResult && syncResult.syncedCount > 0) {
+          showToast(`🎉 Sucesso! ${syncResult.syncedCount} produto(s) sincronizados com o Supabase!`, 'success', 4000);
+        } else {
+          showToast('✓ Supabase conectado e sincronizado!', 'success', 3000);
+        }
+      } else {
+        showToast('⚠ Permissão ainda bloqueada. Execute o script no SQL Editor do Supabase.', 'warning', 4000);
+      }
+    } catch (e) {
+      showToast('Erro ao testar conexão com Supabase.', 'error');
+    } finally {
+      btnTestSupabaseSync.textContent = '🔄 Testar Conexão & Sincronizar Agora';
+      btnTestSupabaseSync.disabled = false;
+    }
+  });
+
+  // Badge de status no topo: abre modal ou dispara sincronização
+  document.getElementById('sync-status-badge')?.addEventListener('click', async () => {
+    const currentStatus = getSyncStatus();
+    if (currentStatus.lastError || currentStatus.lastErrorCode) {
+      openSupabaseDiagModal();
+    } else {
+      showToast('↻ Sincronizando com a Nuvem Supabase...', 'info', 2000);
+      try {
+        await triggerSyncNow();
+        const health = await checkSupabaseHealth();
+        if (health.connected) {
+          showToast('✓ Sincronização concluída!', 'success', 2000);
+        } else {
+          openSupabaseDiagModal();
+        }
+        await renderDashboard();
+      } catch (e) {
+        openSupabaseDiagModal();
+      }
     }
   });
 

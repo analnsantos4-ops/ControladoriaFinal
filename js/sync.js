@@ -5,30 +5,103 @@ import { getUnsyncedQueue, markQueueItemSynced, initDB, getAllFromStore } from '
 let isSyncing = false;
 let syncStatusCallbacks = [];
 let lastSyncError = null;
+let lastSyncErrorCode = null;
+
+export const SUPABASE_SETUP_SQL = `-- ====================================================================
+-- SCRIPT DE LIBERAÇÃO DE ACESSO E SINCRONIZAÇÃO NO SUPABASE
+-- Execute este script no menu "SQL Editor" do seu painel Supabase
+-- ====================================================================
+
+-- 1. Garante a criação das 3 tabelas com a estrutura correta
+CREATE TABLE IF NOT EXISTS public.products (
+  id TEXT PRIMARY KEY,
+  barcode TEXT NOT NULL,
+  name TEXT NOT NULL,
+  sector TEXT DEFAULT 'MERCEARIA',
+  corridor TEXT DEFAULT 'CORREDOR 01',
+  image TEXT,
+  created_at TIMESTAMPTZ DEFAULT NOW(),
+  updated_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE TABLE IF NOT EXISTS public.product_expirations (
+  id TEXT PRIMARY KEY,
+  product_id TEXT NOT NULL,
+  expiration_date TEXT NOT NULL,
+  created_at TIMESTAMPTZ DEFAULT NOW(),
+  updated_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE TABLE IF NOT EXISTS public.inventory_counts (
+  id TEXT PRIMARY KEY,
+  product_id TEXT NOT NULL,
+  expiration_id TEXT NOT NULL,
+  count_session_id TEXT,
+  location_type TEXT DEFAULT 'PRATELEIRA',
+  quantity NUMERIC DEFAULT 0,
+  counted_at TIMESTAMPTZ DEFAULT NOW(),
+  created_at TIMESTAMPTZ DEFAULT NOW(),
+  updated_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+-- 2. Concede permissões completas de acesso para a chave anônima da API
+GRANT USAGE ON SCHEMA public TO anon, authenticated, service_role;
+GRANT ALL ON ALL TABLES IN SCHEMA public TO anon, authenticated, service_role;
+GRANT ALL ON ALL SEQUENCES IN SCHEMA public TO anon, authenticated, service_role;
+GRANT ALL ON ALL ROUTINES IN SCHEMA public TO anon, authenticated, service_role;
+
+ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT ALL ON TABLES TO anon, authenticated, service_role;
+ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT ALL ON SEQUENCES TO anon, authenticated, service_role;
+
+GRANT ALL ON TABLE public.products TO anon, authenticated, service_role;
+GRANT ALL ON TABLE public.product_expirations TO anon, authenticated, service_role;
+GRANT ALL ON TABLE public.inventory_counts TO anon, authenticated, service_role;
+
+-- 3. Desativa o bloqueio Row Level Security (RLS) para permitir que o app sincronize
+ALTER TABLE public.products DISABLE ROW LEVEL SECURITY;
+ALTER TABLE public.product_expirations DISABLE ROW LEVEL SECURITY;
+ALTER TABLE public.inventory_counts DISABLE ROW LEVEL SECURITY;
+`;
 
 export function registerSyncStatusListener(callback) {
   syncStatusCallbacks.push(callback);
   notifyStatus();
 }
 
-function notifyStatus(statusOverride = null) {
+export function getSyncStatus() {
   const isOnline = typeof navigator !== 'undefined' ? navigator.onLine : true;
-  let status = {
+  let label = '✓ Supabase Conectado';
+  let className = 'status-online';
+
+  if (!isOnline) {
+    label = '● Offline (Salvo no celular)';
+    className = 'status-offline';
+  } else if (isSyncing) {
+    label = '↻ Sincronizando...';
+    className = 'status-syncing';
+  } else if (lastSyncErrorCode === '42501' || lastSyncError?.includes('permission denied') || lastSyncError?.includes('42501')) {
+    label = '⚠ Supabase: Liberar SQL (Toque)';
+    className = 'status-offline';
+  } else if (lastSyncError) {
+    label = '⚠ Erro Nuvem (Toque)';
+    className = 'status-offline';
+  }
+
+  return {
     isOnline,
     isSyncing,
-    label: isOnline
-      ? (isSyncing ? '↻ Sincronizando...' : (lastSyncError ? '⚠ Erro Nuvem (Toque)' : '✓ Supabase Conectado'))
-      : '● Offline (Salvo no celular)',
-    className: isOnline
-      ? (isSyncing ? 'status-syncing' : (lastSyncError ? 'status-offline' : 'status-online'))
-      : 'status-offline',
-    lastError: lastSyncError
+    label,
+    className,
+    lastError: lastSyncError,
+    lastErrorCode: lastSyncErrorCode
   };
+}
 
+function notifyStatus(statusOverride = null) {
+  let status = getSyncStatus();
   if (statusOverride) {
     status = { ...status, ...statusOverride };
   }
-
   syncStatusCallbacks.forEach((cb) => cb(status));
 }
 
@@ -42,13 +115,69 @@ function getSupabaseHeaders(prefer = 'resolution=merge-duplicates') {
   };
 }
 
+// Testa a saúde da conexão diretamente com a API do Supabase
+export async function checkSupabaseHealth() {
+  if (!SUPABASE_URL || !SUPABASE_PUBLISHABLE_KEY) {
+    return {
+      connected: false,
+      message: 'Chaves do Supabase não configuradas.',
+      code: 'NO_CONFIG'
+    };
+  }
+
+  try {
+    const headers = getSupabaseHeaders('return=minimal');
+    const res = await fetch(`${SUPABASE_URL}/rest/v1/products?select=id&limit=1`, {
+      method: 'GET',
+      headers
+    });
+
+    if (res.ok) {
+      lastSyncError = null;
+      lastSyncErrorCode = null;
+      notifyStatus();
+      return {
+        connected: true,
+        message: 'Conectado com sucesso ao Supabase!',
+        status: res.status
+      };
+    }
+
+    const errorBody = await res.text();
+    let parsedError = {};
+    try {
+      parsedError = JSON.parse(errorBody);
+    } catch (_) {}
+
+    lastSyncError = parsedError.message || errorBody || `Status ${res.status}`;
+    lastSyncErrorCode = parsedError.code || String(res.status);
+    notifyStatus();
+
+    return {
+      connected: false,
+      status: res.status,
+      code: parsedError.code || String(res.status),
+      message: parsedError.message || errorBody,
+      hint: parsedError.hint || null
+    };
+  } catch (err) {
+    lastSyncError = 'Erro de conexão ou sem internet';
+    lastSyncErrorCode = 'NETWORK_ERROR';
+    notifyStatus();
+    return {
+      connected: false,
+      code: 'NETWORK_ERROR',
+      message: String(err.message || err)
+    };
+  }
+}
+
 // Higieniza e prepara o payload de acordo com a tabela do Supabase
 function cleanPayloadForSupabase(tableName, payload) {
   if (!payload) return {};
   const clean = { ...payload };
 
   if (tableName === 'products') {
-    // Garante tipos e campos compatíveis
     return {
       id: String(clean.id || ''),
       barcode: String(clean.barcode || ''),
@@ -113,7 +242,19 @@ async function pushToSupabase(tableName, operation, rawPayload) {
 
     if (response.ok || response.status === 201 || response.status === 200 || response.status === 204) {
       lastSyncError = null;
+      lastSyncErrorCode = null;
       return true;
+    }
+
+    const errText = await response.text();
+    let errJson = null;
+    try {
+      errJson = JSON.parse(errText);
+    } catch (_) {}
+
+    if (errJson && errJson.code) {
+      lastSyncErrorCode = errJson.code;
+      lastSyncError = errJson.message || errText;
     }
 
     // Se falhar com conflito 409 ou 400 (ex: sem constraint merge-duplicates), tenta PATCH por ID
@@ -127,6 +268,7 @@ async function pushToSupabase(tableName, operation, rawPayload) {
 
       if (patchRes.ok || patchRes.status === 204) {
         lastSyncError = null;
+        lastSyncErrorCode = null;
         return true;
       }
 
@@ -139,22 +281,21 @@ async function pushToSupabase(tableName, operation, rawPayload) {
 
       if (plainInsertRes.ok || plainInsertRes.status === 201) {
         lastSyncError = null;
+        lastSyncErrorCode = null;
         return true;
       }
 
-      const errDetail = await response.text();
-      console.warn(`[Supabase Push Fallback Error] ${tableName}:`, errDetail);
-      lastSyncError = errDetail;
+      const patchErr = await patchRes.text();
+      console.warn(`[Supabase Push Fallback Error] ${tableName}:`, patchErr);
       return false;
     }
 
-    const errText = await response.text();
     console.warn(`[Supabase Push Error ${response.status}] ${tableName}:`, errText);
-    lastSyncError = `Status ${response.status}`;
     return false;
   } catch (error) {
     console.warn('[Supabase Network Error]:', error);
     lastSyncError = 'Erro de rede';
+    lastSyncErrorCode = 'NETWORK_ERROR';
     return false;
   }
 }
@@ -200,7 +341,7 @@ export async function processSyncQueue() {
 
 // Garante envio de todos os registros locais existentes para a nuvem
 export async function syncAllLocalDataToSupabase() {
-  if (!SUPABASE_URL || !SUPABASE_PUBLISHABLE_KEY) return false;
+  if (!SUPABASE_URL || !SUPABASE_PUBLISHABLE_KEY) return { success: false, syncedCount: 0 };
 
   try {
     const [products, expirations, counts] = await Promise.all([
@@ -209,8 +350,10 @@ export async function syncAllLocalDataToSupabase() {
       getAllFromStore('inventory_counts')
     ]);
 
+    let syncedCount = 0;
     for (const p of products) {
-      await pushToSupabase('products', 'UPSERT', p);
+      const ok = await pushToSupabase('products', 'UPSERT', p);
+      if (ok) syncedCount++;
     }
     for (const e of expirations) {
       await pushToSupabase('product_expirations', 'UPSERT', e);
@@ -219,10 +362,10 @@ export async function syncAllLocalDataToSupabase() {
       await pushToSupabase('inventory_counts', 'UPSERT', c);
     }
 
-    return true;
+    return { success: true, syncedCount, totalProducts: products.length };
   } catch (err) {
     console.warn('Erro ao enviar dados locais completos para Supabase:', err);
-    return false;
+    return { success: false, syncedCount: 0 };
   }
 }
 
@@ -246,7 +389,15 @@ export async function pullFromSupabase() {
     ]);
 
     if (!prodRes.ok) {
-      lastSyncError = `Pull Error ${prodRes.status}`;
+      const errText = await prodRes.text();
+      let errJson = null;
+      try { errJson = JSON.parse(errText); } catch (_) {}
+      if (errJson && errJson.code) {
+        lastSyncErrorCode = errJson.code;
+        lastSyncError = errJson.message;
+      } else {
+        lastSyncError = `Pull Error ${prodRes.status}`;
+      }
       return false;
     }
 
@@ -276,6 +427,7 @@ export async function pullFromSupabase() {
     for (const c of counts) countStore.put(c);
 
     lastSyncError = null;
+    lastSyncErrorCode = null;
 
     return new Promise((resolve) => {
       tx.oncomplete = () => resolve(true);
@@ -288,7 +440,8 @@ export async function pullFromSupabase() {
 }
 
 // Disparo imediato sob demanda
-export function triggerSyncNow() {
+export async function triggerSyncNow() {
+  await checkSupabaseHealth();
   return processSyncQueue();
 }
 
@@ -302,6 +455,7 @@ export async function wipeSupabaseCloudData() {
     await fetch(`${SUPABASE_URL}/rest/v1/count_sessions?id=neq.none`, { method: 'DELETE', headers });
     await fetch(`${SUPABASE_URL}/rest/v1/products?id=neq.none`, { method: 'DELETE', headers });
     lastSyncError = null;
+    lastSyncErrorCode = null;
     return true;
   } catch (e) {
     console.warn('Erro ao limpar Supabase:', e);
@@ -324,9 +478,11 @@ export function initSyncEngine() {
     // Puxa e envia dados ao iniciar
     setTimeout(() => {
       if (navigator.onLine) {
-        processSyncQueue();
+        checkSupabaseHealth().then(() => {
+          processSyncQueue();
+        });
       }
-    }, 600);
+    }, 500);
 
     // Sincronização periódica a cada 15 segundos
     setInterval(() => {
@@ -338,3 +494,4 @@ export function initSyncEngine() {
 
   notifyStatus();
 }
+
