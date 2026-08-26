@@ -180,7 +180,7 @@ function cleanPayloadForSupabase(tableName, payload) {
   if (!payload) return {};
   const clean = { ...payload };
 
-  if (tableName === 'products') {
+ if (tableName === 'products') {
   return {
     id: String(clean.id || ''),
     barcode: String(clean.barcode || ''),
@@ -188,11 +188,9 @@ function cleanPayloadForSupabase(tableName, payload) {
 
     sector: String(clean.sector || 'MERCEARIA'),
     corridor: String(clean.corridor || 'CORREDOR 01'),
-
     image: clean.image ? String(clean.image) : null,
 
     total_quantity: Number(clean.total_quantity) || 0,
-
     deposit_qty: Number(clean.deposit_qty) || 0,
     fridge_qty: Number(clean.fridge_qty) || 0,
     shelf_qty: Number(clean.shelf_qty) || 0,
@@ -202,17 +200,11 @@ function cleanPayloadForSupabase(tableName, payload) {
     cart_qty: Number(clean.cart_qty) || 0,
     checkout_qty: Number(clean.checkout_qty) || 0,
 
-    last_expiration_date:
-      clean.last_expiration_date || null,
+    last_expiration_date: clean.last_expiration_date || null,
+    last_count_date: clean.last_count_date || null,
 
-    last_count_date:
-      clean.last_count_date || null,
-
-    created_at:
-      clean.created_at || new Date().toISOString(),
-
-    updated_at:
-      clean.updated_at || new Date().toISOString()
+    created_at: clean.created_at || new Date().toISOString(),
+    updated_at: clean.updated_at || new Date().toISOString()
   };
 }
 
