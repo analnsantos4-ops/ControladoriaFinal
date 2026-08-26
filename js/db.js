@@ -382,24 +382,67 @@ export async function getLatestCountsForExpiration(expirationId) {
 }
 
 export async function saveInventoryCounts(productId, expirationId, locationCounts = {}, sessionId = null) {
-  if (!productId || !expirationId) {
-    throw new Error('Produto e validade são obrigatórios.');
-  }
-
   const now = new Date().toISOString();
   const db = await initDB();
 
-  const normalizedCounts = {
-    'DEPÓSITO': Number(locationCounts['DEPÓSITO']) || 0,
-    'GELADEIRA': Number(locationCounts['GELADEIRA']) || 0,
-    'PRATELEIRA': Number(locationCounts['PRATELEIRA']) || 0,
-    'PONTA DE GÔNDOLA': Number(locationCounts['PONTA DE GÔNDOLA']) || 0,
-    'ORELHA': Number(locationCounts['ORELHA']) || 0,
-    'ILHA': Number(locationCounts['ILHA']) || 0,
-    'CARRINHO': Number(locationCounts['CARRINHO']) || 0,
-    'FRENTE DE LOJA': Number(locationCounts['FRENTE DE LOJA']) || 0
-  };
+  // Calcula o total e prepara os registros
+  let totalCount = 0;
+  const countRecords = Object.entries(locationCounts).map(([loc, qty]) => {
+    const q = Number(qty) || 0;
+    totalCount += q;
+    return {
+      id: generateId(),
+      product_id: productId,
+      expiration_id: expirationId,
+      location_type: loc,
+      quantity: q,
+      counted_at: now
+    };
+  });
 
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction(['products', 'inventory_counts', 'sync_queue'], 'readwrite');
+    
+    // 1. Atualiza o Produto localmente
+    const prodStore = tx.objectStore('products');
+    prodStore.get(productId).onsuccess = (e) => {
+      const product = e.target.result;
+      if (product) {
+        product.total_quantity = totalCount;
+        product.deposit_qty = locationCounts['DEPÓSITO'] || 0;
+        product.shelf_qty = locationCounts['PRATELEIRA'] || 0;
+        product.fridge_qty = locationCounts['GELADEIRA'] || 0;
+        // ... repita para outros locais se necessário
+        product.last_count_date = now;
+        prodStore.put(product);
+        
+        // Manda o produto atualizado para a fila de sincronização
+        tx.objectStore('sync_queue').add({
+          id: generateId(),
+          table_name: 'products',
+          payload: product,
+          synced: 0
+        });
+      }
+    };
+
+    // 2. Salva cada contagem e manda para a fila
+    const countStore = tx.objectStore('inventory_counts');
+    const syncStore = tx.objectStore('sync_queue');
+    countRecords.forEach(record => {
+      countStore.put(record);
+      syncStore.add({
+        id: generateId(),
+        table_name: 'inventory_counts',
+        payload: record,
+        synced: 0
+      });
+    });
+
+    tx.oncomplete = () => resolve({ total: totalCount });
+    tx.onerror = () => reject();
+  });
+}
   const totalCount = Object.values(normalizedCounts)
     .reduce((total, qty) => total + qty, 0);
 
