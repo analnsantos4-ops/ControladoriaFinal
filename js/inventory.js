@@ -401,3 +401,45 @@ export async function loadCorridorAuditProducts(sector, corridor) {
   // Salva sessão de progresso
   await saveSession({ sector, corridor, status: 'IN_PROGRESS' });
 }
+
+/**
+ * Exporta todos os produtos do corredor atual para o WhatsApp
+ */
+export async function exportCurrentCorridorWhatsApp(sector, corridor) {
+  const all = await getAllProducts();
+  const filtered = all.filter((p) => p.sector === sector && p.corridor === corridor);
+
+  if (filtered.length === 0) {
+    showToast('Nenhum produto neste corredor para exportar.', 'warning');
+    return;
+  }
+
+  showToast('Gerando relatório do WhatsApp...', 'sync', 1000);
+
+  const exportItems = [];
+
+  for (const prod of filtered) {
+    const exps = await getProductExpirations(prod.id);
+    if (exps.length === 0) {
+      exportItems.push({
+        name: prod.name,
+        barcode: prod.barcode,
+        expirationDateBR: 'NÃO INFORMADA',
+        quantity: 0
+      });
+    } else {
+      for (const exp of exps) {
+        const latest = await getLatestCountsForExpiration(exp.id);
+        exportItems.push({
+          name: prod.name,
+          barcode: prod.barcode,
+          expirationDateBR: formatDateBR(exp.expiration_date),
+          quantity: latest.total
+        });
+      }
+    }
+  }
+
+  const text = formatMultipleProductsWhatsApp(exportItems, `${sector} — ${corridor}`);
+  openWhatsAppExportModal(text, `Corredor: ${corridor}`);
+}

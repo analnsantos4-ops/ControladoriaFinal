@@ -6,7 +6,7 @@ import { isAuthenticated, verifyCode, logout } from './auth.js';
 import { initDB, getProductByBarcode, getProductById, searchProducts, getAllProducts, getProductExpirations, getLatestCountsForExpiration, clearAllDatabaseData, toggleExpirationTriaged } from './db.js';
 import { initSyncEngine, registerSyncStatusListener, wipeSupabaseCloudData, triggerSyncNow, checkSupabaseHealth, syncAllLocalDataToSupabase, SUPABASE_SETUP_SQL, getSyncStatus } from './sync.js';
 import { showView, showToast, setupButtonFeedbacks, openPhotoModal, getActiveView } from './ui.js';
-import { startCameraScanner, stopCameraScanner, toggleTorch, switchCamera } from './scanner.js';
+import { startCameraScanner, stopCameraScanner, toggleTorch, switchCamera, toggleCameraZoom, scanBarcodeFromImageFile } from './scanner.js';
 import { renderDashboard } from './dashboard.js';
 import { openNewProductView, saveNewProduct, handleProductImageFile, openProductDetailView, updateNewProductTotalCalculation, populateSectorAndCorridorSelects } from './products.js';
 import { openConferenceForProduct, confirmConference, openCorridorAuditView, loadCorridorAuditProducts, exportCurrentCorridorWhatsApp } from './inventory.js';
@@ -433,8 +433,29 @@ function setupEventListeners() {
     if (!ok) torchState = !torchState;
   });
 
+  document.getElementById('btn-scanner-zoom')?.addEventListener('click', async () => {
+    await toggleCameraZoom();
+  });
+
   document.getElementById('btn-scanner-switch')?.addEventListener('click', async () => {
     await switchCamera('scanner-reader-box', onBarcodeDetected);
+  });
+
+  // Upload ou Foto de Código de Barras
+  const scannerFileInput = document.getElementById('scanner-file-input');
+  document.getElementById('btn-scanner-photo')?.addEventListener('click', () => {
+    scannerFileInput?.click();
+  });
+  document.getElementById('btn-scanner-photo-link')?.addEventListener('click', () => {
+    scannerFileInput?.click();
+  });
+
+  scannerFileInput?.addEventListener('change', async (e) => {
+    if (e.target.files && e.target.files[0]) {
+      const file = e.target.files[0];
+      await scanBarcodeFromImageFile(file, onBarcodeDetected);
+      scannerFileInput.value = '';
+    }
   });
 
   // Busca manual no scanner

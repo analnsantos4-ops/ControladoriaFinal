@@ -569,21 +569,7 @@ export async function saveInventoryCounts(productId, expirationId, locationCount
       const countStore = tx.objectStore('inventory_counts');
       const syncStore = tx.objectStore('sync_queue');
 
-      // 1. Salva os registros em inventory_counts
-      countRecords.forEach((record) => {
-        countStore.add(record);
-        syncStore.add({
-          id: generateId(),
-          operation: 'INSERT',
-          table_name: 'inventory_counts',
-          record_id: record.id,
-          payload: record,
-          created_at: now,
-          synced: 0
-        });
-      });
-
-      // 2. Atualiza o produto pai com os totais e locais diretamente
+      // 1. Atualiza o produto pai com os totais e locais diretamente
       const prodReq = prodStore.get(productId);
       prodReq.onsuccess = () => {
         if (prodReq.result) {
@@ -612,6 +598,20 @@ export async function saveInventoryCounts(productId, expirationId, locationCount
             synced: 0
           });
         }
+
+        // 2. Salva os registros em inventory_counts após o produto
+        countRecords.forEach((record) => {
+          countStore.add(record);
+          syncStore.add({
+            id: generateId(),
+            operation: 'INSERT',
+            table_name: 'inventory_counts',
+            record_id: record.id,
+            payload: record,
+            created_at: now,
+            synced: 0
+          });
+        });
       };
 
       tx.oncomplete = () => resolve({ total: totalCount, countDate: now });

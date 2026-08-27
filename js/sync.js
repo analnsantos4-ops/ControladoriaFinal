@@ -95,7 +95,15 @@ function notifyStatus() {
   syncStatusCallbacks.forEach((cb) => cb(status));
 }
 
-function getSupabaseHeaders(prefer = 'resolution=merge-duplicates') {
+function getSupabaseGetHeaders() {
+  return {
+    'apikey': SUPABASE_PUBLISHABLE_KEY,
+    'Authorization': `Bearer ${SUPABASE_PUBLISHABLE_KEY}`,
+    'Accept': 'application/json'
+  };
+}
+
+function getSupabasePostHeaders(prefer = 'resolution=merge-duplicates,return=minimal') {
   return {
     'apikey': SUPABASE_PUBLISHABLE_KEY,
     'Authorization': `Bearer ${SUPABASE_PUBLISHABLE_KEY}`,
@@ -127,6 +135,17 @@ function cleanPayloadForSupabase(tableName, payload) {
       checkout_qty: Number(payload.checkout_qty) || 0,
       last_expiration_date: payload.last_expiration_date || null,
       last_count_date: payload.last_count_date || new Date().toISOString(),
+      created_at: payload.created_at || new Date().toISOString(),
+      updated_at: new Date().toISOString()
+    };
+  }
+
+  if (tableName === 'product_expirations') {
+    return {
+      id: String(payload.id),
+      product_id: String(payload.product_id),
+      expiration_date: String(payload.expiration_date),
+      created_at: payload.created_at || new Date().toISOString(),
       updated_at: new Date().toISOString()
     };
   }
@@ -139,15 +158,8 @@ function cleanPayloadForSupabase(tableName, payload) {
       count_session_id: payload.count_session_id || null,
       location_type: String(payload.location_type || 'PRATELEIRA'),
       quantity: Number(payload.quantity) || 0,
-      counted_at: payload.counted_at || new Date().toISOString()
-    };
-  }
-
-  if (tableName === 'product_expirations') {
-    return {
-      id: String(payload.id),
-      product_id: String(payload.product_id),
-      expiration_date: String(payload.expiration_date),
+      counted_at: payload.counted_at || new Date().toISOString(),
+      created_at: payload.created_at || new Date().toISOString(),
       updated_at: new Date().toISOString()
     };
   }
@@ -155,49 +167,135 @@ function cleanPayloadForSupabase(tableName, payload) {
   return payload;
 }
 
-async function pushToSupabase(tableName, operation, rawPayload) {
+async function pushToSupabase(tableName, operation, rawPayload, skipParentCheck = false) {
   if (!SUPABASE_URL || !SUPABASE_PUBLISHABLE_KEY) return false;
 
   try {
     if (operation === 'DELETE') {
-      const delUrl = `${SUPABASE_URL}/rest/v1/${tableName}?id=eq.${rawPayload.id}`;
-      const res = await fetch(delUrl, { method: 'DELETE', headers: getSupabaseHeaders('return=minimal') });
-      return res.ok;
+      const delUrl = `${SUPABASE_URL}/rest/v1/${tableName}?id=eq.${encodeURIComponent(rawPayload.id)}`;
+      const res = await fetch(delUrl, { method: 'DELETE', headers: getSupabaseGetHeaders() });
+      return res.ok || res.status === 404;
+    }
+
+    // Se for tabela filha (product_expirations ou inventory_counts), garante que o produto pai existe no Supabase
+    if (!skipParentCheck && (tableName === 'product_expirations' || tableName === 'inventory_counts')) {
+      const prodId = rawPayload.product_id;
+      if (prodId) {
+        try {
+          const db = await initDB();
+          const prod = await new Promise((res) => {
+            try {
+              const tx = db.transaction('products', 'readonly');
+              const req = tx.objectStore('products').get(prodId);
+              req.onsuccess = () => res(req.result || null);
+              req.onerror = () => res(null);
+            } catch (_) {
+              res(null);
+            }
+          });
+          if (prod) {
+            await pushToSupabase('products', 'UPSERT', prod, true);
+          }
+        } catch (_) {}
+      }
+    }
+
+    // Se for inventory_counts, garante que a validade pai também existe no Supabase
+    if (!skipParentCheck && tableName === 'inventory_counts' && rawPayload.expiration_id) {
+      try {
+        const db = await initDB();
+        const exp = await new Promise((res) => {
+          try {
+            const tx = db.transaction('product_expirations', 'readonly');
+            const req = tx.objectStore('product_expirations').get(rawPayload.expiration_id);
+            req.onsuccess = () => res(req.result || null);
+            req.onerror = () => res(null);
+          } catch (_) {
+            res(null);
+          }
+        });
+        if (exp) {
+          await pushToSupabase('product_expirations', 'UPSERT', exp, true);
+        }
+      } catch (_) {}
     }
 
     const payload = cleanPayloadForSupabase(tableName, rawPayload);
-    const response = await fetch(`${SUPABASE_URL}/rest/v1/${tableName}`, {
+    const postUrl = `${SUPABASE_URL}/rest/v1/${tableName}`;
+    const response = await fetch(postUrl, {
       method: 'POST',
-      headers: getSupabaseHeaders(),
+      headers: getSupabasePostHeaders('resolution=merge-duplicates,return=minimal'),
       body: JSON.stringify(payload)
     });
 
-    if (response.ok) {
+    if (response.ok || response.status === 201 || response.status === 200 || response.status === 204) {
       lastSyncError = null;
+      lastSyncErrorCode = null;
       return true;
+    }
+
+    // Fallback: Se retornar 409 ou 400, tenta PATCH
+    if (response.status === 409 || response.status === 400) {
+      const patchUrl = `${SUPABASE_URL}/rest/v1/${tableName}?id=eq.${encodeURIComponent(payload.id)}`;
+      const patchRes = await fetch(patchUrl, {
+        method: 'PATCH',
+        headers: getSupabasePostHeaders('return=minimal'),
+        body: JSON.stringify(payload)
+      });
+      if (patchRes.ok || patchRes.status === 204) {
+        lastSyncError = null;
+        lastSyncErrorCode = null;
+        return true;
+      }
     }
     
     const errText = await response.text();
-    console.error(`Erro no Supabase (${tableName}):`, errText);
+    console.warn(`[Supabase ${tableName}] Status ${response.status}:`, errText);
     lastSyncError = errText;
     return false;
   } catch (error) {
+    console.warn(`[Supabase Network Error]:`, error);
     lastSyncError = error.message;
     return false;
   }
 }
 
 export async function processSyncQueue() {
-  if (isSyncing || !navigator.onLine) return;
+  if (isSyncing || (typeof navigator !== 'undefined' && !navigator.onLine)) return;
   isSyncing = true;
   notifyStatus();
 
   try {
     const queue = await getUnsyncedQueue();
-    for (const item of queue) {
-      const success = await pushToSupabase(item.table_name, item.operation || 'UPSERT', item.payload);
-      if (success) {
-        await markQueueItemSynced(item.id);
+    if (queue && queue.length > 0) {
+      // Ordena a fila para garantir integridade referencial:
+      // Inserções: products -> product_expirations -> inventory_counts
+      // Exclusões: inventory_counts -> product_expirations -> products
+      const priorityMap = {
+        'products': 1,
+        'product_expirations': 2,
+        'count_sessions': 3,
+        'inventory_counts': 4
+      };
+
+      const sortedQueue = [...queue].sort((a, b) => {
+        const isDelA = a.operation === 'DELETE';
+        const isDelB = b.operation === 'DELETE';
+        if (isDelA && !isDelB) return -1;
+        if (!isDelA && isDelB) return 1;
+
+        if (isDelA && isDelB) {
+          return (priorityMap[b.table_name] || 99) - (priorityMap[a.table_name] || 99);
+        }
+
+        return (priorityMap[a.table_name] || 99) - (priorityMap[b.table_name] || 99);
+      });
+
+      for (const item of sortedQueue) {
+        const success = await pushToSupabase(item.table_name, item.operation || 'UPSERT', item.payload);
+        if (success) {
+          await markQueueItemSynced(item.id);
+        }
       }
     }
     await pullFromSupabase();
@@ -210,33 +308,88 @@ export async function processSyncQueue() {
 }
 
 export async function pullFromSupabase() {
-  if (!navigator.onLine) return false;
+  if (typeof navigator !== 'undefined' && !navigator.onLine) return false;
+  if (!SUPABASE_URL || !SUPABASE_PUBLISHABLE_KEY) return false;
+
   try {
-    const headers = getSupabaseHeaders('return=representation');
-    const [prodRes, expRes, countRes] = await Promise.all([
-      fetch(`${SUPABASE_URL}/rest/v1/products?select=*`, { headers }),
-      fetch(`${SUPABASE_URL}/rest/v1/product_expirations?select=*`, { headers }),
-      fetch(`${SUPABASE_URL}/rest/v1/inventory_counts?select=*`, { headers })
+    const headers = getSupabaseGetHeaders();
+    
+    // Função auxiliar tolerante a falhas por tabela
+    const fetchTable = async (tableName) => {
+      try {
+        const res = await fetch(`${SUPABASE_URL}/rest/v1/${tableName}?select=*`, {
+          method: 'GET',
+          headers
+        });
+        if (res.ok) {
+          return await res.json();
+        }
+        return null;
+      } catch (err) {
+        console.warn(`[Pull Supabase] Falha ao ler ${tableName}:`, err);
+        return null;
+      }
+    };
+
+    const [products, expirations, counts] = await Promise.all([
+      fetchTable('products'),
+      fetchTable('product_expirations'),
+      fetchTable('inventory_counts')
     ]);
 
-    if (prodRes.ok && expRes.ok && countRes.ok) {
-      const products = await prodRes.json();
-      const expirations = await expRes.json();
-      const counts = await countRes.json();
-
-      const db = await initDB();
-      const tx = db.transaction(['products', 'product_expirations', 'inventory_counts'], 'readwrite');
-      
-      products.forEach(p => tx.objectStore('products').put(p));
-      expirations.forEach(e => tx.objectStore('product_expirations').put(e));
-      counts.forEach(c => tx.objectStore('inventory_counts').put(c));
-
-      return true;
+    if (!products && !expirations && !counts) {
+      return false;
     }
+
+    // Carrega produtos locais ANTES de abrir a transação de escrita para não inativar a transaction
+    let localProducts = [];
+    if (Array.isArray(products) && products.length > 0) {
+      localProducts = await getAllFromStore('products');
+    }
+    const localMap = new Map(localProducts.map((p) => [p.id, p]));
+
+    const db = await initDB();
+    const tx = db.transaction(['products', 'product_expirations', 'inventory_counts'], 'readwrite');
+    const prodStore = tx.objectStore('products');
+    const expStore = tx.objectStore('product_expirations');
+    const countStore = tx.objectStore('inventory_counts');
+
+    if (Array.isArray(products) && products.length > 0) {
+      products.forEach((p) => {
+        const local = localMap.get(p.id);
+        if (local && local.image && !p.image) {
+          p.image = local.image;
+        }
+        prodStore.put(p);
+      });
+    }
+
+    if (Array.isArray(expirations) && expirations.length > 0) {
+      expirations.forEach((e) => expStore.put(e));
+    }
+
+    if (Array.isArray(counts) && counts.length > 0) {
+      counts.forEach((c) => countStore.put(c));
+    }
+
+    lastSyncError = null;
+    lastSyncErrorCode = null;
+
+    return new Promise((resolve) => {
+      tx.oncomplete = () => {
+        if (typeof window !== 'undefined') {
+          window.dispatchEvent(new CustomEvent('supabase-data-updated', {
+            detail: { productsCount: products?.length || 0, countsCount: counts?.length || 0 }
+          }));
+        }
+        resolve(true);
+      };
+      tx.onerror = () => resolve(false);
+    });
   } catch (err) {
-    console.error('Erro ao puxar dados:', err);
+    console.error('Erro ao puxar dados do Supabase:', err);
+    return false;
   }
-  return false;
 }
 
 export async function triggerSyncNow() {
@@ -244,29 +397,76 @@ export async function triggerSyncNow() {
 }
 
 export function initSyncEngine() {
-  window.addEventListener('online', processSyncQueue);
-  setInterval(processSyncQueue, 30000); // 30 segundos
-  processSyncQueue();
+  if (typeof window !== 'undefined') {
+    window.addEventListener('online', () => {
+      notifyStatus();
+      processSyncQueue();
+    });
+    window.addEventListener('offline', () => {
+      notifyStatus();
+    });
+    setInterval(processSyncQueue, 30000); // 30 segundos
+    setTimeout(processSyncQueue, 500);
+  }
 }
 
 export async function checkSupabaseHealth() {
-    try {
-        const res = await fetch(`${SUPABASE_URL}/rest/v1/products?select=id&limit=1`, {
-            method: 'GET',
-            headers: getSupabaseHeaders()
-        });
-        return { connected: res.ok };
-    } catch (e) {
-        return { connected: false, message: e.message };
-    }
+  try {
+    const res = await fetch(`${SUPABASE_URL}/rest/v1/products?select=id&limit=1`, {
+      method: 'GET',
+      headers: getSupabaseGetHeaders()
+    });
+    return { connected: res.ok };
+  } catch (e) {
+    return { connected: false, message: e.message };
+  }
 }
 
 export async function syncAllLocalDataToSupabase() {
-    return processSyncQueue();
+  if (!SUPABASE_URL || !SUPABASE_PUBLISHABLE_KEY) return { success: false, syncedCount: 0 };
+
+  try {
+    const [products, expirations, counts] = await Promise.all([
+      getAllFromStore('products'),
+      getAllFromStore('product_expirations'),
+      getAllFromStore('inventory_counts')
+    ]);
+
+    let syncedCount = 0;
+    // 1. Produtos primeiro
+    for (const p of products) {
+      const ok = await pushToSupabase('products', 'UPSERT', p, true);
+      if (ok) syncedCount++;
+    }
+    // 2. Validades segundo
+    for (const e of expirations) {
+      await pushToSupabase('product_expirations', 'UPSERT', e, false);
+    }
+    // 3. Contagens terceiro
+    for (const c of counts) {
+      await pushToSupabase('inventory_counts', 'UPSERT', c, false);
+    }
+
+    return { success: true, syncedCount, totalProducts: products.length };
+  } catch (err) {
+    console.warn('Erro ao sincronizar dados locais para Supabase:', err);
+    return { success: false, syncedCount: 0 };
+  }
 }
 
 export async function wipeSupabaseCloudData() {
-    // Implementar se necessário para zerar o banco remoto
-    console.warn("Wipe cloud não implementado por segurança via JS.");
+  if (!SUPABASE_URL || !SUPABASE_PUBLISHABLE_KEY) return false;
+  const headers = getSupabaseGetHeaders();
+  try {
+    await fetch(`${SUPABASE_URL}/rest/v1/inventory_counts?id=neq.none`, { method: 'DELETE', headers });
+    await fetch(`${SUPABASE_URL}/rest/v1/product_expirations?id=neq.none`, { method: 'DELETE', headers });
+    await fetch(`${SUPABASE_URL}/rest/v1/count_sessions?id=neq.none`, { method: 'DELETE', headers });
+    await fetch(`${SUPABASE_URL}/rest/v1/products?id=neq.none`, { method: 'DELETE', headers });
+    lastSyncError = null;
+    lastSyncErrorCode = null;
     return true;
+  } catch (e) {
+    console.warn('Erro ao limpar Supabase:', e);
+    return false;
+  }
 }

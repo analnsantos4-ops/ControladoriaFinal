@@ -855,15 +855,36 @@
     .scanner-viewport-container {
       position: relative;
       width: 100%;
-      height: 48vh;
+      height: 50vh;
+      min-height: 280px;
+      max-height: 480px;
       background: #000;
       overflow: hidden;
     }
 
-    #scanner-video {
-      width: 100%;
-      height: 100%;
-      object-fit: cover;
+    #scanner-reader-box {
+      width: 100% !important;
+      height: 100% !important;
+      position: relative;
+      overflow: hidden;
+      background: #000;
+    }
+
+    #scanner-reader-box video {
+      width: 100% !important;
+      height: 100% !important;
+      object-fit: cover !important;
+      display: block !important;
+      margin: 0 !important;
+      padding: 0 !important;
+    }
+
+    #scanner-reader-box canvas {
+      display: none !important;
+    }
+
+    #scanner-reader-box div {
+      border: none !important;
     }
 
     .scanner-overlay {
@@ -1579,15 +1600,15 @@
       <button type="button" id="btn-scanner-back" class="btn-back">← Voltar</button>
       <span class="top-bar-title">ESCANEAR PRODUTO</span>
       <div class="scanner-controls-top">
+        <button type="button" id="btn-scanner-zoom" class="btn-icon-control" title="Zoom da Câmera (1x / 2x)" style="font-size: 0.8rem; font-weight: 800; min-width: 34px;">1x</button>
         <button type="button" id="btn-scanner-torch" class="btn-icon-control" title="Lanterna">⚡</button>
+        <button type="button" id="btn-scanner-photo" class="btn-icon-control" title="Ler Código de Foto ou Galeria">📁</button>
         <button type="button" id="btn-scanner-switch" class="btn-icon-control" title="Alternar Câmera">🔄</button>
       </div>
     </header>
 
     <div class="scanner-viewport-container" id="scanner-viewport-container">
-      <div id="scanner-reader-box" style="width: 100%; height: 100%; position: relative; overflow: hidden; background: #000;">
-        <video id="scanner-video" playsinline autoplay muted style="width: 100%; height: 100%; object-fit: cover;"></video>
-      </div>
+      <div id="scanner-reader-box" style="width: 100%; height: 100%; position: relative; overflow: hidden; background: #000;"></div>
       <div class="scanner-overlay" style="pointer-events: none;">
         <div class="scanner-target-box">
           <div class="scanner-laser-line"></div>
@@ -1599,6 +1620,17 @@
         <p class="scanner-instruction-text">Aponte a câmera para o código de barras</p>
       </div>
     </div>
+
+    <!-- Dica de foco e atalhos rápidos -->
+    <div style="background: #121214; border-bottom: 1px solid #2a2a30; padding: 6px 12px; font-size: 0.76rem; color: #a1a1aa; display: flex; align-items: center; justify-content: space-between; gap: 6px;">
+      <span>💡 Mantenha a <strong>~15cm</strong> para focar</span>
+      <button type="button" id="btn-scanner-photo-link" style="color: #10b981; font-weight: 700; background: none; border: none; font-size: 0.76rem; text-decoration: underline; cursor: pointer;">
+        📷 Enviar Foto
+      </button>
+    </div>
+
+    <!-- Input Oculto para Leitura por Foto / Galeria -->
+    <input type="file" id="scanner-file-input" accept="image/*" style="display: none;" />
 
     <!-- Digitar Código Manualmente -->
     <div class="scanner-manual-box">
