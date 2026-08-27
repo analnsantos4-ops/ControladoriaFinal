@@ -1,5 +1,5 @@
 {
-  "name": "CONTROLADORIA — ANA LUIZA",
+  "name": "Ana Luiza - Controladoria",
   "description": "Aplicativo PWA offline-first de conferência física de estoque, validades e auditoria por setor e corredor.",
   "requestFramePermissions": ["camera"],
   "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
