@@ -2777,3 +2777,332 @@ button {
   gap: 8px;
 }
 
+/* ===================================================================
+   TRIAGEM DE PRODUTOS VENCIDOS
+   =================================================================== */
+.tag-triaged {
+  background: rgba(16, 185, 129, 0.15) !important;
+  color: #10b981 !important;
+  border: 1px solid rgba(16, 185, 129, 0.3) !important;
+  font-weight: 800;
+}
+
+.status-triaged {
+  border-left: 4px solid #10b981 !important;
+  background: rgba(16, 185, 129, 0.04) !important;
+}
+
+.exp-alert-top-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  width: 100%;
+}
+
+.exp-triage-container {
+  margin-top: 10px;
+  padding-top: 10px;
+  border-top: 1px solid rgba(255, 255, 255, 0.08);
+  display: flex;
+  align-items: center;
+  justify-content: flex-start;
+}
+
+.exp-triage-checkbox-label {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  cursor: pointer;
+  user-select: none;
+  font-size: 0.88rem;
+  font-weight: 700;
+  color: var(--text-primary);
+}
+
+.exp-triage-checkbox {
+  width: 20px;
+  height: 20px;
+  accent-color: #10b981;
+  cursor: pointer;
+}
+
+.exp-triage-text {
+  color: #e2e8f0;
+  transition: color 0.2s;
+}
+
+.exp-triage-checkbox:checked + .exp-triage-custom-check + .exp-triage-text,
+.exp-triage-checkbox:checked ~ .exp-triage-text {
+  color: #10b981;
+  font-weight: 800;
+}
+
+/* ===================================================================
+   WHATSAPP IMPORT & PRÉVIA COMPLETA
+   =================================================================== */
+.badge-total-loja {
+  background: rgba(245, 158, 11, 0.15);
+  color: #f59e0b;
+  border: 1px solid rgba(245, 158, 11, 0.3);
+  font-size: 0.72rem;
+  font-weight: 800;
+  padding: 3px 8px;
+  border-radius: 12px;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.wa-preview-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding-bottom: 12px;
+  border-bottom: 1px solid var(--border-color);
+}
+
+.wa-preview-title-col {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.wa-header-badges {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.wa-item-top-section {
+  display: flex;
+  gap: 14px;
+  align-items: flex-start;
+}
+
+.wa-photo-box {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  flex-shrink: 0;
+}
+
+.wa-photo-thumb {
+  width: 72px;
+  height: 72px;
+  border-radius: var(--radius-sm);
+  background: #1e293b;
+  border: 1px solid var(--border-color);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+}
+
+.wa-thumb-img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.wa-photo-buttons {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  width: 100%;
+}
+
+.btn-wa-photo-cam,
+.btn-wa-photo-gal {
+  padding: 4px 6px;
+  font-size: 0.68rem;
+  font-weight: 700;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border-color);
+  background: var(--bg-card-elevated);
+  color: var(--text-primary);
+  cursor: pointer;
+  white-space: nowrap;
+  text-align: center;
+}
+
+.btn-wa-photo-cam:hover,
+.btn-wa-photo-gal:hover {
+  background: rgba(255, 255, 255, 0.1);
+}
+
+.wa-main-fields {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-width: 0;
+}
+
+.form-group-mini {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  flex: 1;
+}
+
+.form-group-mini label {
+  font-size: 0.68rem;
+  font-weight: 800;
+  color: var(--text-secondary);
+  letter-spacing: 0.5px;
+}
+
+.wa-loc-fields-row {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+  background: rgba(255, 255, 255, 0.02);
+  padding: 8px 10px;
+  border-radius: var(--radius-sm);
+  border: 1px solid rgba(255, 255, 255, 0.05);
+}
+
+.wa-expirations-section {
+  background: rgba(0, 0, 0, 0.25);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: var(--radius-sm);
+  padding: 10px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.wa-exp-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-size: 0.72rem;
+  font-weight: 800;
+  color: #94a3b8;
+}
+
+.btn-add-date-mini {
+  background: rgba(16, 185, 129, 0.15);
+  color: #10b981;
+  border: 1px solid rgba(16, 185, 129, 0.3);
+  font-size: 0.72rem;
+  font-weight: 800;
+  padding: 3px 8px;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+}
+
+.btn-add-date-mini:hover {
+  background: rgba(16, 185, 129, 0.25);
+}
+
+.wa-exp-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.wa-exp-row {
+  display: flex;
+  align-items: flex-end;
+  gap: 8px;
+  background: rgba(255, 255, 255, 0.03);
+  padding: 6px 8px;
+  border-radius: var(--radius-sm);
+}
+
+.wa-exp-date-col {
+  flex: 1.2;
+}
+
+.wa-exp-date-col label,
+.wa-exp-qty-col label {
+  font-size: 0.65rem;
+  font-weight: 700;
+  color: var(--text-muted);
+  display: block;
+  margin-bottom: 2px;
+}
+
+.wa-exp-qty-col {
+  flex: 1;
+}
+
+.qty-input-wrap {
+  display: flex;
+  align-items: center;
+  position: relative;
+}
+
+.qty-input-wrap .form-input {
+  padding-right: 28px;
+}
+
+.qty-unit-label {
+  position: absolute;
+  right: 8px;
+  font-size: 0.72rem;
+  font-weight: 700;
+  color: var(--text-muted);
+  pointer-events: none;
+}
+
+.btn-remove-exp-row {
+  background: transparent;
+  color: #ef4444;
+  border: none;
+  font-size: 0.9rem;
+  font-weight: bold;
+  padding: 6px 8px;
+  cursor: pointer;
+  border-radius: var(--radius-sm);
+}
+
+.btn-remove-exp-row:hover {
+  background: rgba(239, 68, 68, 0.15);
+}
+
+.wa-prod-total-banner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  background: rgba(16, 185, 129, 0.1);
+  border: 1px solid rgba(16, 185, 129, 0.25);
+  padding: 6px 10px;
+  border-radius: var(--radius-sm);
+  font-size: 0.78rem;
+  color: var(--text-secondary);
+}
+
+.wa-prod-total-banner strong {
+  color: #10b981;
+  font-size: 0.88rem;
+}
+
+/* ===================================================================
+   AJUSTES MOBILE-FIRST DE ALTA PRECISÃO
+   =================================================================== */
+@media (max-width: 640px) {
+  .app-container {
+    padding-bottom: calc(75px + env(safe-area-inset-bottom));
+  }
+
+  .nav-bottom-bar {
+    padding-bottom: env(safe-area-inset-bottom);
+  }
+
+  .modal-card {
+    max-height: calc(100vh - 40px);
+  }
+
+  .wa-item-top-section {
+    flex-direction: row;
+  }
+
+  .wa-loc-fields-row {
+    grid-template-columns: 1fr;
+  }
+}
+
+

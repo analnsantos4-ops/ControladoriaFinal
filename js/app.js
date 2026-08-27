@@ -3,7 +3,7 @@ import '../style.css';
 
 // Orquestrador Principal do Aplicativo Controladoria - Ana Luiza
 import { isAuthenticated, verifyCode, logout } from './auth.js';
-import { initDB, getProductByBarcode, getProductById, searchProducts, getAllProducts, getProductExpirations, getLatestCountsForExpiration, clearAllDatabaseData } from './db.js';
+import { initDB, getProductByBarcode, getProductById, searchProducts, getAllProducts, getProductExpirations, getLatestCountsForExpiration, clearAllDatabaseData, toggleExpirationTriaged } from './db.js';
 import { initSyncEngine, registerSyncStatusListener, wipeSupabaseCloudData, triggerSyncNow, checkSupabaseHealth, syncAllLocalDataToSupabase, SUPABASE_SETUP_SQL, getSyncStatus } from './sync.js';
 import { showView, showToast, setupButtonFeedbacks, openPhotoModal, getActiveView } from './ui.js';
 import { startCameraScanner, stopCameraScanner, toggleTorch, switchCamera } from './scanner.js';
@@ -412,10 +412,10 @@ function setupEventListeners() {
   document.getElementById('card-metric-15d')?.addEventListener('click', () => {
     openExpirationsView('15_DAYS');
   });
-  document.getElementById('card-metric-30d')?.addEventListener('click', () => {
-    openExpirationsView('30_DAYS');
-  });
   document.getElementById('card-metric-total')?.addEventListener('click', () => {
+    openSearchView();
+  });
+  document.getElementById('card-metric-units')?.addEventListener('click', () => {
     openSearchView();
   });
 
@@ -727,6 +727,7 @@ async function renderExpirationsList(filterType = 'ALL') {
     for (const exp of exps) {
       const latest = await getLatestCountsForExpiration(exp.id);
       const days = getDaysUntilExpiration(exp.expiration_date);
+      const isTriaged = exp.is_triaged === true || exp.is_triaged === 1 || exp.is_triaged === 'true';
 
       let category = 'OK';
       if (days < 0) category = 'EXPIRED';
@@ -734,10 +735,19 @@ async function renderExpirationsList(filterType = 'ALL') {
       else if (days <= 30) category = '30_DAYS';
 
       let include = false;
-      if (filterType === 'ALL') include = true;
-      else if (filterType === 'EXPIRED' && category === 'EXPIRED') include = true;
-      else if (filterType === '15_DAYS' && (category === 'EXPIRED' || category === '15_DAYS')) include = true;
-      else if (filterType === '30_DAYS' && (category === 'EXPIRED' || category === '15_DAYS' || category === '30_DAYS')) include = true;
+      if (filterType === 'ALL') {
+        include = true;
+      } else if (filterType === 'EXPIRED') {
+        // Apenas vencidos que AINDA NÃO foram retirados para triagem
+        include = category === 'EXPIRED' && !isTriaged;
+      } else if (filterType === '15_DAYS') {
+        include = (category === 'EXPIRED' || category === '15_DAYS') && !isTriaged;
+      } else if (filterType === '30_DAYS') {
+        include = (category === 'EXPIRED' || category === '15_DAYS' || category === '30_DAYS') && !isTriaged;
+      } else if (filterType === 'TRIAGED') {
+        // Histórico de todos que foram marcados como retirados para triagem
+        include = isTriaged;
+      }
 
       if (include) {
         items.push({
@@ -745,6 +755,7 @@ async function renderExpirationsList(filterType = 'ALL') {
           expiration: exp,
           daysUntil: days,
           category,
+          isTriaged,
           units: latest.total
         });
       }
@@ -755,7 +766,10 @@ async function renderExpirationsList(filterType = 'ALL') {
   items.sort((a, b) => a.daysUntil - b.daysUntil);
 
   if (items.length === 0) {
-    container.innerHTML = `<div class="empty-exp-state">Nenhum produto encontrado neste filtro.</div>`;
+    let emptyMsg = 'Nenhum produto encontrado neste filtro.';
+    if (filterType === 'EXPIRED') emptyMsg = '🎉 Nenhum produto vencido pendente de triagem!';
+    if (filterType === 'TRIAGED') emptyMsg = 'Nenhum produto retirado para triagem no momento.';
+    container.innerHTML = `<div class="empty-exp-state">${emptyMsg}</div>`;
     return;
   }
 
@@ -765,7 +779,11 @@ async function renderExpirationsList(filterType = 'ALL') {
       let tagText = `${item.daysUntil} dias`;
 
       let cardStatusClass = 'status-ok';
-      if (item.daysUntil < 0) {
+      if (item.isTriaged) {
+        badgeClass = 'tag-triaged';
+        cardStatusClass = 'status-triaged';
+        tagText = '✓ RETIRADO / EM TRIAGEM';
+      } else if (item.daysUntil < 0) {
         badgeClass = 'tag-expired';
         cardStatusClass = 'status-expired';
         tagText = `VENCIDO HÁ ${Math.abs(item.daysUntil)} DIAS`;
@@ -779,34 +797,54 @@ async function renderExpirationsList(filterType = 'ALL') {
         tagText = `VENCE EM ${item.daysUntil} DIAS`;
       }
 
+      // Checkbox para vencidos ou itens em triagem
+      const showTriageControl = item.daysUntil < 0 || item.isTriaged;
+
       return `
       <div class="exp-alert-card ${cardStatusClass}" data-prodid="${item.product.id}" data-expid="${item.expiration.id}">
-        <div class="exp-alert-thumb-col">
-          ${
-            item.product.image
-              ? `<img src="${item.product.image}" alt="" class="compact-prod-thumb" />`
-              : `<div class="photo-placeholder-mini">FOTO</div>`
-          }
-        </div>
-        <div class="exp-alert-info-col">
-          <h4 class="exp-alert-name">${item.product.name}</h4>
-          <div class="exp-alert-meta">
-            <span class="exp-alert-date">📅 ${formatDateBR(item.expiration.expiration_date)}</span>
-            <span class="exp-badge ${badgeClass}">${tagText}</span>
+        <div class="exp-alert-top-row">
+          <div class="exp-alert-thumb-col">
+            ${
+              item.product.image
+                ? `<img src="${item.product.image}" alt="" class="compact-prod-thumb" />`
+                : `<div class="photo-placeholder-mini">FOTO</div>`
+            }
           </div>
-          <div class="exp-alert-loc-row">
-            <span>${item.product.sector} · ${item.product.corridor}</span>
-            <span>Estoque: <strong>${formatNumber(item.units)} un</strong></span>
+          <div class="exp-alert-info-col">
+            <h4 class="exp-alert-name">${item.product.name}</h4>
+            <div class="exp-alert-meta">
+              <span class="exp-alert-date">📅 ${formatDateBR(item.expiration.expiration_date)}</span>
+              <span class="exp-badge ${badgeClass}">${tagText}</span>
+            </div>
+            <div class="exp-alert-loc-row">
+              <span>${item.product.sector} · ${item.product.corridor}</span>
+              <span>Estoque: <strong>${formatNumber(item.units)} un</strong></span>
+            </div>
+          </div>
+          <div class="exp-alert-action-col">
+            <button type="button" class="btn-audit-item">Conferir</button>
           </div>
         </div>
-        <div class="exp-alert-action-col">
-          <button type="button" class="btn-audit-item">Conferir</button>
-        </div>
+
+        ${
+          showTriageControl
+            ? `
+          <div class="exp-triage-container" onclick="event.stopPropagation()">
+            <label class="exp-triage-checkbox-label">
+              <input type="checkbox" class="exp-triage-checkbox" data-expid="${item.expiration.id}" ${item.isTriaged ? 'checked' : ''} />
+              <span class="exp-triage-custom-check"></span>
+              <span class="exp-triage-text">${item.isTriaged ? '✓ Retirado para triagem' : 'Marcar: Retirado para triagem'}</span>
+            </label>
+          </div>
+        `
+            : ''
+        }
       </div>
     `;
     })
     .join('');
 
+  // Listener no card para abrir conferência
   container.querySelectorAll('.exp-alert-card').forEach((card) => {
     card.addEventListener('click', async () => {
       const prodId = card.getAttribute('data-prodid');
@@ -814,6 +852,29 @@ async function renderExpirationsList(filterType = 'ALL') {
       const prod = await getProductById(prodId);
       if (prod) {
         openConferenceForProduct(prod, expId);
+      }
+    });
+  });
+
+  // Listener no checkbox de triagem
+  container.querySelectorAll('.exp-triage-checkbox').forEach((checkbox) => {
+    checkbox.addEventListener('change', async (e) => {
+      e.stopPropagation();
+      const expId = e.target.getAttribute('data-expid');
+      const isChecked = e.target.checked;
+
+      try {
+        await toggleExpirationTriaged(expId, isChecked);
+        if (isChecked) {
+          showToast('✓ Marcado como Retirado para Triagem!', 'success', 2000);
+        } else {
+          showToast('Item retornado para lista ativa', 'info', 1500);
+        }
+        await renderExpirationsList(filterType);
+        await renderDashboard();
+      } catch (err) {
+        console.error('Erro ao atualizar triagem:', err);
+        showToast('Erro ao atualizar status de triagem', 'error');
       }
     });
   });
@@ -832,6 +893,7 @@ async function exportCurrentExpirationsWhatsApp() {
     for (const exp of exps) {
       const latest = await getLatestCountsForExpiration(exp.id);
       const days = getDaysUntilExpiration(exp.expiration_date);
+      const isTriaged = exp.is_triaged === true || exp.is_triaged === 1 || exp.is_triaged === 'true';
 
       let category = 'OK';
       if (days < 0) category = 'EXPIRED';
@@ -840,9 +902,10 @@ async function exportCurrentExpirationsWhatsApp() {
 
       let include = false;
       if (filterType === 'ALL') include = true;
-      else if (filterType === 'EXPIRED' && category === 'EXPIRED') include = true;
-      else if (filterType === '15_DAYS' && (category === 'EXPIRED' || category === '15_DAYS')) include = true;
-      else if (filterType === '30_DAYS' && (category === 'EXPIRED' || category === '15_DAYS' || category === '30_DAYS')) include = true;
+      else if (filterType === 'EXPIRED' && category === 'EXPIRED' && !isTriaged) include = true;
+      else if (filterType === '15_DAYS' && (category === 'EXPIRED' || category === '15_DAYS') && !isTriaged) include = true;
+      else if (filterType === '30_DAYS' && (category === 'EXPIRED' || category === '15_DAYS' || category === '30_DAYS') && !isTriaged) include = true;
+      else if (filterType === 'TRIAGED' && isTriaged) include = true;
 
       if (include) {
         exportItems.push({
@@ -864,9 +927,10 @@ async function exportCurrentExpirationsWhatsApp() {
   exportItems.sort((a, b) => a.daysUntil - b.daysUntil);
 
   let filterLabel = 'TODOS OS VENCIMENTOS';
-  if (filterType === 'EXPIRED') filterLabel = 'PRODUTOS VENCIDOS';
+  if (filterType === 'EXPIRED') filterLabel = 'PRODUTOS VENCIDOS (PENDENTES)';
   else if (filterType === '15_DAYS') filterLabel = 'VENCIMENTOS ATÉ 15 DIAS';
   else if (filterType === '30_DAYS') filterLabel = 'VENCIMENTOS ATÉ 30 DIAS';
+  else if (filterType === 'TRIAGED') filterLabel = 'PRODUTOS RETIRADOS PARA TRIAGEM';
 
   const formatted = formatMultipleProductsWhatsApp(exportItems, filterLabel);
   openWhatsAppExportModal(formatted, `Exportar: ${filterLabel}`);

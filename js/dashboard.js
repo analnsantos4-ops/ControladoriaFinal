@@ -53,9 +53,8 @@ export async function renderDashboard() {
   const elExpiredUnits = document.getElementById('metric-expired-units');
   const el15dProds = document.getElementById('metric-15d-prods');
   const el15dUnits = document.getElementById('metric-15d-units');
-  const el30dProds = document.getElementById('metric-30d-prods');
-  const el30dUnits = document.getElementById('metric-30d-units');
   const elTotalProds = document.getElementById('metric-total-prods');
+  const elTotalUnits = document.getElementById('metric-total-units-val');
 
   if (elExpiredProds) elExpiredProds.textContent = `${metrics.expired.productsCount} ${metrics.expired.productsCount === 1 ? 'produto' : 'produtos'}`;
   if (elExpiredUnits) elExpiredUnits.textContent = `${formatNumber(metrics.expired.unitsCount)} unidades`;
@@ -63,10 +62,8 @@ export async function renderDashboard() {
   if (el15dProds) el15dProds.textContent = `${metrics.upTo15Days.productsCount} ${metrics.upTo15Days.productsCount === 1 ? 'produto' : 'produtos'}`;
   if (el15dUnits) el15dUnits.textContent = `${formatNumber(metrics.upTo15Days.unitsCount)} unidades`;
 
-  if (el30dProds) el30dProds.textContent = `${metrics.upTo30Days.productsCount} ${metrics.upTo30Days.productsCount === 1 ? 'produto' : 'produtos'}`;
-  if (el30dUnits) el30dUnits.textContent = `${formatNumber(metrics.upTo30Days.unitsCount)} unidades`;
-
   if (elTotalProds) elTotalProds.textContent = `${metrics.totalProductsCount} ${metrics.totalProductsCount === 1 ? 'produto' : 'produtos'}`;
+  if (elTotalUnits) elTotalUnits.textContent = `${formatNumber(metrics.totalUnitsCount || metrics.totalAllUnits || 0)} unidades`;
 
   // 5. Sessão Ativa de Conferência (com opção de fechar/encerrar)
   const sessionBanner = document.getElementById('dashboard-active-session-banner');

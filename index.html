@@ -1387,7 +1387,7 @@
       <section class="dash-metrics-section">
         <h3 class="section-title">SITUAÇÃO GERAL</h3>
         <div class="metrics-grid">
-          <!-- Vencidos -->
+          <!-- 1. Vencidos -->
           <div class="metric-card metric-expired" id="card-metric-expired">
             <div class="metric-card-header">
               <span class="metric-icon-badge red-badge">
@@ -1405,7 +1405,7 @@
             </div>
           </div>
 
-          <!-- Até 15 dias -->
+          <!-- 2. Até 15 dias -->
           <div class="metric-card metric-15d" id="card-metric-15d">
             <div class="metric-card-header">
               <span class="metric-icon-badge orange-badge">
@@ -1423,27 +1423,10 @@
             </div>
           </div>
 
-          <!-- Até 30 dias -->
-          <div class="metric-card metric-30d" id="card-metric-30d">
-            <div class="metric-card-header">
-              <span class="metric-icon-badge yellow-badge">
-                <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
-                  <circle cx="12" cy="12" r="10"></circle>
-                  <polyline points="12 6 12 12 16 14"></polyline>
-                </svg>
-              </span>
-              <span class="metric-title">ATÉ 30 DIAS</span>
-            </div>
-            <div class="metric-numbers">
-              <span class="metric-prods" id="metric-30d-prods">0 produtos</span>
-              <span class="metric-units" id="metric-30d-units">0 unidades</span>
-            </div>
-          </div>
-
-          <!-- Cadastrados -->
+          <!-- 3. Produtos Cadastrados -->
           <div class="metric-card metric-total" id="card-metric-total">
             <div class="metric-card-header">
-              <span class="metric-icon-badge green-badge">
+              <span class="metric-icon-badge blue-badge">
                 <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
                   <path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"></path>
                   <polyline points="3.27 6.96 12 12.01 20.73 6.96"></polyline>
@@ -1454,6 +1437,26 @@
             </div>
             <div class="metric-numbers">
               <span class="metric-prods" id="metric-total-prods">0 produtos</span>
+              <span class="metric-units">Itens no catálogo</span>
+            </div>
+          </div>
+
+          <!-- 4. Total de Unidades -->
+          <div class="metric-card metric-units-total" id="card-metric-units">
+            <div class="metric-card-header">
+              <span class="metric-icon-badge green-badge">
+                <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+                  <line x1="4" y1="9" x2="20" y2="9"></line>
+                  <line x1="4" y1="15" x2="20" y2="15"></line>
+                  <line x1="10" y1="3" x2="8" y2="21"></line>
+                  <line x1="16" y1="3" x2="14" y2="21"></line>
+                </svg>
+              </span>
+              <span class="metric-title">TOTAL DE UNIDADES</span>
+            </div>
+            <div class="metric-numbers">
+              <span class="metric-prods" id="metric-total-units-val">0 unidades</span>
+              <span class="metric-units">Soma total do estoque</span>
             </div>
           </div>
         </div>
@@ -1876,6 +1879,7 @@
         <button type="button" class="btn-exp-filter-tab filter-red" data-filter="EXPIRED">🔴 Vencidos</button>
         <button type="button" class="btn-exp-filter-tab filter-orange" data-filter="15_DAYS">🟠 Até 15d</button>
         <button type="button" class="btn-exp-filter-tab filter-yellow" data-filter="30_DAYS">🟡 Até 30d</button>
+        <button type="button" class="btn-exp-filter-tab filter-green" data-filter="TRIAGED">📦 Triagem</button>
       </div>
 
       <div id="expirations-list-container" class="expirations-list-container"></div>
