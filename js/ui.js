@@ -96,7 +96,7 @@ export function setupButtonFeedbacks() {
   });
 }
 
-// Modal de Confirmação com Senha de Segurança (2009)
+// Modal de Confirmação com Senha de Segurança (2002)
 export function promptSecurityPin(actionTitle, actionWarning, onConfirmed) {
   let modal = document.getElementById('security-pin-modal');
   if (!modal) {
@@ -214,6 +214,142 @@ export function promptSecurityPin(actionTitle, actionWarning, onConfirmed) {
       if (pinField) {
         pinField.value = '';
         pinField.focus();
+      }
+    }
+  });
+}
+
+// Modal de Confirmação com Código de Barras para Envio para Triagem
+export function promptTriageBarcodeConfirmation({ product, expiration, onConfirmed }) {
+  let modal = document.getElementById('triage-barcode-modal');
+  if (!modal) {
+    modal = document.createElement('div');
+    modal.id = 'triage-barcode-modal';
+    modal.className = 'custom-modal';
+    document.body.appendChild(modal);
+  }
+
+  const expDateBR = expiration && expiration.expiration_date ? expiration.expiration_date : '';
+  const expectedBarcode = (product.barcode || '').trim();
+
+  modal.innerHTML = `
+    <div class="modal-backdrop" id="triage-barcode-backdrop"></div>
+    <div class="modal-card">
+      <div class="modal-header-triage">
+        <span class="triage-header-icon">📦</span>
+        <div>
+          <h3 class="modal-title">Confirmar Envio para Triagem</h3>
+          <p class="modal-subtitle">Retirada de Lote da Área de Venda</p>
+        </div>
+      </div>
+
+      <div class="triage-modal-body">
+        <!-- Card Resumo do Produto Selecionado -->
+        <div class="triage-target-product-card">
+          <div class="triage-prod-thumb-box">
+            ${
+              product.image
+                ? `<img src="${product.image}" alt="${product.name}" class="triage-prod-thumb" />`
+                : `<span class="triage-no-thumb">FOTO</span>`
+            }
+          </div>
+          <div class="triage-prod-info">
+            <h4 class="triage-prod-name">${product.name}</h4>
+            <div class="triage-prod-meta">
+              <span class="loc-badge sector">${product.sector || 'MERCEARIA'}</span>
+              <span class="loc-badge corridor">${product.corridor || 'CORREDOR 01'}</span>
+            </div>
+            ${
+              expDateBR
+                ? `<div class="triage-exp-date-pill">📅 Lote Vencimento: <strong>${expDateBR}</strong></div>`
+                : ''
+            }
+          </div>
+        </div>
+
+        <div class="triage-info-box">
+          <p class="triage-instruction-text">
+            ⚠️ Para confirmar a retirada deste lote da área de venda e enviá-lo para a Triagem, <strong>digite ou bipe o código de barras</strong> do produto:
+          </p>
+        </div>
+
+        <form id="form-triage-barcode" autocomplete="off">
+          <div class="form-group" style="margin-bottom: 8px;">
+            <label for="triage-barcode-input" style="font-size: 0.78rem; font-weight: 700; color: #a1a1aa; display: block; margin-bottom: 4px;">
+              Código de Barras do Produto:
+            </label>
+            <input
+              type="text"
+              id="triage-barcode-input"
+              class="form-input"
+              placeholder="Digite ou bipe o código..."
+              autocomplete="off"
+              inputmode="numeric"
+              required
+              style="font-family: monospace; font-size: 1.15rem; font-weight: 800; text-align: center; color: #eab308; letter-spacing: 1px;"
+            />
+          </div>
+
+          <div id="triage-barcode-error" class="login-error-text hidden" style="margin-bottom: 10px; font-size: 0.82rem; line-height: 1.4; color: #ef4444; background: rgba(239, 68, 68, 0.12); padding: 8px 12px; border-radius: 6px; border: 1px solid rgba(239, 68, 68, 0.3);"></div>
+
+          <div class="modal-actions-stacked">
+            <button type="submit" class="btn-primary" id="btn-triage-barcode-confirm" style="height: 46px; background: #eab308; color: #000; font-weight: 800;">
+              📦 CONFIRMAR E ENVIAR PARA TRIAGEM
+            </button>
+            <button type="button" class="btn-secondary" id="btn-triage-barcode-cancel" style="height: 42px;">
+              CANCELAR
+            </button>
+          </div>
+        </form>
+      </div>
+    </div>
+  `;
+
+  modal.classList.add('open');
+
+  const barcodeInput = document.getElementById('triage-barcode-input');
+  const errorMsg = document.getElementById('triage-barcode-error');
+  const form = document.getElementById('form-triage-barcode');
+
+  if (barcodeInput) {
+    barcodeInput.value = '';
+    setTimeout(() => barcodeInput.focus(), 150);
+  }
+
+  const closeModal = () => modal.classList.remove('open');
+  document.getElementById('triage-barcode-backdrop')?.addEventListener('click', closeModal);
+  document.getElementById('btn-triage-barcode-cancel')?.addEventListener('click', closeModal);
+
+  form?.addEventListener('submit', (e) => {
+    e.preventDefault();
+    const entered = barcodeInput ? barcodeInput.value.trim() : '';
+
+    if (!entered) {
+      if (errorMsg) {
+        errorMsg.textContent = '⚠ Digite ou bipe o código de barras do produto.';
+        errorMsg.classList.remove('hidden');
+      }
+      return;
+    }
+
+    // Compara o código digitado com o código do produto selecionado
+    if (entered.toLowerCase() === expectedBarcode.toLowerCase()) {
+      modal.classList.remove('open');
+      triggerHaptic(60);
+      playBeep('success');
+      if (typeof onConfirmed === 'function') {
+        onConfirmed();
+      }
+    } else {
+      triggerHaptic(120);
+      playBeep('warning');
+      if (errorMsg) {
+        errorMsg.innerHTML = `❌ <strong>Código incorreto!</strong><br>O código digitado (<code>${entered}</code>) não corresponde ao produto selecionado (<strong>${product.name}</strong>).`;
+        errorMsg.classList.remove('hidden');
+      }
+      if (barcodeInput) {
+        barcodeInput.value = '';
+        barcodeInput.focus();
       }
     }
   });

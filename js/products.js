@@ -1,8 +1,8 @@
 // Gerenciamento de Produtos, Cadastro, Foto e Detalhes
 import { SETORS, CORRIDORS, LOCATIONS, compressImage, formatNumber, formatDateBR, parseDateBRtoISO, getTodayISO } from './utils.js';
-import { getProductByBarcode, getProductById, saveProduct, saveProductExpiration, saveInventoryCounts, saveCompleteProductWithCounts, getProductExpirations, getLatestCountsForExpiration, getHistoryForProduct, getLocationHistoryForProduct, deleteProduct, deleteProductExpiration, toggleExpirationTriaged } from './db.js';
+import { getProductByBarcode, getProductById, saveProduct, saveProductExpiration, saveInventoryCounts, saveCompleteProductWithCounts, getProductExpirations, getLatestCountsForExpiration, getHistoryForProduct, getLocationHistoryForProduct, deleteProduct, deleteProductExpiration, toggleExpirationTriaged, sendProductExpirationToTriage } from './db.js';
 import { triggerSyncNow } from './sync.js';
-import { showToast, showView, openPhotoModal, promptSecurityPin } from './ui.js';
+import { showToast, showView, openPhotoModal, promptSecurityPin, promptTriageBarcodeConfirmation } from './ui.js';
 import { openConferenceForProduct } from './inventory.js';
 import { formatSingleProductWhatsApp, formatMultipleProductsWhatsApp, openWhatsAppExportModal } from './whatsapp.js';
 
@@ -448,8 +448,8 @@ export async function openProductDetailView(productId) {
         <button type="button" class="btn-secondary" id="btn-detail-edit-product" style="border-color: rgba(56, 189, 248, 0.5); color: #38bdf8; font-weight: 800;">
           ✏️ EDITAR PRODUTO (NOME, FOTO, CÓDIGO)
         </button>
-        <button type="button" class="btn-secondary" id="btn-detail-back">
-          VOLTAR AO INÍCIO
+        <button type="button" class="btn-secondary" id="btn-detail-back-bottom">
+          ← VOLTAR PARA PRODUTOS CADASTRADOS
         </button>
         <button type="button" class="btn-danger-outline" id="btn-detail-delete-product">
           🗑️ APAGAR PRODUTO (SENHA 2002)
@@ -466,16 +466,19 @@ export async function openProductDetailView(productId) {
       openEditProductModal(product);
     });
 
-    document.getElementById('btn-detail-back')?.addEventListener('click', () => {
-      showView('view-dashboard');
-    });
+    // Retorna para a tela de Produtos Cadastrados (Busca)
+    const handleBackToSearch = () => {
+      window.dispatchEvent(new CustomEvent('open-search-view'));
+    };
+    document.getElementById('btn-detail-back-bottom')?.addEventListener('click', handleBackToSearch);
+    document.getElementById('btn-detail-header-back')?.addEventListener('click', handleBackToSearch);
 
     // Exportação para WhatsApp
     document.getElementById('btn-detail-export-wa')?.addEventListener('click', () => {
       // Pega a validade mais próxima ou a primeira
       const firstExp = expirations[0];
       const dateBR = firstExp ? formatDateBR(firstExp.expiration_date) : 'NÃO INFORMADA';
-      const formatted = formatSingleProductWhatsApp(product.name, product.barcode, dateBR, totalStock);
+      const formatted = formatSingleProductWhatsApp(product.name, product.barcode, dateBR, totalActiveStock);
       openWhatsAppExportModal(formatted, `Exportar ${product.name}`);
     });
 
@@ -490,7 +493,7 @@ export async function openProductDetailView(productId) {
           triggerSyncNow().catch((e) => console.warn('Sync background error:', e));
           showToast('✓ Produto apagado com sucesso!', 'success', 2500);
           window.dispatchEvent(new CustomEvent('refresh-dashboard-trigger'));
-          showView('view-dashboard');
+          window.dispatchEvent(new CustomEvent('open-search-view'));
         }
       );
     });
@@ -501,27 +504,29 @@ export async function openProductDetailView(productId) {
       });
     }
 
-    // Mini buttons para alternar triagem de data específica
+    // Mini buttons para enviar validade específica para Triagem (com confirmação por código de barras)
     document.querySelectorAll('.btn-triage-date-mini').forEach((btn) => {
-      btn.addEventListener('click', async (e) => {
+      btn.addEventListener('click', (e) => {
         const expId = e.currentTarget.getAttribute('data-expid');
-        const currentTriaged = e.currentTarget.getAttribute('data-triaged') === 'true';
-        const newTriaged = !currentTriaged;
+        const targetExp = expirations.find((x) => String(x.id) === String(expId));
 
-        try {
-          await toggleExpirationTriaged(expId, newTriaged);
-          triggerSyncNow().catch((err) => console.warn('Sync background error:', err));
-          if (newTriaged) {
-            showToast('✓ Lote enviado para a Triagem!', 'success', 2000);
-          } else {
-            showToast('✓ Lote restaurado ao estoque ativo!', 'info', 2000);
+        promptTriageBarcodeConfirmation({
+          product,
+          expiration: targetExp ? { expiration_date: formatDateBR(targetExp.expiration_date) } : { expiration_date: '' },
+          onConfirmed: async () => {
+            try {
+              showToast('Enviando para triagem...', 'sync', 1000);
+              await sendProductExpirationToTriage(product.id, expId);
+              triggerSyncNow().catch((err) => console.warn('Sync background error:', err));
+              showToast('✓ Código confirmado! Lote retirado da área de vendas e enviado para Triagem.', 'success', 3000);
+              window.dispatchEvent(new CustomEvent('refresh-dashboard-trigger'));
+              await openProductDetailView(product.id);
+            } catch (err) {
+              console.error('Erro ao enviar para triagem:', err);
+              showToast('Erro ao processar envio para triagem', 'warning');
+            }
           }
-          window.dispatchEvent(new CustomEvent('refresh-dashboard-trigger'));
-          await openProductDetailView(product.id);
-        } catch (err) {
-          console.error('Erro ao alternar triagem:', err);
-          showToast('Erro ao atualizar triagem', 'warning');
-        }
+        });
       });
     });
 
@@ -866,11 +871,11 @@ export async function openEditProductModal(product) {
 
       closeEditModal();
       triggerSyncNow().catch((err) => console.warn('Sync error:', err));
-      showToast('✓ Produto e estoque atualizados!', 'success', 2500);
+      showToast('✓ Alterações salvas com sucesso!', 'success', 2500);
 
-      // Atualiza a tela de detalhes aberta e o dashboard
+      // Retorna para a tela de Produtos Cadastrados
       window.dispatchEvent(new CustomEvent('refresh-dashboard-trigger'));
-      openProductDetailView(updatedProduct.id);
+      window.dispatchEvent(new CustomEvent('open-search-view'));
     } catch (err) {
       console.error('Erro ao editar produto:', err);
       showToast(`⚠ Erro ao salvar: ${err.message || err}`, 'warning', 3000);

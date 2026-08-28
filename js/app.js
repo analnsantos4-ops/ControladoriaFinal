@@ -405,6 +405,16 @@ function setupEventListeners() {
     await renderDashboard();
   });
 
+  // Listener para abrir tela de Produtos Cadastrados
+  window.addEventListener('open-search-view', async () => {
+    await openSearchView();
+  });
+
+  // Botão Voltar no Cabeçalho dos Detalhes do Produto
+  document.getElementById('btn-detail-header-back')?.addEventListener('click', async () => {
+    await openSearchView();
+  });
+
   // Cartões de métricas clicáveis para filtrar vencimentos
   document.getElementById('card-metric-expired')?.addEventListener('click', () => {
     openExpirationsView('EXPIRED');
