@@ -36,14 +36,20 @@ CREATE TABLE IF NOT EXISTS public.products (
   updated_at TIMESTAMPTZ DEFAULT NOW()
 );
 
--- 2. Tabela de Validades
+-- 2. Tabela de Validades (com suporte a Triagem)
 CREATE TABLE IF NOT EXISTS public.product_expirations (
   id TEXT PRIMARY KEY,
   product_id TEXT NOT NULL,
   expiration_date TEXT NOT NULL,
+  is_triaged BOOLEAN DEFAULT FALSE,
+  triaged_at TIMESTAMPTZ,
   created_at TIMESTAMPTZ DEFAULT NOW(),
   updated_at TIMESTAMPTZ DEFAULT NOW()
 );
+
+-- Atualização de tabelas existentes (adiciona colunas de triagem caso não existam)
+ALTER TABLE public.product_expirations ADD COLUMN IF NOT EXISTS is_triaged BOOLEAN DEFAULT FALSE;
+ALTER TABLE public.product_expirations ADD COLUMN IF NOT EXISTS triaged_at TIMESTAMPTZ;
 
 -- 3. Tabela de Contagens (Histórico detalhado)
 CREATE TABLE IF NOT EXISTS public.inventory_counts (
@@ -141,10 +147,13 @@ function cleanPayloadForSupabase(tableName, payload) {
   }
 
   if (tableName === 'product_expirations') {
+    const isTriaged = payload.is_triaged === true || payload.is_triaged === 1 || payload.is_triaged === 'true';
     return {
       id: String(payload.id),
       product_id: String(payload.product_id),
       expiration_date: String(payload.expiration_date),
+      is_triaged: isTriaged,
+      triaged_at: payload.triaged_at || (isTriaged ? new Date().toISOString() : null),
       created_at: payload.created_at || new Date().toISOString(),
       updated_at: new Date().toISOString()
     };
@@ -251,6 +260,26 @@ async function pushToSupabase(tableName, operation, rawPayload, skipParentCheck 
     
     const errText = await response.text();
     console.warn(`[Supabase ${tableName}] Status ${response.status}:`, errText);
+
+    // Se o erro for de coluna 'is_triaged' ou 'triaged_at' ainda não criada no Supabase, envia sem essas colunas para não travar a fila
+    if (tableName === 'product_expirations' && (payload.is_triaged !== undefined || payload.triaged_at !== undefined) && (errText.includes('is_triaged') || errText.includes('triaged_at') || errText.includes('column'))) {
+      try {
+        const fallbackPayload = { ...payload };
+        delete fallbackPayload.is_triaged;
+        delete fallbackPayload.triaged_at;
+        const retryRes = await fetch(postUrl, {
+          method: 'POST',
+          headers: getSupabasePostHeaders('resolution=merge-duplicates,return=minimal'),
+          body: JSON.stringify(fallbackPayload)
+        });
+        if (retryRes.ok || retryRes.status === 201 || retryRes.status === 200 || retryRes.status === 204) {
+          lastSyncError = null;
+          lastSyncErrorCode = null;
+          return true;
+        }
+      } catch (_) {}
+    }
+
     lastSyncError = errText;
     return false;
   } catch (error) {
@@ -341,12 +370,17 @@ export async function pullFromSupabase() {
       return false;
     }
 
-    // Carrega produtos locais ANTES de abrir a transação de escrita para não inativar a transaction
+    // Carrega produtos e validades locais ANTES de abrir a transação de escrita para não inativar a transaction
     let localProducts = [];
+    let localExps = [];
     if (Array.isArray(products) && products.length > 0) {
       localProducts = await getAllFromStore('products');
     }
+    if (Array.isArray(expirations) && expirations.length > 0) {
+      localExps = await getAllFromStore('product_expirations');
+    }
     const localMap = new Map(localProducts.map((p) => [p.id, p]));
+    const localExpMap = new Map(localExps.map((e) => [e.id, e]));
 
     const db = await initDB();
     const tx = db.transaction(['products', 'product_expirations', 'inventory_counts'], 'readwrite');
@@ -365,7 +399,18 @@ export async function pullFromSupabase() {
     }
 
     if (Array.isArray(expirations) && expirations.length > 0) {
-      expirations.forEach((e) => expStore.put(e));
+      expirations.forEach((e) => {
+        const local = localExpMap.get(e.id);
+        if (local) {
+          // Se localmente estiver triado e o Supabase vier com null/undefined (ou se local tiver sido alterado mais recente),
+          // preserva o estado de triagem para não reverter
+          if (local.is_triaged && (e.is_triaged === undefined || e.is_triaged === null)) {
+            e.is_triaged = true;
+            e.triaged_at = local.triaged_at || e.triaged_at;
+          }
+        }
+        expStore.put(e);
+      });
     }
 
     if (Array.isArray(counts) && counts.length > 0) {

@@ -670,19 +670,39 @@ async function renderSearchResults(query, sector, corridor) {
     return;
   }
 
-  // Calcula estoque total de cada produto para exibição rica na busca
+  // Calcula estoque ativo e triado de cada produto para exibição rica na busca
   const cardsHtml = await Promise.all(
     results.map(async (p) => {
-      let totalStock = 0;
-      let expCount = 0;
+      let activeStock = 0;
+      let triagedStock = 0;
+      let hasExps = false;
       try {
         const exps = await getProductExpirations(p.id);
-        expCount = exps.length;
+        hasExps = exps.length > 0;
         for (const exp of exps) {
           const counts = await getLatestCountsForExpiration(exp.id);
-          totalStock += counts.total || 0;
+          const isTriaged = exp.is_triaged === true || exp.is_triaged === 1 || exp.is_triaged === 'true';
+          if (isTriaged) {
+            triagedStock += counts.total || 0;
+          } else {
+            activeStock += counts.total || 0;
+          }
         }
       } catch (_) {}
+
+      if (!hasExps && Number(p.total_quantity) > 0) {
+        activeStock = Number(p.total_quantity);
+      }
+
+      let stockTagHtml = '';
+      if (activeStock === 0 && triagedStock > 0) {
+        stockTagHtml = `<span class="loc-badge" style="background: rgba(234, 179, 8, 0.15); color: #eab308; border: 1px solid rgba(234, 179, 8, 0.4); font-weight: 800;">📦 RETIRADO P/ TRIAGEM (${formatNumber(triagedStock)} un)</span>`;
+      } else {
+        stockTagHtml = `<span class="loc-badge" style="background: rgba(16, 185, 129, 0.15); color: #10b981; border: 1px solid rgba(16, 185, 129, 0.3); font-weight: 800;">🟢 ${formatNumber(activeStock)} un na loja</span>`;
+        if (triagedStock > 0) {
+          stockTagHtml += ` <span class="loc-badge" style="background: rgba(234, 179, 8, 0.12); color: #eab308; border: 1px solid rgba(234, 179, 8, 0.3); font-weight: 700; font-size: 0.68rem;">+${formatNumber(triagedStock)} triados</span>`;
+        }
+      }
 
       return `
         <div class="search-result-card" data-prodid="${p.id}">
@@ -699,9 +719,7 @@ async function renderSearchResults(query, sector, corridor) {
             <div class="search-loc-tags">
               <span class="loc-badge sector">${p.sector}</span>
               <span class="loc-badge corridor">${p.corridor}</span>
-              <span class="loc-badge" style="background: rgba(16, 185, 129, 0.15); color: #10b981; border: 1px solid rgba(16, 185, 129, 0.3); font-weight: 800;">
-                📦 ${formatNumber(totalStock)} un.
-              </span>
+              ${stockTagHtml}
             </div>
           </div>
           <div class="search-action-col">
@@ -757,7 +775,8 @@ async function renderExpirationsList(filterType = 'ALL') {
 
       let include = false;
       if (filterType === 'ALL') {
-        include = true;
+        // Na aba Todos, exibimos todos os produtos ativos (não triados)
+        include = !isTriaged;
       } else if (filterType === 'EXPIRED') {
         // Apenas vencidos que AINDA NÃO foram retirados para triagem
         include = category === 'EXPIRED' && !isTriaged;
@@ -788,8 +807,11 @@ async function renderExpirationsList(filterType = 'ALL') {
 
   if (items.length === 0) {
     let emptyMsg = 'Nenhum produto encontrado neste filtro.';
-    if (filterType === 'EXPIRED') emptyMsg = '🎉 Nenhum produto vencido pendente de triagem!';
-    if (filterType === 'TRIAGED') emptyMsg = 'Nenhum produto retirado para triagem no momento.';
+    if (filterType === 'ALL') emptyMsg = 'Nenhum produto cadastrado com validade ativa.';
+    if (filterType === 'EXPIRED') emptyMsg = '🎉 Nenhum produto vencido pendente no momento!';
+    if (filterType === '15_DAYS') emptyMsg = 'Nenhum produto com vencimento nos próximos 15 dias.';
+    if (filterType === '30_DAYS') emptyMsg = 'Nenhum produto com vencimento nos próximos 30 dias.';
+    if (filterType === 'TRIAGED') emptyMsg = 'Nenhum produto em triagem no momento.';
     container.innerHTML = `<div class="empty-exp-state">${emptyMsg}</div>`;
     return;
   }
@@ -803,26 +825,23 @@ async function renderExpirationsList(filterType = 'ALL') {
       if (item.isTriaged) {
         badgeClass = 'tag-triaged';
         cardStatusClass = 'status-triaged';
-        tagText = '✓ RETIRADO / EM TRIAGEM';
+        tagText = '📦 EM TRIAGEM (RETIRADO)';
       } else if (item.daysUntil < 0) {
         badgeClass = 'tag-expired';
         cardStatusClass = 'status-expired';
-        tagText = `VENCIDO HÁ ${Math.abs(item.daysUntil)} DIAS`;
+        tagText = `🔴 VENCIDO HÁ ${Math.abs(item.daysUntil)} DIAS`;
       } else if (item.daysUntil <= 15) {
         badgeClass = 'tag-urgent';
         cardStatusClass = 'status-15-days';
-        tagText = item.daysUntil === 0 ? 'VENCE HOJE' : `VENCE EM ${item.daysUntil} DIAS`;
+        tagText = item.daysUntil === 0 ? '🟠 VENCE HOJE' : `🟠 VENCE EM ${item.daysUntil} DIAS`;
       } else if (item.daysUntil <= 30) {
         badgeClass = 'tag-warning';
         cardStatusClass = 'status-30-days';
-        tagText = `VENCE EM ${item.daysUntil} DIAS`;
+        tagText = `🟡 VENCE EM ${item.daysUntil} DIAS`;
       }
 
-      // Checkbox para vencidos ou itens em triagem
-      const showTriageControl = item.daysUntil < 0 || item.isTriaged;
-
       return `
-      <div class="exp-alert-card ${cardStatusClass}" data-prodid="${item.product.id}" data-expid="${item.expiration.id}">
+      <div class="exp-alert-card ${cardStatusClass}" id="exp-card-${item.expiration.id}" data-prodid="${item.product.id}" data-expid="${item.expiration.id}">
         <div class="exp-alert-top-row">
           <div class="exp-alert-thumb-col">
             ${
@@ -847,19 +866,15 @@ async function renderExpirationsList(filterType = 'ALL') {
           </div>
         </div>
 
-        ${
-          showTriageControl
-            ? `
-          <div class="exp-triage-container" onclick="event.stopPropagation()">
-            <label class="exp-triage-checkbox-label">
-              <input type="checkbox" class="exp-triage-checkbox" data-expid="${item.expiration.id}" ${item.isTriaged ? 'checked' : ''} />
-              <span class="exp-triage-custom-check"></span>
-              <span class="exp-triage-text">${item.isTriaged ? '✓ Retirado para triagem' : 'Marcar: Retirado para triagem'}</span>
-            </label>
-          </div>
-        `
-            : ''
-        }
+        <div class="exp-triage-container" onclick="event.stopPropagation()">
+          <label class="exp-triage-checkbox-label">
+            <input type="checkbox" class="exp-triage-checkbox" data-expid="${item.expiration.id}" ${item.isTriaged ? 'checked' : ''} />
+            <span class="exp-triage-custom-check"></span>
+            <span class="exp-triage-text">
+              ${item.isTriaged ? '✓ Retirado para triagem (clique para restaurar ao estoque)' : '📦 Marcar: Retirado para triagem'}
+            </span>
+          </label>
+        </div>
       </div>
     `;
     })
@@ -867,7 +882,9 @@ async function renderExpirationsList(filterType = 'ALL') {
 
   // Listener no card para abrir conferência
   container.querySelectorAll('.exp-alert-card').forEach((card) => {
-    card.addEventListener('click', async () => {
+    card.addEventListener('click', async (e) => {
+      // Se clicou dentro de um botão ou checkbox, não abre conferência
+      if (e.target.closest('.exp-triage-container') || e.target.closest('button')) return;
       const prodId = card.getAttribute('data-prodid');
       const expId = card.getAttribute('data-expid');
       const prod = await getProductById(prodId);
@@ -877,25 +894,53 @@ async function renderExpirationsList(filterType = 'ALL') {
     });
   });
 
-  // Listener no checkbox de triagem
+  // Botão conferir específico
+  container.querySelectorAll('.btn-audit-item').forEach((btn) => {
+    btn.addEventListener('click', async (e) => {
+      e.stopPropagation();
+      const card = btn.closest('.exp-alert-card');
+      const prodId = card?.getAttribute('data-prodid');
+      const expId = card?.getAttribute('data-expid');
+      const prod = await getProductById(prodId);
+      if (prod) {
+        openConferenceForProduct(prod, expId);
+      }
+    });
+  });
+
+  // Listener no checkbox de triagem com atualização imediata
   container.querySelectorAll('.exp-triage-checkbox').forEach((checkbox) => {
     checkbox.addEventListener('change', async (e) => {
       e.stopPropagation();
       const expId = e.target.getAttribute('data-expid');
       const isChecked = e.target.checked;
+      const cardEl = document.getElementById(`exp-card-${expId}`);
+
+      if (cardEl && filterType !== 'TRIAGED' && isChecked) {
+        // Efeito visual imediato de saída do item
+        cardEl.style.opacity = '0.4';
+        cardEl.style.transform = 'scale(0.96)';
+        cardEl.style.transition = 'all 0.25s ease';
+      }
 
       try {
         await toggleExpirationTriaged(expId, isChecked);
+        triggerSyncNow().catch((err) => console.warn('Sync background error:', err));
+        
         if (isChecked) {
-          showToast('✓ Marcado como Retirado para Triagem!', 'success', 2000);
+          showToast('✓ Produto enviado para a Triagem!', 'success', 2200);
         } else {
-          showToast('Item retornado para lista ativa', 'info', 1500);
+          showToast('✓ Produto retornado ao estoque ativo!', 'info', 2000);
         }
+        
+        // Re-renderiza a lista de vencimentos mantendo a aba atual
         await renderExpirationsList(filterType);
+        // Atualiza métricas do dashboard
         await renderDashboard();
       } catch (err) {
         console.error('Erro ao atualizar triagem:', err);
-        showToast('Erro ao atualizar status de triagem', 'error');
+        showToast('Erro ao atualizar status de triagem', 'warning');
+        await renderExpirationsList(filterType);
       }
     });
   });
@@ -922,7 +967,7 @@ async function exportCurrentExpirationsWhatsApp() {
       else if (days <= 30) category = '30_DAYS';
 
       let include = false;
-      if (filterType === 'ALL') include = true;
+      if (filterType === 'ALL') include = !isTriaged;
       else if (filterType === 'EXPIRED' && category === 'EXPIRED' && !isTriaged) include = true;
       else if (filterType === '15_DAYS' && (category === 'EXPIRED' || category === '15_DAYS') && !isTriaged) include = true;
       else if (filterType === '30_DAYS' && (category === 'EXPIRED' || category === '15_DAYS' || category === '30_DAYS') && !isTriaged) include = true;
@@ -967,6 +1012,12 @@ window.addEventListener('supabase-data-updated', async () => {
 
 window.addEventListener('refresh-dashboard-trigger', async () => {
   await renderDashboard();
+  const currentView = getActiveView();
+  if (currentView === 'view-expirations') {
+    const activeTab = document.querySelector('.btn-exp-filter-tab.active');
+    const filterType = activeTab ? activeTab.getAttribute('data-filter') : 'ALL';
+    await renderExpirationsList(filterType);
+  }
 });
 
 // Inicia no carregamento do DOM

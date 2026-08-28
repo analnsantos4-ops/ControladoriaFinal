@@ -1,6 +1,6 @@
 // Gerenciamento de Produtos, Cadastro, Foto e Detalhes
 import { SETORS, CORRIDORS, LOCATIONS, compressImage, formatNumber, formatDateBR, parseDateBRtoISO, getTodayISO } from './utils.js';
-import { getProductByBarcode, getProductById, saveProduct, saveProductExpiration, saveInventoryCounts, saveCompleteProductWithCounts, getProductExpirations, getLatestCountsForExpiration, getHistoryForProduct, getLocationHistoryForProduct, deleteProduct, deleteProductExpiration } from './db.js';
+import { getProductByBarcode, getProductById, saveProduct, saveProductExpiration, saveInventoryCounts, saveCompleteProductWithCounts, getProductExpirations, getLatestCountsForExpiration, getHistoryForProduct, getLocationHistoryForProduct, deleteProduct, deleteProductExpiration, toggleExpirationTriaged } from './db.js';
 import { triggerSyncNow } from './sync.js';
 import { showToast, showView, openPhotoModal, promptSecurityPin } from './ui.js';
 import { openConferenceForProduct } from './inventory.js';
@@ -249,23 +249,29 @@ export async function openProductDetailView(productId) {
   const history = await getHistoryForProduct(productId);
   const locationHistory = await getLocationHistoryForProduct(productId);
 
-  // Calcula estoque total e por local
+  // Calcula estoque ativo (na loja) e estoque em triagem
   const locationSums = {};
   LOCATIONS.forEach((l) => (locationSums[l] = 0));
-  let totalStock = 0;
+  let totalActiveStock = 0;
+  let totalTriagedStock = 0;
 
   for (const exp of expirations) {
     const latest = await getLatestCountsForExpiration(exp.id);
     exp.unitsTotal = latest.total;
-    totalStock += latest.total;
-    Object.entries(latest.countsByLocation).forEach(([loc, qty]) => {
-      locationSums[loc] = (locationSums[loc] || 0) + Number(qty);
-    });
+    const isTriaged = exp.is_triaged === true || exp.is_triaged === 1 || exp.is_triaged === 'true';
+    if (isTriaged) {
+      totalTriagedStock += latest.total;
+    } else {
+      totalActiveStock += latest.total;
+      Object.entries(latest.countsByLocation).forEach(([loc, qty]) => {
+        locationSums[loc] = (locationSums[loc] || 0) + Number(qty);
+      });
+    }
   }
 
-  // Se não houver contagens em inventory_counts, utiliza os valores gravados no próprio produto
-  if (totalStock === 0 && Number(product.total_quantity) > 0) {
-    totalStock = Number(product.total_quantity) || 0;
+  // Se não houver contagens em inventory_counts e não estiver tudo em triagem, utiliza os valores gravados no próprio produto
+  if (totalActiveStock === 0 && totalTriagedStock === 0 && Number(product.total_quantity) > 0) {
+    totalActiveStock = Number(product.total_quantity) || 0;
     locationSums['DEPÓSITO'] = Number(product.deposit_qty) || 0;
     locationSums['GELADEIRA'] = Number(product.fridge_qty) || 0;
     locationSums['PRATELEIRA'] = Number(product.shelf_qty) || 0;
@@ -297,16 +303,28 @@ export async function openProductDetailView(productId) {
           <div class="detail-location-row">
             <span class="loc-badge sector">${product.sector}</span>
             <span class="loc-badge corridor">${product.corridor}</span>
+            ${
+              totalActiveStock === 0 && totalTriagedStock > 0
+                ? `<span class="loc-badge tag-triaged" style="font-weight: 800;">📦 RETIRADO P/ TRIAGEM</span>`
+                : ''
+            }
           </div>
         </div>
       </div>
 
       <!-- Estoque Atual -->
       <div class="detail-section-card">
-        <div class="section-label-header">ESTOQUE ATUAL</div>
+        <div class="section-label-header">ESTOQUE ATIVO (GÔNDOLA / DEPÓSITO)</div>
         <div class="metric-highlight-number">
-          ${formatNumber(totalStock)} <span class="unit-label">UNIDADES</span>
+          ${formatNumber(totalActiveStock)} <span class="unit-label">UNIDADES NA LOJA</span>
         </div>
+        ${
+          totalTriagedStock > 0
+            ? `<div style="margin-top: 6px; font-size: 0.8rem; font-weight: 700; color: #eab308; background: rgba(234, 179, 8, 0.1); padding: 4px 8px; border-radius: 6px; display: inline-flex; align-items: center; gap: 4px;">
+                📦 ${formatNumber(totalTriagedStock)} unidades retiradas para a triagem
+              </div>`
+            : ''
+        }
       </div>
 
       <!-- Validades -->
@@ -318,13 +336,18 @@ export async function openProductDetailView(productId) {
               ? `<p class="empty-state-text">Nenhuma validade cadastrada ainda.</p>`
               : expirations
                   .map((exp) => {
+                    const isTriaged = exp.is_triaged === true || exp.is_triaged === 1 || exp.is_triaged === 'true';
                     return `
-                <div class="exp-item-row">
+                <div class="exp-item-row ${isTriaged ? 'row-triaged' : ''}">
                   <div class="exp-item-info">
                     <span class="exp-date-label">📅 ${formatDateBR(exp.expiration_date)}</span>
                     <span class="exp-units-pill">${formatNumber(exp.unitsTotal || 0)} un.</span>
+                    ${isTriaged ? `<span class="exp-badge tag-triaged">📦 TRIAGEM</span>` : ''}
                   </div>
                   <div class="exp-item-actions">
+                    <button type="button" class="btn-triage-date-mini ${isTriaged ? 'btn-triage-active' : ''}" data-expid="${exp.id}" data-triaged="${isTriaged}" title="${isTriaged ? 'Restaurar ao estoque' : 'Mover para triagem'}">
+                      ${isTriaged ? '↩️ Restaurar' : '📦 Triagem'}
+                    </button>
                     <button type="button" class="btn-count-date-mini" data-expid="${exp.id}" data-prodid="${product.id}">
                       Conferir
                     </button>
@@ -477,6 +500,30 @@ export async function openProductDetailView(productId) {
         openPhotoModal(product.image, product.name);
       });
     }
+
+    // Mini buttons para alternar triagem de data específica
+    document.querySelectorAll('.btn-triage-date-mini').forEach((btn) => {
+      btn.addEventListener('click', async (e) => {
+        const expId = e.currentTarget.getAttribute('data-expid');
+        const currentTriaged = e.currentTarget.getAttribute('data-triaged') === 'true';
+        const newTriaged = !currentTriaged;
+
+        try {
+          await toggleExpirationTriaged(expId, newTriaged);
+          triggerSyncNow().catch((err) => console.warn('Sync background error:', err));
+          if (newTriaged) {
+            showToast('✓ Lote enviado para a Triagem!', 'success', 2000);
+          } else {
+            showToast('✓ Lote restaurado ao estoque ativo!', 'info', 2000);
+          }
+          window.dispatchEvent(new CustomEvent('refresh-dashboard-trigger'));
+          await openProductDetailView(product.id);
+        } catch (err) {
+          console.error('Erro ao alternar triagem:', err);
+          showToast('Erro ao atualizar triagem', 'warning');
+        }
+      });
+    });
 
     // Mini buttons para conferir data específica
     document.querySelectorAll('.btn-count-date-mini').forEach((btn) => {

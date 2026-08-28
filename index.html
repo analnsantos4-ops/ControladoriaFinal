@@ -993,35 +993,36 @@
     .corridor-audit-main-content,
     .search-main-content,
     .expirations-main-content {
-      padding: 10px 12px;
-      max-width: 600px;
+      padding: 8px 10px;
+      max-width: 540px;
       margin: 0 auto;
       display: flex;
       flex-direction: column;
-      gap: 12px;
+      gap: 10px;
     }
 
     .form-group {
       display: flex;
       flex-direction: column;
-      gap: 4px;
-      margin-bottom: 10px;
+      gap: 3px;
+      margin-bottom: 8px;
     }
 
     .form-group label {
-      font-size: 0.78rem;
-      font-weight: 700;
+      font-size: 0.74rem;
+      font-weight: 800;
+      letter-spacing: 0.3px;
       color: #a1a1aa;
     }
 
     .form-input, .form-select {
-      height: 42px;
+      height: 38px;
       background: #121214;
       border: 1px solid #2a2a30;
       border-radius: 8px;
       padding: 0 10px;
       color: #f4f4f5;
-      font-size: 0.9rem;
+      font-size: 0.86rem;
       width: 100%;
     }
 
@@ -1031,118 +1032,373 @@
     }
 
     .form-input-lg {
-      height: 46px;
-      font-size: 0.98rem;
+      height: 42px;
+      font-size: 0.92rem;
     }
 
     .form-row-2col {
       display: grid;
       grid-template-columns: 1fr 1fr;
-      gap: 8px;
+      gap: 6px;
     }
 
     .conf-section-box, .detail-section-card {
       background: #121214;
       border: 1px solid #2a2a30;
-      border-radius: 10px;
-      padding: 12px;
+      border-radius: 8px;
+      padding: 8px 10px;
+      width: 100%;
+      box-sizing: border-box;
     }
 
     .section-label-header {
-      font-size: 0.74rem;
+      font-size: 0.72rem;
       font-weight: 800;
-      letter-spacing: 0.8px;
+      letter-spacing: 0.6px;
       color: #a1a1aa;
-      margin-bottom: 8px;
+      margin-bottom: 6px;
     }
 
+    /* Grid de Locais de Contagem Compacto para Celular (2 Colunas Fixas Sem Transbordo) */
     .locations-inputs-grid {
-      display: flex;
-      flex-direction: column;
-      gap: 6px;
+      display: grid !important;
+      grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+      gap: 6px !important;
+      width: 100% !important;
+      box-sizing: border-box !important;
     }
 
     .location-count-card {
-      background: #1a1a1e;
+      background: #18181c !important;
+      border: 1px solid #2a2a30 !important;
+      border-radius: 6px !important;
+      padding: 5px 6px !important;
+      display: flex !important;
+      flex-direction: column !important;
+      gap: 3px !important;
+      min-width: 0 !important;
+      width: 100% !important;
+      box-sizing: border-box !important;
+      overflow: hidden !important;
+    }
+
+    .loc-card-header {
+      display: flex !important;
+      align-items: center !important;
+      justify-content: space-between !important;
+      gap: 2px !important;
+      width: 100% !important;
+      box-sizing: border-box !important;
+      overflow: hidden !important;
+    }
+
+    .loc-card-title {
+      font-size: 0.72rem !important;
+      font-weight: 800 !important;
+      color: #f4f4f5 !important;
+      white-space: nowrap !important;
+      overflow: hidden !important;
+      text-overflow: ellipsis !important;
+      flex: 1 !important;
+      min-width: 0 !important;
+    }
+
+    .loc-card-prev {
+      font-size: 0.65rem !important;
+      font-weight: 700 !important;
+      color: #a1a1aa !important;
+      white-space: nowrap !important;
+      flex-shrink: 0 !important;
+    }
+
+    .loc-card-controls {
+      display: flex !important;
+      align-items: center !important;
+      gap: 2px !important;
+      width: 100% !important;
+      box-sizing: border-box !important;
+    }
+
+    .loc-qty-input {
+      flex: 1 1 0% !important;
+      min-width: 0 !important;
+      width: 100% !important;
+      height: 32px !important;
+      background: #09090b !important;
+      border: 1px solid #3f3f46 !important;
+      border-radius: 5px !important;
+      text-align: center !important;
+      font-size: 1.05rem !important;
+      font-weight: 900 !important;
+      color: #f4f4f5 !important;
+      padding: 0 !important;
+      box-sizing: border-box !important;
+      -moz-appearance: textfield;
+    }
+
+    .loc-qty-input::-webkit-outer-spin-button,
+    .loc-qty-input::-webkit-inner-spin-button {
+      -webkit-appearance: none;
+      margin: 0;
+    }
+
+    .btn-step {
+      flex: 0 0 24px !important;
+      width: 24px !important;
+      min-width: 24px !important;
+      max-width: 24px !important;
+      height: 32px !important;
+      padding: 0 !important;
+      background: #27272a !important;
+      border: 1px solid #3f3f46 !important;
+      border-radius: 5px !important;
+      font-weight: 800 !important;
+      font-size: 0.74rem !important;
+      color: #f4f4f5 !important;
+      display: flex !important;
+      align-items: center !important;
+      justify-content: center !important;
+      cursor: pointer !important;
+      user-select: none !important;
+      box-sizing: border-box !important;
+    }
+
+    .btn-step:active {
+      background: #3f3f46 !important;
+      transform: scale(0.96);
+    }
+
+    .btn-step-minus { color: #ef4444 !important; }
+    .btn-step-plus { color: #10b981 !important; }
+    .btn-step-plus-five { color: #38bdf8 !important; }
+
+    /* Alerta de Data Já Cadastrada Compacto & Responsivo */
+    .previous-count-banner {
+      background: rgba(245, 158, 11, 0.08);
+      border: 1px solid rgba(245, 158, 11, 0.35);
+      border-radius: 8px;
+      padding: 6px 8px;
+      width: 100%;
+      box-sizing: border-box;
+    }
+
+    .prev-banner-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 6px;
+      font-size: 0.74rem;
+      color: #f59e0b;
+      font-weight: 800;
+      margin-bottom: 4px;
+    }
+
+    .prev-banner-total-badge {
+      font-size: 0.72rem;
+      font-weight: 800;
+      color: #fbbf24;
+      background: rgba(245, 158, 11, 0.15);
+      padding: 2px 6px;
+      border-radius: 4px;
+      white-space: nowrap;
+    }
+
+    .prev-locs-compact-grid {
+      display: grid;
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+      gap: 3px 4px;
+      width: 100%;
+      box-sizing: border-box;
+    }
+
+    .prev-loc-chip {
+      background: rgba(255, 255, 255, 0.04);
+      border: 1px solid rgba(255, 255, 255, 0.08);
+      border-radius: 4px;
+      padding: 2px 4px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 2px;
+      font-size: 0.68rem;
+      white-space: nowrap;
+      overflow: hidden;
+      box-sizing: border-box;
+    }
+
+    .prev-loc-chip .loc-lbl {
+      color: #a1a1aa;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      font-size: 0.65rem;
+    }
+
+    .prev-loc-chip .loc-val {
+      color: #f4f4f5;
+      font-weight: 800;
+      font-size: 0.7rem;
+    }
+
+    /* Resumo Compacto da Conferência */
+    .comp-summary-strip {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 6px;
+      width: 100%;
+      box-sizing: border-box;
+      margin-top: 6px;
+    }
+
+    .comp-summary-item {
+      background: #18181c;
       border: 1px solid #2a2a30;
       border-radius: 8px;
       padding: 6px 8px;
       display: flex;
       flex-direction: column;
-      gap: 4px;
-    }
-
-    .loc-card-header {
-      display: flex;
       align-items: center;
-      justify-content: space-between;
-    }
-
-    .loc-card-title {
-      font-size: 0.8rem;
-      font-weight: 800;
-      color: #f4f4f5;
-    }
-
-    .loc-card-controls {
-      display: flex;
-      align-items: center;
-      gap: 4px;
-    }
-
-    .loc-qty-input {
-      flex: 1;
-      height: 38px;
-      background: #050505;
-      border: 1px solid #3f3f46;
-      border-radius: 6px;
+      justify-content: center;
       text-align: center;
-      font-size: 1.15rem;
+      box-sizing: border-box;
+    }
+
+    .comp-summary-item.current-highlight {
+      background: rgba(16, 185, 129, 0.1);
+      border-color: rgba(16, 185, 129, 0.4);
+    }
+
+    .comp-summary-item.diff-neg {
+      background: rgba(239, 68, 68, 0.1);
+      border-color: rgba(239, 68, 68, 0.4);
+    }
+
+    .comp-summary-item.diff-pos {
+      background: rgba(16, 185, 129, 0.15);
+      border-color: rgba(16, 185, 129, 0.5);
+    }
+
+    .comp-summary-lbl {
+      font-size: 0.65rem;
+      font-weight: 800;
+      color: #a1a1aa;
+      letter-spacing: 0.5px;
+      margin-bottom: 2px;
+    }
+
+    .comp-summary-val {
+      font-size: 1.05rem;
       font-weight: 900;
       color: #f4f4f5;
     }
 
-    .btn-step {
-      height: 38px;
-      min-width: 36px;
-      padding: 0 6px;
-      background: #222226;
+    .comp-summary-val small {
+      font-size: 0.68rem;
+      font-weight: 700;
+      color: #a1a1aa;
+    }
+
+    .comp-summary-item.diff-neg .comp-summary-val {
+      color: #ef4444;
+    }
+
+    .comp-summary-item.diff-pos .comp-summary-val {
+      color: #10b981;
+    }
+
+    /* Compact Grid para Novo Produto */
+    .compact-grid {
+      display: grid;
+      grid-template-columns: repeat(2, 1fr);
+      gap: 6px;
+    }
+
+    .loc-mini-card {
+      background: #18181c;
       border: 1px solid #2a2a30;
-      border-radius: 6px;
-      font-weight: 800;
-      font-size: 0.85rem;
-      color: #f4f4f5;
+      border-radius: 8px;
+      padding: 6px 8px;
       display: flex;
       align-items: center;
-      justify-content: center;
+      justify-content: space-between;
+      gap: 6px;
     }
 
-    .btn-step-minus { color: #ef4444; }
-    .btn-step-plus { color: #10b981; }
-
-    /* Vencimentos & Listas Compactas */
-    .expirations-filter-tabs {
-      display: grid;
-      grid-template-columns: repeat(4, 1fr);
-      gap: 4px;
-    }
-
-    .btn-exp-filter-tab {
-      height: 34px;
-      background: #121214;
-      border: 1px solid #2a2a30;
-      border-radius: 6px;
+    .loc-mini-card label {
       font-size: 0.72rem;
       font-weight: 800;
       color: #a1a1aa;
+      margin: 0;
       white-space: nowrap;
-      padding: 0 4px;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    .new-count-input {
+      width: 54px;
+      height: 32px;
+      background: #050505;
+      border: 1px solid #3f3f46;
+      border-radius: 6px;
+      text-align: center;
+      font-size: 0.95rem;
+      font-weight: 800;
+      color: #f4f4f5;
+      padding: 0 2px;
+    }
+
+    .new-product-total-bar {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin-top: 8px;
+      padding-top: 6px;
+      border-top: 1px solid #2a2a30;
+      font-size: 0.85rem;
+      font-weight: 800;
+      color: #f4f4f5;
+    }
+
+    .new-product-total-bar strong {
+      color: #10b981;
+      font-size: 1.1rem;
+    }
+
+    /* Vencimentos: Abas em Pílulas com Scroll Horizontal Suave */
+    .expirations-filter-tabs {
+      display: flex;
+      gap: 6px;
+      overflow-x: auto;
+      -webkit-overflow-scrolling: touch;
+      padding: 2px 2px 6px 2px;
+      scrollbar-width: none;
+    }
+
+    .expirations-filter-tabs::-webkit-scrollbar {
+      display: none;
+    }
+
+    .btn-exp-filter-tab {
+      flex: 0 0 auto;
+      height: 32px;
+      padding: 0 12px;
+      background: #121214;
+      border: 1px solid #2a2a30;
+      border-radius: 9999px;
+      font-size: 0.74rem;
+      font-weight: 800;
+      color: #a1a1aa;
+      white-space: nowrap;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      cursor: pointer;
     }
 
     .btn-exp-filter-tab.active {
-      background: #222226;
-      color: #f4f4f5;
-      border-color: #f4f4f5;
+      background: #10b981;
+      color: #022c22;
+      border-color: #10b981;
+      font-weight: 900;
     }
 
     .expirations-list-container {
@@ -1157,8 +1413,8 @@
       border-radius: 10px;
       padding: 8px 10px;
       display: flex;
-      align-items: center;
-      gap: 8px;
+      flex-direction: column;
+      gap: 6px;
       cursor: pointer;
     }
 
@@ -1166,10 +1422,18 @@
     .exp-alert-card.expired { border-left: 3px solid #ef4444; }
     .exp-alert-card.status-15-days { border-left: 3px solid #f97316; }
     .exp-alert-card.status-30-days { border-left: 3px solid #eab308; }
+    .exp-alert-card.status-triaged { border-left: 3px solid #10b981; }
+
+    .exp-alert-top-row {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      width: 100%;
+    }
 
     .exp-alert-thumb-col {
-      width: 42px;
-      height: 42px;
+      width: 40px;
+      height: 40px;
       border-radius: 6px;
       background: #1a1a1e;
       overflow: hidden;
@@ -1186,7 +1450,7 @@
     }
 
     .photo-placeholder-mini {
-      font-size: 0.65rem;
+      font-size: 0.62rem;
       color: #71717a;
       font-weight: 800;
     }
@@ -1200,23 +1464,24 @@
     }
 
     .exp-alert-name {
-      font-size: 0.88rem;
+      font-size: 0.82rem;
       font-weight: 800;
       color: #f4f4f5;
       white-space: nowrap;
       overflow: hidden;
       text-overflow: ellipsis;
+      line-height: 1.2;
     }
 
     .exp-alert-meta {
       display: flex;
       align-items: center;
       gap: 4px;
-      font-size: 0.74rem;
+      font-size: 0.72rem;
     }
 
     .exp-badge {
-      font-size: 0.68rem;
+      font-size: 0.65rem;
       font-weight: 800;
       padding: 1px 5px;
       border-radius: 4px;
@@ -1226,12 +1491,13 @@
     .tag-expired { background: rgba(239, 68, 68, 0.15); color: #ef4444; }
     .tag-urgent { background: rgba(249, 115, 22, 0.15); color: #f97316; }
     .tag-warning { background: rgba(234, 179, 8, 0.15); color: #eab308; }
+    .tag-triaged { background: rgba(16, 185, 129, 0.15); color: #10b981; }
 
     .exp-alert-loc-row {
       display: flex;
       align-items: center;
       justify-content: space-between;
-      font-size: 0.72rem;
+      font-size: 0.7rem;
       color: #71717a;
     }
 
@@ -1239,29 +1505,59 @@
       color: #f4f4f5;
     }
 
+    .exp-alert-action-col {
+      flex-shrink: 0;
+    }
+
     .btn-audit-item {
       background: #1a1a1e;
       border: 1px solid #2a2a30;
       color: #f4f4f5;
-      font-size: 0.76rem;
+      font-size: 0.74rem;
       font-weight: 700;
-      padding: 5px 9px;
+      padding: 4px 8px;
       border-radius: 6px;
       white-space: nowrap;
+    }
+
+    .exp-triage-container {
+      border-top: 1px solid #1f1f23;
+      padding-top: 5px;
+      margin-top: 1px;
+      display: flex;
+      align-items: center;
+    }
+
+    .exp-triage-checkbox-label {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      cursor: pointer;
+      user-select: none;
+      font-size: 0.72rem;
+      font-weight: 700;
+      color: #a1a1aa;
+    }
+
+    .exp-triage-checkbox {
+      width: 16px;
+      height: 16px;
+      accent-color: #10b981;
+      cursor: pointer;
     }
 
     /* Modais e Toasts */
     .app-toast {
       position: fixed;
-      bottom: max(env(safe-area-inset-bottom, 0px) + 16px, 20px);
+      bottom: max(env(safe-area-inset-bottom, 0px) + 14px, 18px);
       left: 50%;
       transform: translateX(-50%) translateY(100px);
       background: #1c1c1e;
       border: 1px solid #3f3f46;
       color: #fff;
-      padding: 10px 16px;
+      padding: 9px 14px;
       border-radius: 9999px;
-      font-size: 0.85rem;
+      font-size: 0.82rem;
       font-weight: 700;
       display: flex;
       align-items: center;
@@ -1287,7 +1583,7 @@
       display: none;
       align-items: center;
       justify-content: center;
-      padding: 12px;
+      padding: 10px;
     }
 
     .custom-modal.open {
@@ -1303,15 +1599,16 @@
 
     .modal-card {
       position: relative;
-      width: 100%;
+      width: calc(100% - 16px);
       max-width: 440px;
-      max-height: 90vh;
+      max-height: calc(100vh - 32px);
       overflow-y: auto;
       background: #121214;
       border: 1px solid #2a2a30;
-      border-radius: 14px;
-      box-shadow: 0 20px 40px rgba(0, 0, 0, 0.6);
+      border-radius: 12px;
+      box-shadow: 0 16px 36px rgba(0, 0, 0, 0.7);
       z-index: 2;
+      margin: auto;
     }
   </style>
 </head>

@@ -853,20 +853,23 @@ export async function getDashboardMetrics() {
     expirationsByProduct[exp.product_id].push(exp);
   });
 
-  // Calcula SOMA TOTAL DE TODAS AS UNIDADES CADASTRADAS NO SISTEMA
+  // Calcula SOMA TOTAL DE TODAS AS UNIDADES ATIVAS NO ESTOQUE (exclui validades triadas/retiradas)
   let totalAllUnits = 0;
   products.forEach((p) => {
     const pExps = expirationsByProduct[p.id] || [];
     if (pExps.length > 0) {
-      let prodSum = 0;
+      let prodActiveSum = 0;
+      let hasActive = false;
       pExps.forEach((exp) => {
-        const units = expirationTotals[exp.id] !== undefined ? expirationTotals[exp.id] : 0;
-        prodSum += units;
+        const isTriaged = exp.is_triaged === true || exp.is_triaged === 1 || exp.is_triaged === 'true';
+        if (!isTriaged) {
+          hasActive = true;
+          const units = expirationTotals[exp.id] !== undefined ? expirationTotals[exp.id] : 0;
+          prodActiveSum += units;
+        }
       });
-      if (prodSum === 0 && Number(p.total_quantity) > 0) {
-        totalAllUnits += Number(p.total_quantity);
-      } else {
-        totalAllUnits += prodSum;
+      if (hasActive) {
+        totalAllUnits += prodActiveSum;
       }
     } else {
       totalAllUnits += Number(p.total_quantity) || 0;
@@ -901,41 +904,37 @@ export async function getDashboardMetrics() {
     if (isTriaged) {
       triagedProductsSet.add(product.id);
       triagedUnits += units;
-    }
-
-    if (days < 0) {
-      // Vencidos: Se estiver marcado como 'Retirado para triagem', não computa no contador ativo nem nos alertas
-      if (!isTriaged) {
+    } else {
+      // Apenas produtos ATIVOS (não triados) entram nos alertas e contadores de gôndola/estoque
+      if (days < 0) {
         expiredProductsSet.add(product.id);
         expiredUnits += units;
+      } else if (days <= 15) {
+        upTo15DaysProductsSet.add(product.id);
+        upTo15DaysUnits += units;
+        if (days <= 7) {
+          upTo7DaysProductsSet.add(product.id);
+        }
+      } else if (days <= 30) {
+        upTo30DaysProductsSet.add(product.id);
+        upTo30DaysUnits += units;
       }
-    } else if (days <= 15) {
-      // Até 15 dias
-      upTo15DaysProductsSet.add(product.id);
-      upTo15DaysUnits += units;
-      if (days <= 7) {
-        upTo7DaysProductsSet.add(product.id);
-      }
-    } else if (days <= 30) {
-      // Até 30 dias
-      upTo30DaysProductsSet.add(product.id);
-      upTo30DaysUnits += units;
-    }
 
-    if (days >= 0 && days <= 60 && units > 0) {
-      upcomingList.push({
-        productId: product.id,
-        expirationId: exp.id,
-        name: product.name,
-        barcode: product.barcode,
-        image: product.image,
-        sector: product.sector,
-        corridor: product.corridor,
-        expirationDate: exp.expiration_date,
-        daysUntil: days,
-        units,
-        isTriaged
-      });
+      if (days >= 0 && days <= 60 && units > 0) {
+        upcomingList.push({
+          productId: product.id,
+          expirationId: exp.id,
+          name: product.name,
+          barcode: product.barcode,
+          image: product.image,
+          sector: product.sector,
+          corridor: product.corridor,
+          expirationDate: exp.expiration_date,
+          daysUntil: days,
+          units,
+          isTriaged: false
+        });
+      }
     }
   });
 

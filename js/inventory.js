@@ -139,6 +139,17 @@ async function renderExpirationSelector(productId, preselectedExpirationId = nul
   }
 }
 
+const LOCATION_SHORT_NAMES = {
+  'DEPÓSITO': 'Depósito',
+  'GELADEIRA': 'Geladeira',
+  'PRATELEIRA': 'Prateleira',
+  'PONTA DE GÔNDOLA': 'P. Gôndola',
+  'ORELHA': 'Orelha',
+  'ILHA': 'Ilha',
+  'CARRINHO': 'Carrinho',
+  'FRENTE DE LOJA': 'Frente Loja'
+};
+
 /**
  * Carrega os dados da validade escolhida para iniciar a contagem
  */
@@ -151,24 +162,51 @@ async function selectExpirationForCounting(expiration) {
   const latestInfo = await getLatestCountsForExpiration(expiration.id);
   previousCountsForSelectedDate = latestInfo;
 
-  // Alerta de contagem anterior
+  // Alerta de contagem anterior e triagem
   const alertContainer = document.getElementById('conf-previous-count-alert');
   if (alertContainer) {
-    if (latestInfo.hasPreviousCount) {
+    const isTriaged = expiration.is_triaged === true || expiration.is_triaged === 1 || expiration.is_triaged === 'true';
+    let triageWarningHtml = '';
+    if (isTriaged) {
+      triageWarningHtml = `
+        <div style="background: rgba(234, 179, 8, 0.15); border: 1px solid rgba(234, 179, 8, 0.5); border-radius: 6px; padding: 6px 10px; margin-bottom: 6px; display: flex; align-items: center; justify-content: space-between; gap: 8px;">
+          <span style="font-size: 0.74rem; font-weight: 800; color: #eab308;">📦 VALIDADE RETIRADA PARA TRIAGEM</span>
+          <button type="button" id="btn-conf-restore-triage" style="background: #eab308; color: #000; border: none; font-size: 0.7rem; font-weight: 800; padding: 3px 8px; border-radius: 4px; cursor: pointer;">↩️ Restaurar</button>
+        </div>
+      `;
+    }
+
+    if (latestInfo.hasPreviousCount || isTriaged) {
       alertContainer.innerHTML = `
-        <div class="previous-count-banner">
-          <div class="prev-banner-header">
-            <strong>DATA JÁ CADASTRADA (${formatDateBR(expiration.expiration_date)})</strong>
-          </div>
-          <div class="prev-banner-body">
-            <p class="prev-subtitle">ÚLTIMA CONFERÊNCIA:</p>
-            <div class="prev-locs-grid">
-              ${LOCATIONS.map(loc => `<span>${loc}: <strong>${latestInfo.countsByLocation[loc] || 0}</strong></span>`).join('')}
-            </div>
-            <div class="prev-total-row">TOTAL: <strong>${formatNumber(latestInfo.total)} UN</strong></div>
-          </div>
-        </div>`;
+        ${triageWarningHtml}
+        ${
+          latestInfo.hasPreviousCount
+            ? `<div class="previous-count-banner">
+                <div class="prev-banner-header">
+                  <span>📅 <strong>DATA JÁ CADASTRADA (${formatDateBR(expiration.expiration_date)})</strong></span>
+                  <span class="prev-banner-total-badge">TOTAL: <strong>${formatNumber(latestInfo.total)} UN</strong></span>
+                </div>
+                <div class="prev-banner-body">
+                  <div class="prev-locs-compact-grid">
+                    ${LOCATIONS.map(loc => `
+                      <div class="prev-loc-chip">
+                        <span class="loc-lbl">${LOCATION_SHORT_NAMES[loc] || loc}:</span>
+                        <strong class="loc-val">${latestInfo.countsByLocation[loc] || 0}</strong>
+                      </div>
+                    `).join('')}
+                  </div>
+                </div>
+              </div>`
+            : ''
+        }`;
       alertContainer.classList.remove('hidden');
+
+      document.getElementById('btn-conf-restore-triage')?.addEventListener('click', async () => {
+        await toggleExpirationTriaged(expiration.id, false);
+        expiration.is_triaged = false;
+        showToast('✓ Validade restaurada ao estoque ativo!', 'success', 2000);
+        selectExpirationForCounting(expiration);
+      });
     } else {
       alertContainer.classList.add('hidden');
     }
@@ -187,17 +225,18 @@ function renderLocationInputs(previousValues = {}) {
 
   container.innerHTML = LOCATIONS.map((loc, idx) => {
     const qty = previousValues[loc] || 0;
+    const shortName = LOCATION_SHORT_NAMES[loc] || loc;
     return `
       <div class="location-count-card" data-loc="${loc}">
         <div class="loc-card-header">
-          <span class="loc-card-title">${loc}</span>
-          <span class="loc-card-prev">Anterior: ${qty}</span>
+          <span class="loc-card-title" title="${loc}">${shortName}</span>
+          <span class="loc-card-prev">Ant: <strong>${qty}</strong></span>
         </div>
         <div class="loc-card-controls">
-          <button type="button" class="btn-step" data-idx="${idx}" data-delta="-1">-1</button>
+          <button type="button" class="btn-step btn-step-minus" data-idx="${idx}" data-delta="-1" aria-label="Diminuir 1">-1</button>
           <input type="number" id="loc-input-${idx}" class="loc-qty-input" value="${qty}" min="0" data-idx="${idx}" inputmode="numeric" />
-          <button type="button" class="btn-step" data-idx="${idx}" data-delta="1">+1</button>
-          <button type="button" class="btn-step" data-idx="${idx}" data-delta="5">+5</button>
+          <button type="button" class="btn-step btn-step-plus" data-idx="${idx}" data-delta="1" aria-label="Aumentar 1">+1</button>
+          <button type="button" class="btn-step btn-step-plus-five" data-idx="${idx}" data-delta="5" aria-label="Aumentar 5">+5</button>
         </div>
       </div>
     `;
@@ -241,12 +280,18 @@ export function updateComparisonCard() {
   const diff = currentTotal - prevTotal;
 
   comparisonContainer.innerHTML = `
-    <div class="comparison-box">
-      <div class="comp-header">RESUMO DA CONFERÊNCIA</div>
-      <div class="comp-footer">
-        <div class="comp-footer-row"><span>ANTERIOR:</span> <strong>${formatNumber(prevTotal)}</strong></div>
-        <div class="comp-footer-row highlight"><span>ATUAL:</span> <strong>${formatNumber(currentTotal)}</strong></div>
-        <div class="comp-footer-row"><span>DIFERENÇA:</span> <strong class="${diff < 0 ? 'negative' : 'positive'}">${diff > 0 ? '+' : ''}${formatNumber(diff)}</strong></div>
+    <div class="comp-summary-strip">
+      <div class="comp-summary-item">
+        <span class="comp-summary-lbl">ANTERIOR</span>
+        <span class="comp-summary-val">${formatNumber(prevTotal)} <small>un</small></span>
+      </div>
+      <div class="comp-summary-item current-highlight">
+        <span class="comp-summary-lbl">ATUAL</span>
+        <span class="comp-summary-val">${formatNumber(currentTotal)} <small>un</small></span>
+      </div>
+      <div class="comp-summary-item ${diff < 0 ? 'diff-neg' : diff > 0 ? 'diff-pos' : ''}">
+        <span class="comp-summary-lbl">DIFERENÇA</span>
+        <span class="comp-summary-val">${diff > 0 ? '+' : ''}${formatNumber(diff)} <small>un</small></span>
       </div>
     </div>
   `;
@@ -370,20 +415,37 @@ export async function loadCorridorAuditProducts(sector, corridor) {
 
   const listHtml = await Promise.all(filtered.map(async (prod) => {
     const exps = await getProductExpirations(prod.id);
-    let stock = 0;
+    let activeStock = 0;
+    let triagedStock = 0;
     let done = false;
     for (const exp of exps) {
       const info = await getLatestCountsForExpiration(exp.id);
-      stock += info.total;
+      const isTriaged = exp.is_triaged === true || exp.is_triaged === 1 || exp.is_triaged === 'true';
+      if (isTriaged) {
+        triagedStock += info.total;
+      } else {
+        activeStock += info.total;
+      }
       if (info.lastCountDate?.startsWith(today)) done = true;
     }
+    if (exps.length === 0 && Number(prod.total_quantity) > 0) {
+      activeStock = Number(prod.total_quantity);
+    }
     if (done) auditedCount++;
+
+    let stockDisplay = '';
+    if (activeStock === 0 && triagedStock > 0) {
+      stockDisplay = `<span class="prod-item-stock-tag" style="color: #eab308; background: rgba(234, 179, 8, 0.15); border-color: rgba(234, 179, 8, 0.3);">📦 Em Triagem (${formatNumber(triagedStock)} un)</span>`;
+    } else {
+      stockDisplay = `<span class="prod-item-stock-tag">Estoque: <strong>${formatNumber(activeStock)} un</strong></span>`;
+    }
+
     return `
       <div class="corridor-prod-item ${done ? 'audited' : 'pending'}" data-prodid="${prod.id}">
         <div class="prod-item-status-icon">${done ? '✓' : '○'}</div>
         <div class="prod-item-details-col">
           <h4 class="prod-item-name">${prod.name}</h4>
-          <span class="prod-item-stock-tag">Estoque: <strong>${formatNumber(stock)}</strong></span>
+          ${stockDisplay}
         </div>
         <button type="button" class="btn-audit-item">Conferir</button>
       </div>`;
