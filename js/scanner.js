@@ -13,6 +13,7 @@ let currentCameraFacing = 'environment'; // 'environment' ou 'user'
 let activeTorchState = false;
 let currentZoomLevel = 1.0;
 let onDetectedCallbackRef = null;
+let currentActiveContainerId = 'scanner-reader-box';
 
 // Sistema de confirmação de leitura consistente (evita leituras aleatórias/ruído)
 let lastCandidateCode = '';
@@ -113,15 +114,17 @@ export async function startCameraScanner(containerElementOrId, onDetectedCallbac
   lastCandidateTime = 0;
   onDetectedCallbackRef = onDetectedCallback;
 
+  const containerId = typeof containerElementOrId === 'string'
+    ? containerElementOrId
+    : (containerElementOrId?.id || 'scanner-reader-box');
+
+  currentActiveContainerId = containerId;
+
   updateZoomButtonUI(1.0);
 
   // Aguarda 60ms para layout DOM estar pronto
   await new Promise((r) => setTimeout(r, 60));
   if (!isScanning) return { success: false };
-
-  const containerId = typeof containerElementOrId === 'string'
-    ? containerElementOrId
-    : (containerElementOrId?.id || 'scanner-reader-box');
 
   const containerEl = document.getElementById(containerId) || document.getElementById('scanner-reader-box');
   if (containerEl) {
@@ -387,7 +390,7 @@ export async function stopCameraScanner() {
     html5QrCode = null;
   }
 
-  const containerEl = document.getElementById('scanner-reader-box');
+  const containerEl = document.getElementById(currentActiveContainerId) || document.getElementById('scanner-reader-box');
   if (containerEl) {
     containerEl.innerHTML = '';
   }
@@ -409,7 +412,8 @@ export async function toggleTorch(turnOn) {
     } catch (_) {}
   }
 
-  const video = document.querySelector('#scanner-reader-box video');
+  const selector = `#${currentActiveContainerId} video, #scanner-reader-box video`;
+  const video = document.querySelector(selector);
   if (video && video.srcObject) {
     const track = video.srcObject.getVideoTracks()[0];
     if (track && typeof track.applyConstraints === 'function') {
@@ -431,7 +435,8 @@ export async function toggleTorch(turnOn) {
 export async function toggleCameraZoom() {
   const targetZoom = currentZoomLevel >= 1.9 ? 1.0 : 2.0;
 
-  const vid = document.querySelector('#scanner-reader-box video');
+  const selector = `#${currentActiveContainerId} video, #scanner-reader-box video`;
+  const vid = document.querySelector(selector);
   if (vid) {
     vid.style.transform = targetZoom > 1 ? `scale(${targetZoom})` : 'none';
     vid.style.transformOrigin = 'center center';

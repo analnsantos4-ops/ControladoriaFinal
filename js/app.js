@@ -3,9 +3,9 @@ import '../style.css';
 
 // Orquestrador Principal do Aplicativo Controladoria - Ana Luiza
 import { isAuthenticated, verifyCode, logout } from './auth.js';
-import { initDB, getProductByBarcode, getProductById, searchProducts, getAllProducts, getProductExpirations, getLatestCountsForExpiration, clearAllDatabaseData, toggleExpirationTriaged } from './db.js';
-import { initSyncEngine, registerSyncStatusListener, wipeSupabaseCloudData, triggerSyncNow, checkSupabaseHealth, syncAllLocalDataToSupabase, SUPABASE_SETUP_SQL, getSyncStatus } from './sync.js';
-import { showView, showToast, setupButtonFeedbacks, openPhotoModal, getActiveView } from './ui.js';
+import { initDB, getProductByBarcode, getProductById, searchProducts, getAllProducts, getProductExpirations, getLatestCountsForExpiration, clearAllDatabaseData, toggleExpirationTriaged, sendProductExpirationToTriage, restoreProductExpirationFromTriage, runAutomaticTriageCleanup, getDatabaseStorageStats, TRIAGE_RETENTION_MS } from './db.js';
+import { initSyncEngine, registerSyncStatusListener, wipeSupabaseCloudData, triggerSyncNow, checkSupabaseHealth, syncAllLocalDataToSupabase, SUPABASE_SETUP_SQL, getSyncStatus, getSyncDiagnostics } from './sync.js';
+import { showView, showToast, setupButtonFeedbacks, openPhotoModal, getActiveView, promptTriageBarcodeConfirmation, promptSecurityPin } from './ui.js';
 import { startCameraScanner, stopCameraScanner, toggleTorch, switchCamera, toggleCameraZoom, scanBarcodeFromImageFile } from './scanner.js';
 import { renderDashboard } from './dashboard.js';
 import { openNewProductView, saveNewProduct, handleProductImageFile, openProductDetailView, updateNewProductTotalCalculation, populateSectorAndCorridorSelects } from './products.js';
@@ -19,9 +19,10 @@ let torchState = false;
 async function initApp() {
   setupButtonFeedbacks();
 
-  // Inicializa Banco IndexedDB
+  // Inicializa Banco IndexedDB e executa limpeza automática de triagem (3 dias)
   try {
     await initDB();
+    runAutomaticTriageCleanup().catch((err) => console.warn('Auto triage cleanup on init error:', err));
   } catch (e) {
     console.error('Falha ao inicializar IndexedDB:', e);
   }
@@ -275,31 +276,137 @@ function setupEventListeners() {
       diagBadge.className = 'sync-badge status-syncing';
     }
     if (diagMsg) {
-      diagMsg.textContent = 'Verificando permissões com o Supabase...';
+      diagMsg.textContent = 'Verificando diagnóstico de rede, memória e nuvem...';
       diagMsg.style.color = '#a1a1aa';
     }
 
-    const health = await checkSupabaseHealth();
-    updateSupabaseDiagUI(health);
+    const [diag, storageStats] = await Promise.all([
+      getSyncDiagnostics(),
+      getDatabaseStorageStats()
+    ]);
+    updateSupabaseDiagUI(diag, storageStats);
   }
 
-  function updateSupabaseDiagUI(health) {
+  function updateSupabaseDiagUI(diag, storageStats) {
     if (!diagBadge || !diagMsg) return;
-    if (health.connected) {
+
+    // Atualiza indicadores de rede física
+    const netTypeEl = document.getElementById('diag-net-type');
+    const netRttEl = document.getElementById('diag-net-rtt');
+    const netSpeedEl = document.getElementById('diag-net-speed');
+    const queueBadgeEl = document.getElementById('diag-queue-count-badge');
+    const queueBreakdownEl = document.getElementById('diag-queue-breakdown');
+
+    if (netTypeEl) {
+      netTypeEl.textContent = !diag.isOnline ? 'OFFLINE' : (diag.connectionInfo.effectiveType || 'Wi-Fi/4G');
+      netTypeEl.style.color = !diag.isOnline ? '#ef4444' : '#38bdf8';
+    }
+
+    if (netRttEl) {
+      if (!diag.isOnline) {
+        netRttEl.textContent = 'Desconectado';
+        netRttEl.style.color = '#ef4444';
+      } else if (diag.cloudHealth.latencyMs > 0) {
+        netRttEl.textContent = `${diag.cloudHealth.latencyMs} ms`;
+        netRttEl.style.color = diag.cloudHealth.latencyMs < 300 ? '#10b981' : (diag.cloudHealth.latencyMs < 800 ? '#eab308' : '#ef4444');
+      } else {
+        netRttEl.textContent = diag.connectionInfo.rtt || 'Normal';
+        netRttEl.style.color = '#10b981';
+      }
+    }
+
+    if (netSpeedEl) {
+      if (!diag.isOnline) {
+        netSpeedEl.textContent = '0 Mbps';
+        netSpeedEl.style.color = '#ef4444';
+      } else {
+        netSpeedEl.textContent = diag.connectionInfo.downlink || 'Estável';
+        netSpeedEl.style.color = '#eab308';
+      }
+    }
+
+    // Atualiza Fila de Sincronização
+    if (queueBadgeEl) {
+      const pCount = diag.pendingCount || 0;
+      queueBadgeEl.textContent = `${pCount} pendente${pCount === 1 ? '' : 's'}`;
+      queueBadgeEl.style.background = pCount > 0 ? '#b45309' : '#1e3a8a';
+      queueBadgeEl.style.color = pCount > 0 ? '#fef3c7' : '#bfdbfe';
+    }
+
+    if (queueBreakdownEl) {
+      const pCount = diag.pendingCount || 0;
+      if (pCount === 0) {
+        queueBreakdownEl.innerHTML = '<span style="color: #10b981;">✓ Todos os registros estão salvos na nuvem Supabase.</span>';
+      } else {
+        const byTbl = diag.pendingByTable || {};
+        const parts = [];
+        if (byTbl.products) parts.push(`${byTbl.products} produto(s)`);
+        if (byTbl.product_expirations) parts.push(`${byTbl.product_expirations} lote(s)`);
+        if (byTbl.inventory_counts) parts.push(`${byTbl.inventory_counts} contagem(ns)`);
+        const str = parts.join(', ') || `${pCount} itens`;
+        queueBreakdownEl.innerHTML = `<strong>Aguardando envio:</strong> ${str}. Eles serão enviados automaticamente assim que houver sinal.`;
+      }
+    }
+
+    // Atualiza Memória e Armazenamento do Banco de Dados
+    if (storageStats) {
+      const storageUsedBadge = document.getElementById('diag-storage-used-badge');
+      const storageProgressFill = document.getElementById('diag-storage-progress-fill');
+      const storageProds = document.getElementById('diag-storage-prods');
+      const storageTriage = document.getElementById('diag-storage-triage');
+      const storagePhotos = document.getElementById('diag-storage-photos');
+      const storageQuota = document.getElementById('diag-storage-quota');
+
+      if (storageUsedBadge) {
+        storageUsedBadge.textContent = `${storageStats.storageEstimate.usageFormatted} (${storageStats.totalRecords} registros)`;
+      }
+
+      if (storageProgressFill) {
+        const pct = Math.max(1, Math.min(100, storageStats.storageEstimate.percentUsed || 1));
+        storageProgressFill.style.width = `${pct}%`;
+      }
+
+      if (storageProds) {
+        const prodCount = storageStats.tableStats?.products?.count || 0;
+        const prodSize = storageStats.tableStats?.products?.sizeFormatted || '0 B';
+        storageProds.textContent = `${prodCount} produto(s) (${prodSize})`;
+      }
+
+      if (storageTriage) {
+        const tCount = storageStats.triagedCount || 0;
+        storageTriage.textContent = `${tCount} lote(s) em triagem (auto-delete 3d)`;
+      }
+
+      if (storagePhotos) {
+        storagePhotos.textContent = `${storageStats.totalPhotoCount} foto(s) (${storageStats.totalPhotoFormatted})`;
+      }
+
+      if (storageQuota) {
+        storageQuota.textContent = `${storageStats.storageEstimate.quotaFormatted} livre (${(100 - (storageStats.storageEstimate.percentUsed || 0)).toFixed(1)}% livre)`;
+      }
+    }
+
+    // Status da Nuvem Supabase
+    if (!diag.isOnline) {
+      diagBadge.textContent = '● Modo Offline';
+      diagBadge.className = 'sync-badge status-offline';
+      diagMsg.style.color = '#f97316';
+      diagMsg.innerHTML = '📴 O celular está sem conexão no momento. Seus dados e contagens estão 100% salvos localmente e serão sincronizados automaticamente.';
+    } else if (diag.cloudHealth.connected) {
       diagBadge.textContent = '✓ Conectado';
       diagBadge.className = 'sync-badge status-online';
       diagMsg.style.color = '#10b981';
-      diagMsg.innerHTML = '✓ Conexão estabelecida com sucesso! Tabelas liberadas para sincronização.';
-    } else if (health.code === '42501' || health.message?.includes('permission denied') || health.message?.includes('42501')) {
+      diagMsg.innerHTML = `✓ Conexão com Supabase ativa e respondendo em <strong>${diag.cloudHealth.latencyMs}ms</strong>.`;
+    } else if (diag.cloudHealth.code === 42501 || diag.cloudHealth.message?.includes('permission denied') || diag.cloudHealth.message?.includes('42501')) {
       diagBadge.textContent = '⚠ Permissão Bloqueada (42501)';
       diagBadge.className = 'sync-badge status-offline';
       diagMsg.style.color = '#f97316';
-      diagMsg.innerHTML = `⚠️ <strong>Permissão Negada no Supabase (Erro 42501)</strong><br>O banco recusou o acesso da chave anônima. Execute o <strong>Script SQL</strong> abaixo no <strong>SQL Editor</strong> do painel Supabase para liberar.`;
+      diagMsg.innerHTML = `⚠️ <strong>Permissão Negada no Supabase (Erro 42501)</strong><br>Execute o <strong>Script SQL</strong> abaixo no <strong>SQL Editor</strong> do painel Supabase para liberar o acesso das tabelas.`;
     } else {
-      diagBadge.textContent = `⚠ ${health.code || 'Erro'}`;
+      diagBadge.textContent = `⚠ ${diag.cloudHealth.code || 'Falha de Nuvem'}`;
       diagBadge.className = 'sync-badge status-offline';
       diagMsg.style.color = '#ef4444';
-      diagMsg.innerHTML = `Falha: ${health.message || 'Verifique sua conexão'}`;
+      diagMsg.innerHTML = `Aviso: ${diag.cloudHealth.message || 'Verifique o sinal de internet'}`;
     }
   }
 
@@ -340,22 +447,26 @@ function setupEventListeners() {
     btnTestSupabaseSync.disabled = true;
 
     try {
-      const health = await checkSupabaseHealth();
-      updateSupabaseDiagUI(health);
+      const diag = await getSyncDiagnostics();
+      updateSupabaseDiagUI(diag);
 
-      if (health.connected) {
+      if (diag.cloudHealth.connected) {
         showToast('✓ Conexão OK! Sincronizando produtos locais...', 'info', 2000);
         const syncResult = await syncAllLocalDataToSupabase();
         await triggerSyncNow();
         await renderDashboard();
         
+        // Atualiza diagnóstico após sincronização
+        const updatedDiag = await getSyncDiagnostics();
+        updateSupabaseDiagUI(updatedDiag);
+
         if (syncResult && syncResult.syncedCount > 0) {
           showToast(`🎉 Sucesso! ${syncResult.syncedCount} produto(s) sincronizados com o Supabase!`, 'success', 4000);
         } else {
           showToast('✓ Supabase conectado e sincronizado!', 'success', 3000);
         }
       } else {
-        showToast('⚠ Permissão ainda bloqueada. Execute o script no SQL Editor do Supabase.', 'warning', 4000);
+        showToast('⚠ Verifique a conexão ou execute o script no SQL Editor do Supabase.', 'warning', 4000);
       }
     } catch (e) {
       showToast('Erro ao testar conexão com Supabase.', 'error');
@@ -762,9 +873,17 @@ export async function openExpirationsView(initialFilter = 'ALL') {
 }
 
 async function renderExpirationsList(filterType = 'ALL') {
-  const products = await getAllProducts();
   const container = document.getElementById('expirations-list-container');
   if (!container) return;
+
+  // Executa limpeza preventiva de itens com mais de 3 dias na triagem
+  await runAutomaticTriageCleanup();
+
+  const products = await getAllProducts();
+  if (!products) {
+    container.innerHTML = '<div class="empty-exp-state">Carregando lista de vencimentos...</div>';
+    return;
+  }
 
   const productMap = {};
   products.forEach((p) => (productMap[p.id] = p));
@@ -821,10 +940,13 @@ async function renderExpirationsList(filterType = 'ALL') {
     if (filterType === 'EXPIRED') emptyMsg = '🎉 Nenhum produto vencido pendente no momento!';
     if (filterType === '15_DAYS') emptyMsg = 'Nenhum produto com vencimento nos próximos 15 dias.';
     if (filterType === '30_DAYS') emptyMsg = 'Nenhum produto com vencimento nos próximos 30 dias.';
-    if (filterType === 'TRIAGED') emptyMsg = 'Nenhum produto em triagem no momento.';
+    if (filterType === 'TRIAGED') emptyMsg = '📦 Nenhum produto em triagem no momento.';
     container.innerHTML = `<div class="empty-exp-state">${emptyMsg}</div>`;
     return;
   }
+
+  const nowMs = Date.now();
+  const AUTO_DELETE_MS = TRIAGE_RETENTION_MS || (3 * 24 * 60 * 60 * 1000);
 
   container.innerHTML = items
     .map((item) => {
@@ -832,10 +954,56 @@ async function renderExpirationsList(filterType = 'ALL') {
       let tagText = `${item.daysUntil} dias`;
 
       let cardStatusClass = 'status-ok';
+      let countdownHtml = '';
+
       if (item.isTriaged) {
         badgeClass = 'tag-triaged';
         cardStatusClass = 'status-triaged';
         tagText = '📦 EM TRIAGEM (RETIRADO)';
+
+        // Cálculo da contagem regressiva de 3 dias para auto-exclusão
+        const triagedAtMs = item.expiration.triaged_at
+          ? new Date(item.expiration.triaged_at).getTime()
+          : (item.expiration.updated_at ? new Date(item.expiration.updated_at).getTime() : nowMs);
+
+        const elapsedMs = Math.max(0, nowMs - triagedAtMs);
+        const remainingMs = Math.max(0, AUTO_DELETE_MS - elapsedMs);
+        const progressPct = Math.min(100, Math.max(2, Math.round((elapsedMs / AUTO_DELETE_MS) * 100)));
+
+        const totalRemHours = Math.floor(remainingMs / (1000 * 60 * 60));
+        const remDays = Math.floor(totalRemHours / 24);
+        const remHoursInDay = totalRemHours % 24;
+        const remMinutes = Math.floor((remainingMs % (1000 * 60 * 60)) / (1000 * 60));
+
+        let countdownText = '';
+        if (remainingMs <= 0) {
+          countdownText = 'Exclusão no próximo ciclo';
+        } else if (remDays > 0) {
+          countdownText = `${remDays}d ${remHoursInDay}h restantes`;
+        } else if (totalRemHours > 0) {
+          countdownText = `${totalRemHours}h ${remMinutes}m restantes`;
+        } else {
+          countdownText = `${remMinutes} minutos restantes`;
+        }
+
+        countdownHtml = `
+          <div class="exp-triage-countdown-box">
+            <div class="triage-countdown-header">
+              <div class="countdown-title-wrap">
+                <span class="countdown-clock-icon">⏳</span>
+                <span>Auto-exclusão do banco:</span>
+              </div>
+              <span class="countdown-val">${countdownText}</span>
+            </div>
+            <div class="triage-countdown-progressbar">
+              <div class="triage-countdown-fill" style="width: ${progressPct}%;"></div>
+            </div>
+            <div class="countdown-subtext">
+              <span>Prazo de 3 dias de retenção</span>
+              <span>${progressPct}% decorrido</span>
+            </div>
+          </div>
+        `;
       } else if (item.daysUntil < 0) {
         badgeClass = 'tag-expired';
         cardStatusClass = 'status-expired';
@@ -868,7 +1036,7 @@ async function renderExpirationsList(filterType = 'ALL') {
             </div>
             <div class="exp-alert-loc-row">
               <span>${item.product.sector} · ${item.product.corridor}</span>
-              <span>Estoque: <strong>${formatNumber(item.units)} un</strong></span>
+              <span>Lote/Qtd: <strong>${formatNumber(item.units)} un</strong></span>
             </div>
           </div>
           <div class="exp-alert-action-col">
@@ -877,13 +1045,18 @@ async function renderExpirationsList(filterType = 'ALL') {
         </div>
 
         <div class="exp-triage-container" onclick="event.stopPropagation()">
-          <label class="exp-triage-checkbox-label">
-            <input type="checkbox" class="exp-triage-checkbox" data-expid="${item.expiration.id}" ${item.isTriaged ? 'checked' : ''} />
-            <span class="exp-triage-custom-check"></span>
-            <span class="exp-triage-text">
-              ${item.isTriaged ? '✓ Retirado para triagem (clique para restaurar ao estoque)' : '📦 Marcar: Retirado para triagem'}
-            </span>
-          </label>
+          ${countdownHtml}
+          <div class="exp-triage-actions-row">
+            ${
+              item.isTriaged
+                ? `<button type="button" class="btn-exp-triage-restore" data-expid="${item.expiration.id}" data-prodid="${item.product.id}" title="Restaurar este lote para o estoque de vendas">
+                     ↩️ Restaurar ao Estoque da Loja
+                   </button>`
+                : `<button type="button" class="btn-exp-triage-send" data-expid="${item.expiration.id}" data-prodid="${item.product.id}" title="Confirmar retirada deste lote para triagem">
+                     📦 Enviar para Triagem
+                   </button>`
+            }
+          </div>
         </div>
       </div>
     `;
@@ -893,7 +1066,7 @@ async function renderExpirationsList(filterType = 'ALL') {
   // Listener no card para abrir conferência
   container.querySelectorAll('.exp-alert-card').forEach((card) => {
     card.addEventListener('click', async (e) => {
-      // Se clicou dentro de um botão ou checkbox, não abre conferência
+      // Se clicou dentro de um botão de ação, não abre conferência
       if (e.target.closest('.exp-triage-container') || e.target.closest('button')) return;
       const prodId = card.getAttribute('data-prodid');
       const expId = card.getAttribute('data-expid');
@@ -918,40 +1091,68 @@ async function renderExpirationsList(filterType = 'ALL') {
     });
   });
 
-  // Listener no checkbox de triagem com atualização imediata
-  container.querySelectorAll('.exp-triage-checkbox').forEach((checkbox) => {
-    checkbox.addEventListener('change', async (e) => {
+  // Listener para envio para Triagem com Confirmação Obrigatória por Código de Barras
+  container.querySelectorAll('.btn-exp-triage-send').forEach((btn) => {
+    btn.addEventListener('click', async (e) => {
       e.stopPropagation();
-      const expId = e.target.getAttribute('data-expid');
-      const isChecked = e.target.checked;
-      const cardEl = document.getElementById(`exp-card-${expId}`);
+      const expId = btn.getAttribute('data-expid');
+      const prodId = btn.getAttribute('data-prodid');
+      const product = await getProductById(prodId);
+      if (!product) return;
 
-      if (cardEl && filterType !== 'TRIAGED' && isChecked) {
-        // Efeito visual imediato de saída do item
-        cardEl.style.opacity = '0.4';
-        cardEl.style.transform = 'scale(0.96)';
-        cardEl.style.transition = 'all 0.25s ease';
-      }
+      const expirations = await getProductExpirations(prodId);
+      const targetExp = expirations.find((x) => String(x.id) === String(expId));
 
-      try {
-        await toggleExpirationTriaged(expId, isChecked);
-        triggerSyncNow().catch((err) => console.warn('Sync background error:', err));
-        
-        if (isChecked) {
-          showToast('✓ Produto enviado para a Triagem!', 'success', 2200);
-        } else {
-          showToast('✓ Produto retornado ao estoque ativo!', 'info', 2000);
+      promptTriageBarcodeConfirmation({
+        product,
+        expiration: targetExp ? { expiration_date: formatDateBR(targetExp.expiration_date) } : { expiration_date: '' },
+        onConfirmed: async () => {
+          try {
+            showToast('Enviando lote para a triagem...', 'sync', 1200);
+            await sendProductExpirationToTriage(product.id, expId);
+            triggerSyncNow().catch((err) => console.warn('Sync background error:', err));
+            showToast('✓ Confirmado com sucesso! Lote retirado da área de vendas e enviado para Triagem.', 'success', 3000);
+            
+            // Re-renderiza a lista e dashboard
+            await renderExpirationsList(filterType);
+            await renderDashboard();
+          } catch (err) {
+            console.error('Erro ao enviar para triagem:', err);
+            showToast('Erro ao processar envio para triagem', 'warning');
+            await renderExpirationsList(filterType);
+          }
         }
-        
-        // Re-renderiza a lista de vencimentos mantendo a aba atual
-        await renderExpirationsList(filterType);
-        // Atualiza métricas do dashboard
-        await renderDashboard();
-      } catch (err) {
-        console.error('Erro ao atualizar triagem:', err);
-        showToast('Erro ao atualizar status de triagem', 'warning');
-        await renderExpirationsList(filterType);
-      }
+      });
+    });
+  });
+
+  // Listener para restauração do lote da Triagem de volta ao Estoque Ativo
+  container.querySelectorAll('.btn-exp-triage-restore').forEach((btn) => {
+    btn.addEventListener('click', async (e) => {
+      e.stopPropagation();
+      const expId = btn.getAttribute('data-expid');
+      const prodId = btn.getAttribute('data-prodid');
+      const product = await getProductById(prodId);
+      if (!product) return;
+
+      promptSecurityPin(
+        'RESTAURAR AO ESTOQUE',
+        `Deseja restaurar o lote de validade do produto "${product.name}" de volta para o estoque ativo da loja?`,
+        async () => {
+          try {
+            showToast('Restaurando ao estoque...', 'sync', 1000);
+            await restoreProductExpirationFromTriage(product.id, expId);
+            triggerSyncNow().catch((err) => console.warn('Sync background error:', err));
+            showToast('✓ Lote retornado ao estoque ativo com sucesso!', 'success', 2500);
+            
+            await renderExpirationsList(filterType);
+            await renderDashboard();
+          } catch (err) {
+            console.error('Erro ao restaurar da triagem:', err);
+            showToast('Erro ao restaurar lote', 'warning');
+          }
+        }
+      );
     });
   });
 }

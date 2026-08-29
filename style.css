@@ -1955,45 +1955,144 @@ button {
 
 .exp-triage-container {
   border-top: 1px solid var(--border-color);
-  padding-top: 5px;
-  margin-top: 1px;
+  padding-top: 8px;
+  margin-top: 4px;
   display: flex;
-  align-items: center;
+  flex-direction: column;
+  gap: 8px;
 }
 
-.exp-triage-checkbox-label {
+.exp-triage-actions-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.exp-triage-countdown-box {
+  background: rgba(234, 179, 8, 0.08);
+  border: 1px solid rgba(234, 179, 8, 0.3);
+  border-radius: var(--radius-sm);
+  padding: 8px 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  width: 100%;
+  box-sizing: border-box;
+}
+
+.triage-countdown-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-size: 0.76rem;
+  color: #fbbf24;
+}
+
+.countdown-title-wrap {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  font-weight: 700;
+}
+
+.countdown-clock-icon {
+  font-size: 0.9rem;
+}
+
+.countdown-val {
+  font-weight: 900;
+  color: #fef08a;
+  background: rgba(234, 179, 8, 0.2);
+  padding: 2px 6px;
+  border-radius: 4px;
+  letter-spacing: 0.2px;
+}
+
+.triage-countdown-progressbar {
+  width: 100%;
+  height: 5px;
+  background: #27272a;
+  border-radius: 3px;
+  overflow: hidden;
+}
+
+.triage-countdown-fill {
+  height: 100%;
+  background: linear-gradient(90deg, #10b981 0%, #eab308 60%, #ef4444 100%);
+  border-radius: 3px;
+  transition: width 0.4s ease;
+}
+
+.countdown-subtext {
+  font-size: 0.68rem;
+  color: #a1a1aa;
+  display: flex;
+  justify-content: space-between;
+}
+
+.btn-exp-triage-send {
+  background: rgba(234, 179, 8, 0.12);
+  border: 1px solid rgba(234, 179, 8, 0.4);
+  color: #eab308;
+  font-size: 0.78rem;
+  font-weight: 800;
+  padding: 6px 12px;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
   display: inline-flex;
   align-items: center;
   gap: 6px;
-  cursor: pointer;
-  user-select: none;
-  font-size: 0.72rem;
-  font-weight: 700;
-  color: var(--text-secondary);
+  transition: all 0.2s ease;
 }
 
-.exp-triage-checkbox {
-  width: 16px;
-  height: 16px;
-  accent-color: var(--accent-green);
+.btn-exp-triage-send:hover {
+  background: #eab308;
+  color: #000;
+  transform: translateY(-1px);
+}
+
+.btn-exp-triage-restore {
+  background: rgba(56, 189, 248, 0.12);
+  border: 1px solid rgba(56, 189, 248, 0.4);
+  color: #38bdf8;
+  font-size: 0.78rem;
+  font-weight: 800;
+  padding: 6px 12px;
+  border-radius: var(--radius-sm);
   cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  transition: all 0.2s ease;
+}
+
+.btn-exp-triage-restore:hover {
+  background: #38bdf8;
+  color: #000;
 }
 
 .btn-triage-date-mini {
-  background: var(--bg-card-subtle);
-  border: 1px solid var(--border-color);
-  color: var(--text-secondary);
-  font-size: 0.72rem;
-  font-weight: 700;
-  padding: 4px 8px;
+  background: rgba(234, 179, 8, 0.12);
+  border: 1px solid rgba(234, 179, 8, 0.4);
+  color: #eab308;
+  font-size: 0.76rem;
+  font-weight: 800;
+  padding: 5px 10px;
   border-radius: var(--radius-sm);
   cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.btn-triage-date-mini:hover {
+  background: #eab308;
+  color: #000;
 }
 
 .btn-triage-date-mini.btn-triage-active {
-  background: var(--accent-green-bg);
-  border-color: var(--accent-green);
-  color: var(--accent-green);
+  background: rgba(56, 189, 248, 0.15);
+  border-color: rgba(56, 189, 248, 0.5);
+  color: #38bdf8;
 }
 
 .exp-item-actions {
@@ -3490,5 +3589,100 @@ button {
 .triage-instruction-text strong {
   color: #eab308;
 }
+
+/* ===================================================================
+   CÂMERA NO MODAL DE TRIAGEM
+   =================================================================== */
+.triage-camera-section {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 2px;
+}
+
+.btn-triage-cam-toggle {
+  width: 100%;
+  height: 44px;
+  background: rgba(16, 185, 129, 0.14);
+  border: 1px solid #10b981;
+  color: #10b981;
+  border-radius: var(--radius-md);
+  font-size: 0.88rem;
+  font-weight: 800;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.btn-triage-cam-toggle:hover {
+  background: rgba(16, 185, 129, 0.22);
+}
+
+.btn-triage-cam-toggle.active {
+  background: rgba(239, 68, 68, 0.15);
+  border-color: #ef4444;
+  color: #ef4444;
+}
+
+.btn-cam-icon {
+  font-size: 1.1rem;
+}
+
+.triage-camera-wrapper {
+  position: relative;
+  width: 100%;
+  border-radius: var(--radius-md);
+  overflow: hidden;
+  border: 1px solid #3f3f46;
+  background: #000;
+}
+
+.triage-camera-top-toolbar {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  z-index: 10;
+  display: flex;
+  gap: 6px;
+}
+
+.btn-icon-control.mini {
+  width: 32px;
+  height: 32px;
+  font-size: 0.85rem;
+  background: rgba(24, 24, 27, 0.85);
+  backdrop-filter: blur(4px);
+  border: 1px solid #3f3f46;
+  color: #f4f4f5;
+  border-radius: 6px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+}
+
+.triage-scanner-viewport {
+  position: relative;
+  width: 100%;
+  height: 180px;
+  background: #000;
+}
+
+.triage-scanner-box {
+  width: 100%;
+  height: 100%;
+  position: relative;
+  overflow: hidden;
+}
+
+.triage-scanner-box video {
+  width: 100% !important;
+  height: 100% !important;
+  object-fit: cover !important;
+}
+
 
 

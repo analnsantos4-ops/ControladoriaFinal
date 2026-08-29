@@ -1,5 +1,6 @@
 // Gerenciador de Interface, Telas, Modais e Toasts
 import { playBeep, triggerHaptic } from './utils.js';
+import { startCameraScanner, stopCameraScanner, toggleTorch, switchCamera, toggleCameraZoom } from './scanner.js';
 
 let activeViewId = 'view-login';
 
@@ -237,10 +238,11 @@ export function promptTriageBarcodeConfirmation({ product, expiration, onConfirm
     <div class="modal-card">
       <div class="modal-header-triage">
         <span class="triage-header-icon">📦</span>
-        <div>
+        <div style="flex: 1;">
           <h3 class="modal-title">Confirmar Envio para Triagem</h3>
           <p class="modal-subtitle">Retirada de Lote da Área de Venda</p>
         </div>
+        <button type="button" id="btn-triage-modal-close-x" class="btn-icon-control" style="font-size: 1rem; width: 32px; height: 32px;">✕</button>
       </div>
 
       <div class="triage-modal-body">
@@ -269,14 +271,46 @@ export function promptTriageBarcodeConfirmation({ product, expiration, onConfirm
 
         <div class="triage-info-box">
           <p class="triage-instruction-text">
-            ⚠️ Para confirmar a retirada deste lote da área de venda e enviá-lo para a Triagem, <strong>digite ou bipe o código de barras</strong> do produto:
+            ⚠️ Aponte a câmera para o código de barras ou digite/bipe para confirmar a retirada do lote:
           </p>
         </div>
 
+        <!-- Opção 1: Leitor de Câmera Integrado -->
+        <div class="triage-camera-section">
+          <button type="button" id="btn-triage-open-camera" class="btn-triage-cam-toggle">
+            <span class="btn-cam-icon">📷</span>
+            <span id="triage-cam-toggle-text">LER CÓDIGO COM A CÂMERA</span>
+          </button>
+
+          <!-- Viewport da Câmera no Modal (Oculto inicialmente) -->
+          <div id="triage-camera-wrapper" class="triage-camera-wrapper hidden">
+            <div class="triage-camera-top-toolbar">
+              <button type="button" id="btn-triage-cam-zoom" class="btn-icon-control mini" title="Zoom">1x</button>
+              <button type="button" id="btn-triage-cam-torch" class="btn-icon-control mini" title="Lanterna">⚡</button>
+              <button type="button" id="btn-triage-cam-switch" class="btn-icon-control mini" title="Alternar Câmera">🔄</button>
+              <button type="button" id="btn-triage-cam-close" class="btn-icon-control mini" title="Fechar Câmera">✕</button>
+            </div>
+            <div class="triage-scanner-viewport">
+              <div id="triage-scanner-box" class="triage-scanner-box"></div>
+              <div class="scanner-overlay" style="pointer-events: none;">
+                <div class="scanner-target-box" style="max-width: 260px; max-height: 110px;">
+                  <div class="scanner-laser-line"></div>
+                  <span class="target-corner top-left"></span>
+                  <span class="target-corner top-right"></span>
+                  <span class="target-corner bottom-left"></span>
+                  <span class="target-corner bottom-right"></span>
+                </div>
+                <p class="scanner-instruction-text" style="font-size: 0.72rem;">Enquadre o código de barras</p>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Opção 2: Entrada Manual / Leitor Físico -->
         <form id="form-triage-barcode" autocomplete="off">
           <div class="form-group" style="margin-bottom: 8px;">
             <label for="triage-barcode-input" style="font-size: 0.78rem; font-weight: 700; color: #a1a1aa; display: block; margin-bottom: 4px;">
-              Código de Barras do Produto:
+              Ou digite o código de barras:
             </label>
             <input
               type="text"
@@ -310,30 +344,55 @@ export function promptTriageBarcodeConfirmation({ product, expiration, onConfirm
   const barcodeInput = document.getElementById('triage-barcode-input');
   const errorMsg = document.getElementById('triage-barcode-error');
   const form = document.getElementById('form-triage-barcode');
+  const btnOpenCamera = document.getElementById('btn-triage-open-camera');
+  const cameraWrapper = document.getElementById('triage-camera-wrapper');
+  const btnCloseCam = document.getElementById('btn-triage-cam-close');
+  const btnTorchCam = document.getElementById('btn-triage-cam-torch');
+  const btnSwitchCam = document.getElementById('btn-triage-cam-switch');
+  const btnZoomCam = document.getElementById('btn-triage-cam-zoom');
+
+  let isCameraActive = false;
+  let isTorchOn = false;
+
+  const stopActiveCamera = async () => {
+    if (isCameraActive) {
+      isCameraActive = false;
+      await stopCameraScanner();
+      if (cameraWrapper) cameraWrapper.classList.add('hidden');
+      if (btnOpenCamera) {
+        btnOpenCamera.classList.remove('active');
+        btnOpenCamera.innerHTML = '<span class="btn-cam-icon">📷</span><span>LER CÓDIGO COM A CÂMERA</span>';
+      }
+    }
+  };
+
+  const closeModal = async () => {
+    await stopActiveCamera();
+    modal.classList.remove('open');
+  };
+
+  document.getElementById('triage-barcode-backdrop')?.addEventListener('click', closeModal);
+  document.getElementById('btn-triage-barcode-cancel')?.addEventListener('click', closeModal);
+  document.getElementById('btn-triage-modal-close-x')?.addEventListener('click', closeModal);
 
   if (barcodeInput) {
     barcodeInput.value = '';
     setTimeout(() => barcodeInput.focus(), 150);
   }
 
-  const closeModal = () => modal.classList.remove('open');
-  document.getElementById('triage-barcode-backdrop')?.addEventListener('click', closeModal);
-  document.getElementById('btn-triage-barcode-cancel')?.addEventListener('click', closeModal);
-
-  form?.addEventListener('submit', (e) => {
-    e.preventDefault();
-    const entered = barcodeInput ? barcodeInput.value.trim() : '';
-
-    if (!entered) {
+  // Validador central de código (usado pela câmera e pelo formulário)
+  const validateAndConfirmCode = async (entered) => {
+    const cleanEntered = (entered || '').trim();
+    if (!cleanEntered) {
       if (errorMsg) {
-        errorMsg.textContent = '⚠ Digite ou bipe o código de barras do produto.';
+        errorMsg.textContent = '⚠ Digite ou aponte a câmera para o código de barras do produto.';
         errorMsg.classList.remove('hidden');
       }
       return;
     }
 
-    // Compara o código digitado com o código do produto selecionado
-    if (entered.toLowerCase() === expectedBarcode.toLowerCase()) {
+    if (cleanEntered.toLowerCase() === expectedBarcode.toLowerCase()) {
+      await stopActiveCamera();
       modal.classList.remove('open');
       triggerHaptic(60);
       playBeep('success');
@@ -344,14 +403,74 @@ export function promptTriageBarcodeConfirmation({ product, expiration, onConfirm
       triggerHaptic(120);
       playBeep('warning');
       if (errorMsg) {
-        errorMsg.innerHTML = `❌ <strong>Código incorreto!</strong><br>O código digitado (<code>${entered}</code>) não corresponde ao produto selecionado (<strong>${product.name}</strong>).`;
+        errorMsg.innerHTML = `❌ <strong>Código incorreto!</strong><br>O código lido (<code>${cleanEntered}</code>) não corresponde ao produto selecionado (<strong>${product.name}</strong>).`;
         errorMsg.classList.remove('hidden');
       }
       if (barcodeInput) {
-        barcodeInput.value = '';
+        barcodeInput.value = cleanEntered;
         barcodeInput.focus();
       }
     }
+  };
+
+  // Câmera no Modal
+  btnOpenCamera?.addEventListener('click', async () => {
+    if (isCameraActive) {
+      await stopActiveCamera();
+      return;
+    }
+
+    if (errorMsg) errorMsg.classList.add('hidden');
+    cameraWrapper.classList.remove('hidden');
+    btnOpenCamera.classList.add('active');
+    btnOpenCamera.innerHTML = '<span class="btn-cam-icon">⏹</span><span>FECHAR CÂMERA</span>';
+    isCameraActive = true;
+
+    try {
+      const res = await startCameraScanner('triage-scanner-box', (scannedCode) => {
+        validateAndConfirmCode(scannedCode);
+      });
+
+      if (!res.success && res.error) {
+        showToast(res.error, 'warning', 4000);
+        await stopActiveCamera();
+      }
+    } catch (camErr) {
+      console.warn('Erro ao abrir câmera na triagem:', camErr);
+      showToast('Câmera indisponível. Digite o código manualmente.', 'warning');
+      await stopActiveCamera();
+    }
+  });
+
+  btnCloseCam?.addEventListener('click', stopActiveCamera);
+
+  btnTorchCam?.addEventListener('click', async () => {
+    isTorchOn = !isTorchOn;
+    await toggleTorch(isTorchOn);
+    if (btnTorchCam) {
+      btnTorchCam.style.background = isTorchOn ? '#eab308' : '#27272a';
+      btnTorchCam.style.color = isTorchOn ? '#000' : '#f4f4f5';
+    }
+  });
+
+  btnSwitchCam?.addEventListener('click', async () => {
+    await switchCamera('triage-scanner-box', (scannedCode) => {
+      validateAndConfirmCode(scannedCode);
+    });
+  });
+
+  btnZoomCam?.addEventListener('click', async () => {
+    const newZoom = await toggleCameraZoom();
+    if (btnZoomCam) {
+      btnZoomCam.textContent = `${newZoom.toFixed(1).replace('.0', '')}x`;
+    }
+  });
+
+  // Submissão manual
+  form?.addEventListener('submit', (e) => {
+    e.preventDefault();
+    const entered = barcodeInput ? barcodeInput.value.trim() : '';
+    validateAndConfirmCode(entered);
   });
 }
 

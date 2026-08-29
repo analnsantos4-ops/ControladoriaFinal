@@ -504,11 +504,33 @@ export async function openProductDetailView(productId) {
       });
     }
 
-    // Mini buttons para enviar validade específica para Triagem (com confirmação por código de barras)
+    // Mini buttons para enviar validade específica para Triagem ou Restaurar ao estoque
     document.querySelectorAll('.btn-triage-date-mini').forEach((btn) => {
       btn.addEventListener('click', (e) => {
         const expId = e.currentTarget.getAttribute('data-expid');
+        const isTriaged = e.currentTarget.getAttribute('data-triaged') === 'true';
         const targetExp = expirations.find((x) => String(x.id) === String(expId));
+
+        if (isTriaged) {
+          promptSecurityPin(
+            'RESTAURAR AO ESTOQUE',
+            `Deseja restaurar esta validade do produto "${product.name}" de volta para o estoque ativo de vendas?`,
+            async () => {
+              try {
+                showToast('Restaurando ao estoque...', 'sync', 1000);
+                await toggleExpirationTriaged(expId, false);
+                triggerSyncNow().catch((err) => console.warn('Sync background error:', err));
+                showToast('✓ Validade restaurada para o estoque ativo!', 'success', 2500);
+                window.dispatchEvent(new CustomEvent('refresh-dashboard-trigger'));
+                await openProductDetailView(product.id);
+              } catch (err) {
+                console.error('Erro ao restaurar:', err);
+                showToast('Erro ao restaurar validade', 'warning');
+              }
+            }
+          );
+          return;
+        }
 
         promptTriageBarcodeConfirmation({
           product,

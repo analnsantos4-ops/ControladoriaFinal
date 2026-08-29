@@ -93,7 +93,88 @@ export function getSyncStatus() {
     className = 'status-offline';
   }
 
-  return { isOnline, isSyncing, label, className, lastError: lastSyncError };
+  return { isOnline, isSyncing, label, className, lastError: lastSyncError, lastErrorCode: lastSyncErrorCode };
+}
+
+/**
+ * Diagnóstico completo do estado da rede, da fila pendente e da latência do Supabase
+ */
+export async function getSyncDiagnostics() {
+  const isOnline = typeof navigator !== 'undefined' ? navigator.onLine : true;
+  
+  // Informações de rede do navegador (se suportado pelo dispositivo)
+  let connectionInfo = {
+    effectiveType: 'Desconhecido',
+    rtt: null,
+    downlink: null,
+    saveData: false
+  };
+
+  if (typeof navigator !== 'undefined' && navigator.connection) {
+    const conn = navigator.connection;
+    connectionInfo = {
+      effectiveType: conn.effectiveType ? conn.effectiveType.toUpperCase() : 'OK',
+      rtt: conn.rtt ? `${conn.rtt}ms` : null,
+      downlink: conn.downlink ? `${conn.downlink} Mbps` : null,
+      saveData: conn.saveData || false
+    };
+  }
+
+  // Fila local de pendências
+  let pendingItems = [];
+  let pendingCount = 0;
+  let pendingByTable = { products: 0, product_expirations: 0, inventory_counts: 0, count_sessions: 0 };
+
+  try {
+    pendingItems = await getUnsyncedQueue();
+    pendingCount = pendingItems.length;
+    pendingItems.forEach((item) => {
+      const tbl = item.table_name || 'outros';
+      pendingByTable[tbl] = (pendingByTable[tbl] || 0) + 1;
+    });
+  } catch (err) {
+    console.warn('Erro ao ler fila no diagnóstico:', err);
+  }
+
+  // Teste de latência e saúde do Supabase em tempo real
+  let cloudHealth = { connected: false, latencyMs: 0, message: '', code: null };
+  if (isOnline && SUPABASE_URL && SUPABASE_PUBLISHABLE_KEY) {
+    const startTime = performance.now();
+    try {
+      const res = await fetch(`${SUPABASE_URL}/rest/v1/products?select=id&limit=1`, {
+        method: 'GET',
+        headers: getSupabaseGetHeaders()
+      });
+      const latency = Math.round(performance.now() - startTime);
+      cloudHealth.latencyMs = latency;
+
+      if (res.ok) {
+        cloudHealth.connected = true;
+        cloudHealth.message = 'Banco Supabase acessível e respondendo perfeitamente.';
+      } else {
+        const errText = await res.text();
+        cloudHealth.code = res.status;
+        cloudHealth.message = errText;
+      }
+    } catch (e) {
+      cloudHealth.latencyMs = Math.round(performance.now() - startTime);
+      cloudHealth.connected = false;
+      cloudHealth.message = e.message || 'Falha ao comunicar com o servidor.';
+    }
+  } else if (!isOnline) {
+    cloudHealth.message = 'Dispositivo desconectado da internet (Modo Offline ativo).';
+  }
+
+  return {
+    isOnline,
+    isSyncing,
+    connectionInfo,
+    pendingCount,
+    pendingByTable,
+    cloudHealth,
+    lastSyncError,
+    supabaseUrl: SUPABASE_URL ? SUPABASE_URL.replace(/https?:\/\//, '').split('.')[0] : 'Não configurado'
+  };
 }
 
 function notifyStatus() {

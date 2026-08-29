@@ -1071,30 +1071,33 @@ export async function toggleExpirationTriaged(expirationId, isTriaged = true) {
 
 /**
  * Envia um lote/validade para Triagem:
- * 1. Remove a validade específica e suas contagens do banco de dados (e enfileira DELETE no Supabase).
- * 2. Recalcula o estoque ativo do produto com base nas demais validades cadastradas.
- * 3. Se não sobrarem outras validades, zera o estoque ativo da gôndola mantendo o cadastro do produto.
+ * 1. Marca a validade como triada (is_triaged = true, triaged_at = data atual).
+ * 2. Recalcula o estoque ativo da gôndola do produto com base apenas nas validades ativas restantes.
+ * 3. Se não sobrarem outras validades ativas, zera o estoque da gôndola mantendo o cadastro do produto.
  */
 export async function sendProductExpirationToTriage(productId, expirationId) {
   if (!productId || !expirationId) return false;
 
-  // 1. Exclui a data de validade específica e suas contagens associadas do banco
-  await deleteProductExpiration(expirationId);
+  // 1. Marca a validade específica como triada
+  await toggleExpirationTriaged(expirationId, true);
 
   // 2. Busca o produto pai
   const product = await getProductById(productId);
   if (!product) return true;
 
-  // 3. Busca validades restantes ativas do produto
-  const remainingExps = await getProductExpirations(productId);
+  // 3. Busca validades restantes ATIVAS (não triadas) do produto
+  const allExps = await getProductExpirations(productId);
+  const activeExps = (allExps || []).filter(
+    (e) => !(e.is_triaged === true || e.is_triaged === 1 || e.is_triaged === 'true')
+  );
 
-  if (remainingExps && remainingExps.length > 0) {
-    // Recalcula totais com base nas validades restantes
+  if (activeExps && activeExps.length > 0) {
+    // Recalcula totais com base nas validades ativas restantes
     const locationSums = {};
     LOCATIONS.forEach((l) => (locationSums[l] = 0));
     let newTotal = 0;
 
-    for (const exp of remainingExps) {
+    for (const exp of activeExps) {
       const counts = await getLatestCountsForExpiration(exp.id);
       newTotal += counts.total || 0;
       Object.entries(counts.countsByLocation || {}).forEach(([loc, qty]) => {
@@ -1102,9 +1105,9 @@ export async function sendProductExpirationToTriage(productId, expirationId) {
       });
     }
 
-    // Ordena para pegar a validade mais próxima
-    remainingExps.sort((a, b) => (a.expiration_date > b.expiration_date ? 1 : -1));
-    const earliestExp = remainingExps[0];
+    // Ordena para pegar a validade ativa mais próxima
+    activeExps.sort((a, b) => (a.expiration_date > b.expiration_date ? 1 : -1));
+    const earliestExp = activeExps[0];
 
     product.total_quantity = newTotal;
     product.deposit_qty = locationSums['DEPÓSITO'] || 0;
@@ -1120,7 +1123,7 @@ export async function sendProductExpirationToTriage(productId, expirationId) {
 
     await saveProduct(product);
   } else {
-    // Não sobraram outras datas: zera quantidades ativas da gôndola, mas MANTÉM o produto cadastrado!
+    // Não restam outras datas ativas: zera quantidades ativas da gôndola, mas MANTÉM o produto cadastrado!
     product.total_quantity = 0;
     product.deposit_qty = 0;
     product.fridge_qty = 0;
@@ -1142,9 +1145,61 @@ export async function sendProductExpirationToTriage(productId, expirationId) {
 }
 
 /**
- * Limpeza automática:
- * Exclui definitivamente do banco de dados qualquer data vencida há mais de 7 dias
- * e que já tenha sido marcada/enviada para triagem.
+ * Restaura um lote/validade da Triagem de volta ao Estoque Ativo da Loja:
+ * 1. Desmarca o status de triagem (is_triaged = false, triaged_at = null).
+ * 2. Recalcula o estoque ativo da gôndola reintegrando as contagens deste lote.
+ */
+export async function restoreProductExpirationFromTriage(productId, expirationId) {
+  if (!productId || !expirationId) return false;
+  await toggleExpirationTriaged(expirationId, false);
+
+  const product = await getProductById(productId);
+  if (!product) return true;
+
+  const allExps = await getProductExpirations(productId);
+  const activeExps = (allExps || []).filter(
+    (e) => !(e.is_triaged === true || e.is_triaged === 1 || e.is_triaged === 'true')
+  );
+
+  const locationSums = {};
+  LOCATIONS.forEach((l) => (locationSums[l] = 0));
+  let newTotal = 0;
+
+  for (const exp of activeExps) {
+    const counts = await getLatestCountsForExpiration(exp.id);
+    newTotal += counts.total || 0;
+    Object.entries(counts.countsByLocation || {}).forEach(([loc, qty]) => {
+      locationSums[loc] = (locationSums[loc] || 0) + Number(qty);
+    });
+  }
+
+  activeExps.sort((a, b) => (a.expiration_date > b.expiration_date ? 1 : -1));
+  const earliestExp = activeExps[0];
+
+  product.total_quantity = newTotal;
+  product.deposit_qty = locationSums['DEPÓSITO'] || 0;
+  product.fridge_qty = locationSums['GELADEIRA'] || 0;
+  product.shelf_qty = locationSums['PRATELEIRA'] || 0;
+  product.gondola_end_qty = locationSums['PONTA DE GÔNDOLA'] || 0;
+  product.ear_qty = locationSums['ORELHA'] || 0;
+  product.island_qty = locationSums['ILHA'] || 0;
+  product.cart_qty = locationSums['CARRINHO'] || 0;
+  product.checkout_qty = locationSums['FRENTE DE LOJA'] || 0;
+  product.last_expiration_date = earliestExp ? earliestExp.expiration_date : null;
+  product.updated_at = new Date().toISOString();
+
+  await saveProduct(product);
+  window.dispatchEvent(new CustomEvent('refresh-dashboard-trigger'));
+  return true;
+}
+
+// Prazo de retenção na triagem: 3 dias (72 horas em milissegundos)
+export const TRIAGE_RETENTION_MS = 3 * 24 * 60 * 60 * 1000;
+
+/**
+ * Limpeza automática de triagem:
+ * Exclui definitivamente do banco de dados qualquer lote em triagem após 3 dias (72 horas)
+ * do momento em que foi enviado para a triagem.
  */
 export async function runAutomaticTriageCleanup() {
   try {
@@ -1152,25 +1207,159 @@ export async function runAutomaticTriageCleanup() {
     if (!expirations || expirations.length === 0) return 0;
 
     let purgedCount = 0;
+    const now = Date.now();
+
     for (const exp of expirations) {
       const isTriaged = exp.is_triaged === true || exp.is_triaged === 1 || exp.is_triaged === 'true';
-      const days = getDaysUntilExpiration(exp.expiration_date);
+      if (!isTriaged) continue;
 
-      // Se foi enviado para triagem E já está vencido há mais de 7 dias (days < -7)
-      if (isTriaged && days < -7) {
+      const triagedTimestamp = exp.triaged_at ? new Date(exp.triaged_at).getTime() : null;
+
+      // Se possui registro de quando foi triado e já se passaram 3 dias (72 horas)
+      if (triagedTimestamp && (now - triagedTimestamp) >= TRIAGE_RETENTION_MS) {
         await deleteProductExpiration(exp.id);
         purgedCount++;
+      } else if (!triagedTimestamp) {
+        // Fallback para itens antigos sem triaged_at: se data de validade já passou há mais de 3 dias
+        const days = getDaysUntilExpiration(exp.expiration_date);
+        if (days < -3) {
+          await deleteProductExpiration(exp.id);
+          purgedCount++;
+        }
       }
     }
 
     if (purgedCount > 0) {
-      console.log(`[Limpeza Automática] ${purgedCount} registros de triagem antigos foram limpos definitivamente.`);
+      console.log(`[Limpeza Automática] ${purgedCount} lotes em triagem após 3 dias foram excluídos definitivamente do banco de dados.`);
     }
     return purgedCount;
   } catch (err) {
     console.warn('[Limpeza Automática Error]:', err);
     return 0;
   }
+}
+
+/**
+ * Retorna as estatísticas completas de Memória e Armazenamento do Banco de Dados
+ */
+export async function getDatabaseStorageStats() {
+  const db = await initDB();
+
+  // 1. Estimativa de cota nativa da Storage API do navegador
+  let storageEstimate = {
+    usage: 0,
+    quota: 0,
+    percentUsed: 0,
+    usageFormatted: '0 KB',
+    quotaFormatted: '0 MB'
+  };
+
+  if (typeof navigator !== 'undefined' && navigator.storage && typeof navigator.storage.estimate === 'function') {
+    try {
+      const est = await navigator.storage.estimate();
+      const usage = est.usage || 0;
+      const quota = est.quota || (1024 * 1024 * 1024 * 2); // 2GB fallback
+      const percent = quota > 0 ? (usage / quota) * 100 : 0;
+      storageEstimate = {
+        usage,
+        quota,
+        percentUsed: Number(percent.toFixed(2)),
+        usageFormatted: formatByteSize(usage),
+        quotaFormatted: formatByteSize(quota)
+      };
+    } catch (e) {
+      console.warn('Storage estimate error:', e);
+    }
+  }
+
+  // 2. Contagem e peso detalhado de cada tabela no IndexedDB
+  const tables = ['products', 'product_expirations', 'inventory_counts', 'count_sessions', 'sync_queue'];
+  const tableStats = {};
+  let totalRecords = 0;
+  let estimatedDbBytes = 0;
+  let totalPhotoCount = 0;
+  let totalPhotoBytes = 0;
+  let triagedCount = 0;
+  let activeExpCount = 0;
+
+  for (const tableName of tables) {
+    try {
+      const records = await new Promise((resolve) => {
+        const tx = db.transaction(tableName, 'readonly');
+        const store = tx.objectStore(tableName);
+        const req = store.getAll();
+        req.onsuccess = () => resolve(req.result || []);
+        req.onerror = () => resolve([]);
+      });
+
+      const count = records.length;
+      totalRecords += count;
+
+      let jsonBytes = 0;
+      try {
+        const str = JSON.stringify(records);
+        jsonBytes = new Blob([str]).size;
+      } catch (_) {
+        jsonBytes = count * 250;
+      }
+
+      if (tableName === 'products') {
+        records.forEach((p) => {
+          if (p.image && typeof p.image === 'string') {
+            totalPhotoCount++;
+            totalPhotoBytes += p.image.length;
+          }
+        });
+      }
+
+      if (tableName === 'product_expirations') {
+        records.forEach((e) => {
+          const isT = e.is_triaged === true || e.is_triaged === 1 || e.is_triaged === 'true';
+          if (isT) {
+            triagedCount++;
+          } else {
+            activeExpCount++;
+          }
+        });
+      }
+
+      estimatedDbBytes += jsonBytes;
+      tableStats[tableName] = {
+        count,
+        sizeBytes: jsonBytes,
+        sizeFormatted: formatByteSize(jsonBytes)
+      };
+    } catch (err) {
+      tableStats[tableName] = { count: 0, sizeBytes: 0, sizeFormatted: '0 B' };
+    }
+  }
+
+  const finalUsedBytes = Math.max(storageEstimate.usage, estimatedDbBytes);
+
+  return {
+    storageEstimate: {
+      ...storageEstimate,
+      usage: finalUsedBytes,
+      usageFormatted: formatByteSize(finalUsedBytes)
+    },
+    totalRecords,
+    activeExpCount,
+    triagedCount,
+    totalPhotoCount,
+    totalPhotoBytes,
+    totalPhotoFormatted: formatByteSize(totalPhotoBytes),
+    tableStats,
+    estimatedDbBytes,
+    estimatedDbFormatted: formatByteSize(estimatedDbBytes)
+  };
+}
+
+function formatByteSize(bytes) {
+  if (!bytes || bytes <= 0) return '0 B';
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+  if (bytes < 1024 * 1024 * 1024) return `${(bytes / (1024 * 1024)).toFixed(2)} MB`;
+  return `${(bytes / (1024 * 1024 * 1024)).toFixed(2)} GB`;
 }
 
 // ----------------------------------------------------
