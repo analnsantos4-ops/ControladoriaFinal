@@ -1,6 +1,6 @@
 // Mecanismo de Conferência de Estoque, Validades e Auditoria por Corredor
 import { LOCATIONS, SETORS, CORRIDORS, formatDateBR, parseDateBRtoISO, formatNumber, triggerHaptic, playBeep, getTodayISO } from './utils.js';
-import { getProductExpirations, getLatestCountsForExpiration, saveInventoryCounts, saveProductExpiration, saveSession, getActiveSession, clearActiveSession, getAllProducts, getProductById } from './db.js';
+import { getProductExpirations, getLatestCountsForExpiration, saveInventoryCounts, saveProductExpiration, saveSession, getActiveSession, clearActiveSession, getAllProducts, getProductById, saveBlitzItem } from './db.js';
 import { triggerSyncNow } from './sync.js';
 import { showToast, showView, openPhotoModal } from './ui.js';
 import { formatSingleProductWhatsApp, formatMultipleProductsWhatsApp, openWhatsAppExportModal } from './whatsapp.js';
@@ -8,6 +8,15 @@ import { formatSingleProductWhatsApp, formatMultipleProductsWhatsApp, openWhatsA
 let currentAuditingProduct = null;
 let currentSelectedExpiration = null;
 let previousCountsForSelectedDate = { countsByLocation: {}, total: 0, hasPreviousCount: false };
+let currentBlitzConferenceContext = null;
+
+export function setBlitzConferenceContext(ctx) {
+  currentBlitzConferenceContext = ctx;
+}
+
+export function getBlitzConferenceContext() {
+  return currentBlitzConferenceContext;
+}
 
 /**
  * Abre a interface de conferência para um produto específico
@@ -234,7 +243,7 @@ function renderLocationInputs(previousValues = {}) {
         </div>
         <div class="loc-card-controls">
           <button type="button" class="btn-step btn-step-minus" data-idx="${idx}" data-delta="-1" aria-label="Diminuir 1">-1</button>
-          <input type="number" id="loc-input-${idx}" class="loc-qty-input" value="${qty}" min="0" data-idx="${idx}" inputmode="numeric" />
+          <input type="number" id="loc-input-${idx}" class="loc-qty-input" value="${qty}" min="0" data-idx="${idx}" inputmode="numeric" onfocus="this.select()" />
           <button type="button" class="btn-step btn-step-plus" data-idx="${idx}" data-delta="1" aria-label="Aumentar 1">+1</button>
           <button type="button" class="btn-step btn-step-plus-five" data-idx="${idx}" data-delta="5" aria-label="Aumentar 5">+5</button>
         </div>
@@ -244,6 +253,7 @@ function renderLocationInputs(previousValues = {}) {
 
   container.querySelectorAll('.loc-qty-input').forEach(input => {
     input.addEventListener('input', () => updateComparisonCard());
+    input.addEventListener('focus', function() { this.select(); });
   });
 
   container.querySelectorAll('.btn-step').forEach(btn => {
@@ -321,6 +331,23 @@ export async function confirmConference() {
       session?.id
     );
 
+    // Se houver contexto de Blitz ativo, registra o item da Blitz como TEM
+    if (currentBlitzConferenceContext) {
+      try {
+        await saveBlitzItem({
+          blitz_session_id: currentBlitzConferenceContext.sessionId,
+          product_id: currentAuditingProduct.id,
+          barcode: currentAuditingProduct.barcode,
+          requested_expiration_date: currentBlitzConferenceContext.requestedDate || currentSelectedExpiration.expiration_date,
+          result: 'TEM',
+          conference_id: result.countRecord?.id || null,
+          total_quantity: result.total
+        });
+      } catch (errBlitz) {
+        console.warn('Erro ao associar contagem com a Blitz:', errBlitz);
+      }
+    }
+
     triggerHaptic(100);
     playBeep('success');
     showToast('✓ Conferência salva!', 'success');
@@ -328,7 +355,8 @@ export async function confirmConference() {
     window.dispatchEvent(new CustomEvent('refresh-dashboard-trigger'));
     triggerSyncNow().catch(e => console.warn('Sync background error:', e));
 
-    showConferenceSavedModal(currentAuditingProduct, currentSelectedExpiration, result.total);
+    showConferenceSavedModal(currentAuditingProduct, currentSelectedExpiration, result.total, currentBlitzConferenceContext);
+    currentBlitzConferenceContext = null;
   } catch (error) {
     console.error(error);
     showToast('⚠ Erro ao salvar', 'warning');
@@ -338,7 +366,7 @@ export async function confirmConference() {
 /**
  * Modal de Sucesso após salvar
  */
-function showConferenceSavedModal(product, expiration, total) {
+function showConferenceSavedModal(product, expiration, total, blitzContext = null) {
   let modal = document.getElementById('modal-conference-saved');
   if (!modal) {
     modal = document.createElement('div');
@@ -347,11 +375,13 @@ function showConferenceSavedModal(product, expiration, total) {
     document.body.appendChild(modal);
   }
 
+  const isBlitz = Boolean(blitzContext);
+
   modal.innerHTML = `
     <div class="modal-backdrop"></div>
     <div class="modal-card success-card">
       <div class="saved-check-icon">✓</div>
-      <h3 class="saved-title">CONFERÊNCIA SALVA</h3>
+      <h3 class="saved-title">${isBlitz ? 'CONFERÊNCIA DA BLITZ SALVA' : 'CONFERÊNCIA SALVA'}</h3>
       <p class="saved-product-name">${product.name}</p>
       <div class="saved-details-pill">
         <span>Validade: ${formatDateBR(expiration.expiration_date)}</span>
@@ -359,8 +389,12 @@ function showConferenceSavedModal(product, expiration, total) {
       </div>
       <div class="modal-actions-stacked">
         <button type="button" class="btn-whatsapp-hero" id="btn-saved-export-wa">💬 WHATSAPP</button>
-        <button type="button" class="btn-primary btn-hero-action" id="btn-saved-scan-next">📷 BIPAR PRÓXIMO</button>
-        <button type="button" class="btn-secondary" id="btn-saved-go-dashboard">VOLTAR AO INÍCIO</button>
+        <button type="button" class="btn-primary btn-hero-action" id="btn-saved-scan-next">
+          ${isBlitz ? '📷 BIPAR PRÓXIMO NA BLITZ' : '📷 BIPAR PRÓXIMO'}
+        </button>
+        <button type="button" class="btn-secondary" id="btn-saved-go-dashboard">
+          ${isBlitz ? '📊 PAINEL DA BLITZ' : 'VOLTAR AO INÍCIO'}
+        </button>
       </div>
     </div>`;
 
@@ -379,7 +413,11 @@ function showConferenceSavedModal(product, expiration, total) {
 
   document.getElementById('btn-saved-go-dashboard')?.addEventListener('click', () => {
     modal.classList.remove('open');
-    showView('view-dashboard');
+    if (isBlitz) {
+      window.dispatchEvent(new CustomEvent('open-blitz-dashboard-trigger'));
+    } else {
+      showView('view-dashboard');
+    }
   });
 }
 

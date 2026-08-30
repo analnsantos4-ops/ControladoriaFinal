@@ -12,6 +12,7 @@ import { openNewProductView, saveNewProduct, handleProductImageFile, openProduct
 import { openConferenceForProduct, confirmConference, openCorridorAuditView, loadCorridorAuditProducts, exportCurrentCorridorWhatsApp } from './inventory.js';
 import { SETORS, CORRIDORS, formatDateBR, formatNumber, getDaysUntilExpiration } from './utils.js';
 import { openWhatsAppImportModal, formatMultipleProductsWhatsApp, openWhatsAppExportModal } from './whatsapp.js';
+import { initBlitzModule, getActiveBlitz, promptStartBlitz, handleBlitzBarcodeScanned, openBlitzDashboardView, openBlitzHistoryView, updateBlitzTopBarIndicator } from './blitz.js';
 
 let torchState = false;
 
@@ -22,9 +23,10 @@ async function initApp() {
   // Inicializa Banco IndexedDB e executa limpeza automática de triagem (3 dias)
   try {
     await initDB();
+    await initBlitzModule();
     runAutomaticTriageCleanup().catch((err) => console.warn('Auto triage cleanup on init error:', err));
   } catch (e) {
-    console.error('Falha ao inicializar IndexedDB:', e);
+    console.error('Falha ao inicializar IndexedDB / Blitz:', e);
   }
 
   // Inicializa motor de sincronização Supabase
@@ -99,6 +101,7 @@ function showLoginView() {
 // Configura Tela de Dashboard
 async function showDashboardView() {
   await renderDashboard();
+  updateBlitzTopBarIndicator();
   showView('view-dashboard');
 }
 
@@ -158,9 +161,14 @@ function setupEventListeners() {
   // --------------------------------------------------
   // 2. DASHBOARD - AÇÕES RÁPIDAS
   // --------------------------------------------------
-  // [ 📷 CONFERIR ] - Botão Principal
+  // [ 📷 CONFERIR ] - Botão Principal (Conferência Direta de Produto)
   document.getElementById('btn-dash-scan')?.addEventListener('click', () => {
-    openScannerView();
+    openScannerView({ mode: 'DIRECT_CONFERENCE' });
+  });
+
+  // [ 📋 BLITZ SEMANAL ] - Botão Hero
+  document.getElementById('btn-dash-blitz')?.addEventListener('click', () => {
+    promptStartBlitz();
   });
 
   // [ 🔎 CONSULTAR ]
@@ -702,22 +710,43 @@ function setupEventListeners() {
   });
 
   // Custom Event Listeners
-  window.addEventListener('start-scanner-trigger', () => {
-    openScannerView();
+  window.addEventListener('start-scanner-trigger', (e) => {
+    const mode = e.detail?.mode || (getActiveBlitz() ? 'BLITZ' : 'DIRECT_CONFERENCE');
+    openScannerView({ mode });
   });
 
   window.addEventListener('refresh-dashboard-trigger', () => {
     renderDashboard();
+    updateBlitzTopBarIndicator();
+  });
+
+  window.addEventListener('open-blitz-dashboard-trigger', () => {
+    openBlitzDashboardView();
   });
 }
 
 // ----------------------------------------------------
 // FLUXO DO SCANNER E DETECÇÃO DE CÓDIGO
 // ----------------------------------------------------
-export async function openScannerView() {
+let currentScannerMode = 'DIRECT_CONFERENCE'; // 'DIRECT_CONFERENCE' | 'BLITZ'
+
+export function setScannerMode(mode) {
+  currentScannerMode = mode;
+}
+
+export function getScannerMode() {
+  return currentScannerMode;
+}
+
+export async function openScannerView(options = {}) {
+  const mode = options.mode || (getActiveBlitz() ? 'BLITZ' : 'DIRECT_CONFERENCE');
+  currentScannerMode = mode;
+
   showView('view-scanner');
   const manualInput = document.getElementById('manual-barcode-input');
   if (manualInput) manualInput.value = '';
+
+  renderScannerHeaderIndicator();
 
   const res = await startCameraScanner('scanner-reader-box', onBarcodeDetected);
   if (!res.success) {
@@ -726,17 +755,57 @@ export async function openScannerView() {
   }
 }
 
+export function renderScannerHeaderIndicator() {
+  const banner = document.getElementById('scanner-blitz-indicator-bar');
+  if (!banner) return;
+
+  const activeBlitz = getActiveBlitz();
+
+  if (currentScannerMode === 'BLITZ' && activeBlitz) {
+    updateBlitzTopBarIndicator();
+  } else {
+    // Modo Conferência Direta: Cabeçalho claro e opção de alternar para a blitz se houver
+    banner.classList.remove('hidden');
+    banner.innerHTML = `
+      <div style="display: flex; align-items: center; justify-content: space-between; width: 100%; gap: 6px; flex-wrap: wrap;">
+        <span style="display: flex; align-items: center; gap: 6px; font-weight: 800; color: #60a5fa; font-size: 0.78rem;">
+          <span>📷</span>
+          <span>CONFERÊNCIA DIRETA: Bipar produto</span>
+        </span>
+        ${activeBlitz ? `
+          <button type="button" id="btn-scanner-switch-blitz" style="background: #18181c; border: 1px solid #f59e0b; color: #fbbf24; padding: 2px 8px; border-radius: 4px; font-size: 0.72rem; font-weight: 800; cursor: pointer;">
+            📋 Ir para Blitz
+          </button>
+        ` : ''}
+      </div>
+    `;
+
+    document.getElementById('btn-scanner-switch-blitz')?.addEventListener('click', () => {
+      currentScannerMode = 'BLITZ';
+      renderScannerHeaderIndicator();
+      showToast('Modo Blitz Ativado', 'info', 1000);
+    });
+  }
+}
+
 // Callback executado imediatamente após o bip
 export async function onBarcodeDetected(barcode) {
   if (!barcode) return;
   const cleanCode = barcode.trim();
 
-  // 1. Pesquisa no IndexedDB primeiro (Ultra rápido / offline)
+  // Se estiver explicitamente no modo BLITZ e com sessão ativa
+  if (currentScannerMode === 'BLITZ' && getActiveBlitz()) {
+    stopCameraScanner();
+    await handleBlitzBarcodeScanned(cleanCode);
+    return;
+  }
+
+  // 1. CONFERÊNCIA DIRETA: Pesquisa no IndexedDB primeiro (Ultra rápido / offline)
   showToast(`Bipado: ${cleanCode}`, 'info', 1000);
   const existingProduct = await getProductByBarcode(cleanCode);
 
   if (existingProduct) {
-    // SIM → ABRIR PRODUTO PARA CONFERÊNCIA
+    // SIM → ABRIR PRODUTO PARA CONFERÊNCIA DIRETA
     openConferenceForProduct(existingProduct);
   } else {
     // NÃO → CADASTRAR PRODUTO COM CÓDIGO PREENCHIDO

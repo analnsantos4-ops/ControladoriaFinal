@@ -1,12 +1,13 @@
 // Gerenciamento de Produtos, Cadastro, Foto e Detalhes
 import { SETORS, CORRIDORS, LOCATIONS, compressImage, formatNumber, formatDateBR, parseDateBRtoISO, getTodayISO } from './utils.js';
-import { getProductByBarcode, getProductById, saveProduct, saveProductExpiration, saveInventoryCounts, saveCompleteProductWithCounts, getProductExpirations, getLatestCountsForExpiration, getHistoryForProduct, getLocationHistoryForProduct, deleteProduct, deleteProductExpiration, toggleExpirationTriaged, sendProductExpirationToTriage } from './db.js';
+import { getProductByBarcode, getProductById, saveProduct, saveProductExpiration, saveInventoryCounts, saveCompleteProductWithCounts, getProductExpirations, getLatestCountsForExpiration, getHistoryForProduct, getLocationHistoryForProduct, deleteProduct, deleteProductExpiration, toggleExpirationTriaged, sendProductExpirationToTriage, saveBlitzItem } from './db.js';
 import { triggerSyncNow } from './sync.js';
 import { showToast, showView, openPhotoModal, promptSecurityPin, promptTriageBarcodeConfirmation } from './ui.js';
 import { openConferenceForProduct } from './inventory.js';
 import { formatSingleProductWhatsApp, formatMultipleProductsWhatsApp, openWhatsAppExportModal } from './whatsapp.js';
 
 let currentProductImage = '';
+let currentNewProductBlitzContext = null;
 
 // Prepara os selects de Setor e Corredor
 export function populateSectorAndCorridorSelects(sectorSelectId, corridorSelectId) {
@@ -22,12 +23,14 @@ export function populateSectorAndCorridorSelects(sectorSelectId, corridorSelectI
   }
 }
 
-// Inicializa a tela de Novo Produto com código preenchido
-export function openNewProductView(barcode = '') {
+// Inicializa a tela de Novo Produto com código preenchido e suporte a contexto Blitz
+export function openNewProductView(barcode = '', prefilledSector = '', prefilledExpDate = '', blitzContext = null) {
   const form = document.getElementById('form-new-product');
   if (form) form.reset();
 
   currentProductImage = '';
+  currentNewProductBlitzContext = blitzContext;
+
   document.getElementById('new-product-barcode').value = barcode;
   document.getElementById('new-product-img-preview').src = '';
   document.getElementById('new-product-img-preview-container').classList.add('hidden');
@@ -35,13 +38,18 @@ export function openNewProductView(barcode = '') {
 
   populateSectorAndCorridorSelects('new-product-sector', 'new-product-corridor');
 
-  // Preenche data padrão de validade (hoje ou vazia)
-  const dateInput = document.getElementById('new-product-exp-date');
-  if (dateInput) {
-    dateInput.value = '';
+  if (prefilledSector) {
+    const secEl = document.getElementById('new-product-sector');
+    if (secEl) secEl.value = prefilledSector;
   }
 
-  // Reseta campos de contagem dos 8 locais
+  // Preenche data padrão de validade
+  const dateInput = document.getElementById('new-product-exp-date');
+  if (dateInput) {
+    dateInput.value = prefilledExpDate || '';
+  }
+
+  // Reseta campos de contagem dos locais
   LOCATIONS.forEach((loc, idx) => {
     const el = document.getElementById(`new-count-${idx}`);
     if (el) el.value = 0;
@@ -153,6 +161,27 @@ export async function saveNewProduct() {
       expirationDate: finalExpDate,
       locationCounts
     });
+
+    // Se cadastrado no fluxo da Blitz Semanal, registra item como TEM
+    if (currentNewProductBlitzContext) {
+      try {
+        let totalCount = 0;
+        Object.values(locationCounts).forEach(v => { totalCount += Number(v) || 0; });
+
+        await saveBlitzItem({
+          blitz_session_id: currentNewProductBlitzContext.sessionId,
+          product_id: result.product.id,
+          barcode: result.product.barcode,
+          requested_expiration_date: currentNewProductBlitzContext.requestedDate || finalExpDate,
+          result: 'TEM',
+          conference_id: result.countRecord?.id || null,
+          total_quantity: totalCount
+        });
+      } catch (errBlitz) {
+        console.warn('Erro ao associar novo produto à Blitz:', errBlitz);
+      }
+      currentNewProductBlitzContext = null;
+    }
 
     showToast('✓ Produto e quantidades gravados!', 'success', 2500);
 
@@ -717,8 +746,8 @@ export async function openEditProductModal(product) {
           </div>
           <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 6px;">
             ${LOCATIONS.map((loc, idx) => `
-              <div style="display: flex; align-items: center; justify-content: space-between; background: #09090b; padding: 4px 8px; border-radius: 6px; border: 1px solid #27272a;">
-                <span style="font-size: 0.7rem; color: #a1a1aa; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 90px;" title="${loc}">${loc}</span>
+              <div style="display: flex; align-items: center; justify-content: space-between; background: #09090b; padding: 4px 8px; border-radius: 6px; border: 1px solid #27272a; gap: 4px;">
+                <span style="font-size: 0.7rem; color: #a1a1aa; font-weight: 700; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; flex: 1; min-width: 0;" title="${loc}">${loc}</span>
                 <input
                   type="number"
                   min="0"
@@ -726,7 +755,8 @@ export async function openEditProductModal(product) {
                   data-location="${loc}"
                   class="form-input edit-loc-input"
                   value="${currentLocCounts[loc] || 0}"
-                  style="width: 54px; height: 28px; text-align: center; font-weight: 700; font-size: 0.85rem; padding: 0 4px;"
+                  onfocus="this.select()"
+                  style="width: 68px; min-width: 54px; height: 32px; text-align: center; font-weight: 800; font-size: 1.05rem; padding: 0 4px; border-radius: 5px; background: #000; color: #f4f4f5;"
                 />
               </div>
             `).join('')}

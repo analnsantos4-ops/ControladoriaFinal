@@ -474,3 +474,78 @@ export function promptTriageBarcodeConfirmation({ product, expiration, onConfirm
   });
 }
 
+// Modal de Confirmação Genérico e Amigável (Evita bloqueios de window.confirm em iframes)
+export function promptConfirmDialog({
+  title = 'Confirmação',
+  message = 'Deseja confirmar esta ação?',
+  confirmText = 'CONFIRMAR',
+  cancelText = 'CANCELAR',
+  confirmStyle = 'primary', // 'primary' | 'danger' | 'warning'
+  icon = '❓',
+  onConfirm,
+  onCancel
+}) {
+  let modal = document.getElementById('generic-confirm-modal');
+  if (!modal) {
+    modal = document.createElement('div');
+    modal.id = 'generic-confirm-modal';
+    modal.className = 'custom-modal';
+    document.body.appendChild(modal);
+  }
+
+  let confirmBtnBg = '#10b981';
+  let confirmBtnColor = '#022c22';
+  let confirmBorder = 'transparent';
+
+  if (confirmStyle === 'danger') {
+    confirmBtnBg = '#ef4444';
+    confirmBtnColor = '#ffffff';
+  } else if (confirmStyle === 'warning') {
+    confirmBtnBg = '#f59e0b';
+    confirmBtnColor = '#000000';
+  }
+
+  modal.innerHTML = `
+    <div class="modal-backdrop" id="generic-confirm-backdrop"></div>
+    <div class="modal-card" style="padding: 20px; max-width: 420px; width: 100%; box-sizing: border-box;">
+      <div style="display: flex; align-items: center; gap: 12px; margin-bottom: 12px;">
+        <span style="font-size: 1.6rem;">${icon}</span>
+        <div>
+          <h3 style="font-size: 1.05rem; font-weight: 900; color: #f4f4f5; margin: 0;">${title}</h3>
+        </div>
+      </div>
+
+      <div style="font-size: 0.85rem; color: #d4d4d8; line-height: 1.45; margin-bottom: 18px;">
+        ${message}
+      </div>
+
+      <div style="display: flex; gap: 8px;">
+        <button type="button" id="btn-generic-cancel" class="btn-secondary" style="flex: 1; height: 44px; justify-content: center; font-weight: 800; font-size: 0.82rem;">
+          ${cancelText}
+        </button>
+        <button type="button" id="btn-generic-confirm" class="btn-primary" style="flex: 1.2; height: 44px; justify-content: center; background: ${confirmBtnBg}; color: ${confirmBtnColor}; border: 1px solid ${confirmBorder}; font-weight: 900; font-size: 0.82rem;">
+          ${confirmText}
+        </button>
+      </div>
+    </div>
+  `;
+
+  modal.classList.add('open');
+
+  const closeModal = () => modal.classList.remove('open');
+
+  const handleCancel = () => {
+    closeModal();
+    if (typeof onCancel === 'function') onCancel();
+  };
+
+  const handleConfirm = () => {
+    closeModal();
+    if (typeof onConfirm === 'function') onConfirm();
+  };
+
+  document.getElementById('generic-confirm-backdrop')?.addEventListener('click', handleCancel);
+  document.getElementById('btn-generic-cancel')?.addEventListener('click', handleCancel);
+  document.getElementById('btn-generic-confirm')?.addEventListener('click', handleConfirm);
+}
+

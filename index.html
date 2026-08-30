@@ -1121,17 +1121,17 @@
 
     .loc-qty-input {
       flex: 1 1 0% !important;
-      min-width: 0 !important;
+      min-width: 48px !important;
       width: 100% !important;
-      height: 32px !important;
+      height: 34px !important;
       background: #09090b !important;
       border: 1px solid #3f3f46 !important;
       border-radius: 5px !important;
       text-align: center !important;
-      font-size: 1.05rem !important;
+      font-size: 1.1rem !important;
       font-weight: 900 !important;
       color: #f4f4f5 !important;
-      padding: 0 !important;
+      padding: 0 4px !important;
       box-sizing: border-box !important;
       -moz-appearance: textfield;
     }
@@ -1307,60 +1307,86 @@
 
     /* Compact Grid para Novo Produto */
     .compact-grid {
-      display: grid;
-      grid-template-columns: repeat(2, 1fr);
-      gap: 6px;
+      display: grid !important;
+      grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+      gap: 8px !important;
+      width: 100% !important;
+      box-sizing: border-box !important;
     }
 
     .loc-mini-card {
-      background: #18181c;
-      border: 1px solid #2a2a30;
-      border-radius: 8px;
-      padding: 6px 8px;
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-      gap: 6px;
+      background: #18181c !important;
+      border: 1px solid #2a2a30 !important;
+      border-radius: 8px !important;
+      padding: 8px 10px !important;
+      display: flex !important;
+      flex-direction: column !important;
+      align-items: center !important;
+      justify-content: center !important;
+      gap: 6px !important;
+      min-width: 0 !important;
+      width: 100% !important;
+      box-sizing: border-box !important;
     }
 
     .loc-mini-card label {
-      font-size: 0.72rem;
-      font-weight: 800;
-      color: #a1a1aa;
-      margin: 0;
-      white-space: nowrap;
-      overflow: hidden;
-      text-overflow: ellipsis;
+      font-size: 0.72rem !important;
+      font-weight: 800 !important;
+      color: #a1a1aa !important;
+      margin: 0 !important;
+      white-space: nowrap !important;
+      overflow: hidden !important;
+      text-overflow: ellipsis !important;
+      text-align: center !important;
+      width: 100% !important;
+      letter-spacing: 0.3px !important;
     }
 
     .new-count-input {
-      width: 54px;
-      height: 32px;
-      background: #050505;
-      border: 1px solid #3f3f46;
-      border-radius: 6px;
-      text-align: center;
-      font-size: 0.95rem;
-      font-weight: 800;
-      color: #f4f4f5;
-      padding: 0 2px;
+      width: 100% !important;
+      min-width: 0 !important;
+      max-width: 100% !important;
+      height: 44px !important;
+      background: #09090b !important;
+      border: 1px solid #3f3f46 !important;
+      border-radius: 6px !important;
+      text-align: center !important;
+      font-size: 1.25rem !important;
+      font-weight: 900 !important;
+      color: #f4f4f5 !important;
+      padding: 0 6px !important;
+      box-sizing: border-box !important;
+      -moz-appearance: textfield !important;
+    }
+
+    .new-count-input:focus {
+      border-color: #10b981 !important;
+      background: #000 !important;
+      outline: none !important;
+      box-shadow: 0 0 0 2px rgba(16, 185, 129, 0.25) !important;
+    }
+
+    .new-count-input::-webkit-outer-spin-button,
+    .new-count-input::-webkit-inner-spin-button {
+      -webkit-appearance: none !important;
+      margin: 0 !important;
     }
 
     .new-product-total-bar {
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-      margin-top: 8px;
-      padding-top: 6px;
-      border-top: 1px solid #2a2a30;
-      font-size: 0.85rem;
-      font-weight: 800;
-      color: #f4f4f5;
+      display: flex !important;
+      align-items: center !important;
+      justify-content: space-between !important;
+      margin-top: 10px !important;
+      padding-top: 8px !important;
+      border-top: 1px solid #2a2a30 !important;
+      font-size: 0.95rem !important;
+      font-weight: 800 !important;
+      color: #f4f4f5 !important;
     }
 
     .new-product-total-bar strong {
-      color: #10b981;
-      font-size: 1.1rem;
+      color: #10b981 !important;
+      font-size: 1.35rem !important;
     }
 
     /* Vencimentos: Abas em Pílulas com Scroll Horizontal Suave */
@@ -1704,6 +1730,9 @@
 
       <!-- Sessão de Conferência em Andamento (se houver) -->
       <div id="dashboard-active-session-banner" class="hidden"></div>
+      
+      <!-- Sessão de Blitz Semanal em Andamento (se houver) -->
+      <div id="dashboard-active-blitz-banner" class="hidden" style="margin-bottom: 8px;"></div>
 
       <!-- Ações Rápidas -->
       <section class="dash-quick-actions">
@@ -1711,6 +1740,12 @@
           <span class="action-card-icon">📷</span>
           <span class="action-card-label">CONFERIR</span>
           <span class="action-card-hint">Bipar código de barras</span>
+        </button>
+
+        <button type="button" id="btn-dash-blitz" class="action-card hero-action-card" style="background: linear-gradient(135deg, #f59e0b 0%, #d97706 100%); color: #000; box-shadow: 0 4px 14px rgba(245, 158, 11, 0.22);">
+          <span class="action-card-icon">📋</span>
+          <span class="action-card-label">BLITZ SEMANAL</span>
+          <span class="action-card-hint">Conferência por setor & data</span>
         </button>
 
         <div class="secondary-actions-grid">
@@ -1722,13 +1757,13 @@
             <span class="action-card-icon">⚠️</span>
             <span class="action-card-label">VENCIMENTOS</span>
           </button>
-          <button type="button" id="btn-dash-wa-import" class="action-card sub-action-card action-card-whatsapp">
-            <span class="action-card-icon">💬</span>
-            <span class="action-card-label">IMPORTAR DO WHATSAPP</span>
-          </button>
           <button type="button" id="btn-dash-corridor" class="action-card sub-action-card">
             <span class="action-card-icon">🏢</span>
-            <span class="action-card-label">CONFERIR POR CORREDOR</span>
+            <span class="action-card-label">POR CORREDOR</span>
+          </button>
+          <button type="button" id="btn-dash-wa-import" class="action-card sub-action-card action-card-whatsapp">
+            <span class="action-card-icon">💬</span>
+            <span class="action-card-label">IMPORTAR WHATSAPP</span>
           </button>
         </div>
       </section>
@@ -2006,6 +2041,9 @@
       </div>
     </header>
 
+    <!-- Barra indicadora de Blitz Ativa no Scanner -->
+    <div id="scanner-blitz-indicator-bar" class="hidden" style="background: rgba(245, 158, 11, 0.15); border-bottom: 1px solid rgba(245, 158, 11, 0.4); padding: 6px 12px; display: flex; align-items: center; justify-content: space-between;"></div>
+
     <div class="scanner-viewport-container" id="scanner-viewport-container">
       <div id="scanner-reader-box" style="width: 100%; height: 100%; position: relative; overflow: hidden; background: #000;"></div>
       <div class="scanner-overlay" style="pointer-events: none;">
@@ -2154,41 +2192,37 @@
           <input type="date" id="new-product-exp-date" class="form-input" />
         </div>
 
-        <!-- Contagem Inicial -->
+        <!-- Contagem Inicial (7 Locais Padronizados) -->
         <div class="conf-section-box">
           <div class="section-label-header">CONTAGEM INICIAL</div>
           <div class="locations-inputs-grid compact-grid">
             <div class="loc-mini-card">
               <label for="new-count-0">DEPÓSITO:</label>
-              <input type="number" id="new-count-0" class="new-count-input form-input" value="0" min="0" />
+              <input type="number" id="new-count-0" class="new-count-input form-input" value="0" min="0" inputmode="numeric" onfocus="this.select()" />
             </div>
             <div class="loc-mini-card">
               <label for="new-count-1">GELADEIRA:</label>
-              <input type="number" id="new-count-1" class="new-count-input form-input" value="0" min="0" />
+              <input type="number" id="new-count-1" class="new-count-input form-input" value="0" min="0" inputmode="numeric" onfocus="this.select()" />
             </div>
             <div class="loc-mini-card">
               <label for="new-count-2">PRATELEIRA:</label>
-              <input type="number" id="new-count-2" class="new-count-input form-input" value="0" min="0" />
+              <input type="number" id="new-count-2" class="new-count-input form-input" value="0" min="0" inputmode="numeric" onfocus="this.select()" />
             </div>
             <div class="loc-mini-card">
               <label for="new-count-3">PONTA DE GÔNDOLA:</label>
-              <input type="number" id="new-count-3" class="new-count-input form-input" value="0" min="0" />
+              <input type="number" id="new-count-3" class="new-count-input form-input" value="0" min="0" inputmode="numeric" onfocus="this.select()" />
             </div>
             <div class="loc-mini-card">
               <label for="new-count-4">ORELHA:</label>
-              <input type="number" id="new-count-4" class="new-count-input form-input" value="0" min="0" />
+              <input type="number" id="new-count-4" class="new-count-input form-input" value="0" min="0" inputmode="numeric" onfocus="this.select()" />
             </div>
             <div class="loc-mini-card">
               <label for="new-count-5">ILHA:</label>
-              <input type="number" id="new-count-5" class="new-count-input form-input" value="0" min="0" />
+              <input type="number" id="new-count-5" class="new-count-input form-input" value="0" min="0" inputmode="numeric" onfocus="this.select()" />
             </div>
-            <div class="loc-mini-card">
-              <label for="new-count-6">CARRINHO:</label>
-              <input type="number" id="new-count-6" class="new-count-input form-input" value="0" min="0" />
-            </div>
-            <div class="loc-mini-card">
-              <label for="new-count-7">FRENTE DE LOJA:</label>
-              <input type="number" id="new-count-7" class="new-count-input form-input" value="0" min="0" />
+            <div class="loc-mini-card" style="grid-column: span 2;">
+              <label for="new-count-6">CARRINHO NA FRENTE DE LOJA:</label>
+              <input type="number" id="new-count-6" class="new-count-input form-input" value="0" min="0" inputmode="numeric" onfocus="this.select()" />
             </div>
           </div>
 
@@ -2316,6 +2350,16 @@
       <div id="expirations-list-container" class="expirations-list-container"></div>
     </main>
   </div>
+
+  <!-- ========================================== -->
+  <!-- 10. TELA DO PAINEL DA BLITZ SEMANAL -->
+  <!-- ========================================== -->
+  <div id="view-blitz-dashboard" class="app-view"></div>
+
+  <!-- ========================================== -->
+  <!-- 11. TELA DO HISTÓRICO DE SESSÕES DE BLITZ -->
+  <!-- ========================================== -->
+  <div id="view-blitz-history" class="app-view"></div>
 
   <!-- Script Principal com Módulos ES6 -->
   <script type="module" src="/js/app.js"></script>

@@ -2,7 +2,7 @@
 import { generateId, getTodayISO, getDaysUntilExpiration, LOCATIONS } from './utils.js';
 
 const DB_NAME = 'ControladoriaAnaLuizaDB';
-const DB_VERSION = 1;
+const DB_VERSION = 2;
 
 let dbInstance = null;
 let dbInitPromise = null;
@@ -57,6 +57,23 @@ export function initDB() {
         const syncStore = db.createObjectStore('sync_queue', { keyPath: 'id' });
         syncStore.createIndex('synced', 'synced', { unique: false });
         syncStore.createIndex('created_at', 'created_at', { unique: false });
+      }
+
+      // 6. Tabela blitz_sessions (Sessões de Blitz Semanal)
+      if (!db.objectStoreNames.contains('blitz_sessions')) {
+        const blitzStore = db.createObjectStore('blitz_sessions', { keyPath: 'id' });
+        blitzStore.createIndex('status', 'status', { unique: false });
+        blitzStore.createIndex('blitz_type', 'blitz_type', { unique: false });
+        blitzStore.createIndex('started_at', 'started_at', { unique: false });
+      }
+
+      // 7. Tabela blitz_items (Itens e conferências da Blitz)
+      if (!db.objectStoreNames.contains('blitz_items')) {
+        const itemStore = db.createObjectStore('blitz_items', { keyPath: 'id' });
+        itemStore.createIndex('blitz_session_id', 'blitz_session_id', { unique: false });
+        itemStore.createIndex('product_id', 'product_id', { unique: false });
+        itemStore.createIndex('session_product', ['blitz_session_id', 'product_id'], { unique: false });
+        itemStore.createIndex('checked_at', 'checked_at', { unique: false });
       }
     };
 
@@ -629,7 +646,10 @@ export async function saveInventoryCounts(productId, expirationId, locationCount
         });
       };
 
-      tx.oncomplete = () => resolve({ total: totalCount, countDate: now });
+      tx.oncomplete = () => {
+        invalidateMetricsCache();
+        resolve({ total: totalCount, countDate: now });
+      };
       tx.onerror = (e) => reject(e.target.error);
     } catch (e) {
       reject(e);
@@ -744,6 +764,7 @@ export async function saveCompleteProductWithCounts({ product, expirationDate, l
       });
 
       tx.oncomplete = () => {
+        invalidateMetricsCache();
         resolve({
           product: productData,
           expiration: expirationData,
@@ -819,78 +840,38 @@ export async function getLocationHistoryForProduct(productId) {
 }
 
 // ----------------------------------------------------
-// MÉTRICAS DO DASHBOARD INTELIGENTE
+// MÉTRICAS DO DASHBOARD INTELIGENTE COM CACHE ULTRA RÁPIDO
 // ----------------------------------------------------
 
+let cachedMetrics = null;
+let lastMetricsCalculationTime = 0;
+const METRICS_CACHE_TTL = 1500; // 1.5 segundos de cache para evitar leituras repetidas em rajada
+
+export function invalidateMetricsCache() {
+  cachedMetrics = null;
+  lastMetricsCalculationTime = 0;
+}
+
 export async function getDashboardMetrics() {
+  const now = Date.now();
+  if (cachedMetrics && (now - lastMetricsCalculationTime < METRICS_CACHE_TTL)) {
+    return cachedMetrics;
+  }
+
   await runAutomaticTriageCleanup();
 
-  const [products, allExpirations, allCounts] = await Promise.all([
+  // Carrega apenas produtos e validades (ignora a tabela pesada de histórico de contagens para máxima velocidade)
+  const [products, allExpirations] = await Promise.all([
     getAllProducts(),
-    getAllExpirations(),
-    getAllCounts()
+    getAllExpirations()
   ]);
 
   // Mapeia produto por id
   const productMap = {};
-  products.forEach((p) => {
-    productMap[p.id] = p;
-  });
-
-  // Calcula estoque mais recente por validade
-  const expirationTotals = {};
-  const expLastCounts = {};
-
-  allCounts.forEach((c) => {
-    if (!expLastCounts[c.expiration_id]) {
-      expLastCounts[c.expiration_id] = {};
-    }
-    const currentForLoc = expLastCounts[c.expiration_id][c.location_type];
-    const cTime = new Date(c.counted_at || c.created_at).getTime();
-    const curTime = currentForLoc ? new Date(currentForLoc.counted_at || currentForLoc.created_at).getTime() : 0;
-    if (!currentForLoc || cTime >= curTime) {
-      expLastCounts[c.expiration_id][c.location_type] = c;
-    }
-  });
-
-  Object.entries(expLastCounts).forEach(([expId, locObj]) => {
-    let sum = 0;
-    Object.values(locObj).forEach((item) => {
-      sum += Number(item.quantity) || 0;
-    });
-    expirationTotals[expId] = sum;
-  });
-
-  // Mapeia validades por produto para cálculo perfeito de total de unidades
-  const expirationsByProduct = {};
-  allExpirations.forEach((exp) => {
-    if (!expirationsByProduct[exp.product_id]) {
-      expirationsByProduct[exp.product_id] = [];
-    }
-    expirationsByProduct[exp.product_id].push(exp);
-  });
-
-  // Calcula SOMA TOTAL DE TODAS AS UNIDADES ATIVAS NO ESTOQUE (exclui validades triadas/retiradas)
   let totalAllUnits = 0;
   products.forEach((p) => {
-    const pExps = expirationsByProduct[p.id] || [];
-    if (pExps.length > 0) {
-      let prodActiveSum = 0;
-      let hasActive = false;
-      pExps.forEach((exp) => {
-        const isTriaged = exp.is_triaged === true || exp.is_triaged === 1 || exp.is_triaged === 'true';
-        if (!isTriaged) {
-          hasActive = true;
-          const units = expirationTotals[exp.id] !== undefined ? expirationTotals[exp.id] : 0;
-          prodActiveSum += units;
-        }
-      });
-      if (hasActive) {
-        totalAllUnits += prodActiveSum;
-      }
-    } else {
-      totalAllUnits += Number(p.total_quantity) || 0;
-    }
+    productMap[p.id] = p;
+    totalAllUnits += Number(p.total_quantity) || 0;
   });
 
   // Categorização das validades
@@ -914,7 +895,7 @@ export async function getDashboardMetrics() {
     const product = productMap[exp.product_id];
     if (!product) return;
 
-    const units = expirationTotals[exp.id] !== undefined ? expirationTotals[exp.id] : (Number(product.total_quantity) || 0);
+    const units = Number(product.total_quantity) || 0;
     const days = getDaysUntilExpiration(exp.expiration_date);
     const isTriaged = exp.is_triaged === true || exp.is_triaged === 1 || exp.is_triaged === 'true';
 
@@ -1462,6 +1443,340 @@ export async function markQueueItemSynced(id) {
 }
 
 // ----------------------------------------------------
+// BLITZ SEMANAL (blitz_sessions e blitz_items)
+// ----------------------------------------------------
+
+export async function createBlitzSession({ blitz_type }) {
+  const now = new Date().toISOString();
+  const session = {
+    id: generateId(),
+    blitz_type: blitz_type || 'mercearia',
+    started_at: now,
+    finished_at: null,
+    status: 'em_andamento',
+    created_at: now,
+    updated_at: now
+  };
+
+  const db = await initDB();
+  return new Promise((resolve, reject) => {
+    try {
+      const tx = db.transaction(['blitz_sessions', 'sync_queue'], 'readwrite');
+      const sessionStore = tx.objectStore('blitz_sessions');
+      const syncStore = tx.objectStore('sync_queue');
+
+      // Fecha preventivamente qualquer outra sessão anterior que tenha ficado em aberto
+      const getAllReq = sessionStore.getAll();
+      getAllReq.onsuccess = () => {
+        const allSessions = getAllReq.result || [];
+        allSessions.forEach((s) => {
+          if (s.status === 'em_andamento') {
+            s.status = 'finalizada';
+            s.finished_at = now;
+            s.updated_at = now;
+            sessionStore.put(s);
+          }
+        });
+      };
+
+      sessionStore.put(session);
+
+      syncStore.add({
+        id: generateId(),
+        operation: 'UPSERT',
+        table_name: 'blitz_sessions',
+        record_id: session.id,
+        payload: session,
+        created_at: now,
+        synced: 0
+      });
+
+      tx.oncomplete = () => resolve(session);
+      tx.onerror = (e) => reject(e.target.error);
+    } catch (e) {
+      reject(e);
+    }
+  });
+}
+
+export async function getActiveBlitzSession() {
+  const db = await initDB();
+  return new Promise((resolve) => {
+    try {
+      const tx = db.transaction('blitz_sessions', 'readonly');
+      const store = tx.objectStore('blitz_sessions');
+      const index = store.index('status');
+      const req = index.getAll('em_andamento');
+      req.onsuccess = () => {
+        const list = req.result || [];
+        if (list.length === 0) {
+          resolve(null);
+          return;
+        }
+        // Retorna a sessão em andamento mais recente
+        list.sort((a, b) => new Date(b.started_at || 0) - new Date(a.started_at || 0));
+        resolve(list[0]);
+      };
+      req.onerror = () => resolve(null);
+    } catch (e) {
+      resolve(null);
+    }
+  });
+}
+
+export async function getBlitzSessionById(id) {
+  if (!id) return null;
+  const db = await initDB();
+  return new Promise((resolve) => {
+    try {
+      const tx = db.transaction('blitz_sessions', 'readonly');
+      const store = tx.objectStore('blitz_sessions');
+      const req = store.get(id);
+      req.onsuccess = () => resolve(req.result || null);
+      req.onerror = () => resolve(null);
+    } catch (e) {
+      resolve(null);
+    }
+  });
+}
+
+export async function finishBlitzSession(sessionId = null) {
+  const db = await initDB();
+  const now = new Date().toISOString();
+
+  return new Promise((resolve, reject) => {
+    try {
+      const tx = db.transaction(['blitz_sessions', 'sync_queue'], 'readwrite');
+      const store = tx.objectStore('blitz_sessions');
+      const syncStore = tx.objectStore('sync_queue');
+
+      const getAllReq = store.getAll();
+      let updatedSession = null;
+
+      getAllReq.onsuccess = () => {
+        const allSessions = getAllReq.result || [];
+        allSessions.forEach((session) => {
+          // Finaliza a sessão alvo ou qualquer sessão que ainda esteja 'em_andamento'
+          if ((sessionId && session.id === sessionId) || (!sessionId && session.status === 'em_andamento') || session.status === 'em_andamento') {
+            session.status = 'finalizada';
+            session.finished_at = session.finished_at || now;
+            session.updated_at = now;
+            if (!updatedSession || session.id === sessionId) {
+              updatedSession = session;
+            }
+            store.put(session);
+
+            syncStore.add({
+              id: generateId(),
+              operation: 'UPSERT',
+              table_name: 'blitz_sessions',
+              record_id: session.id,
+              payload: session,
+              created_at: now,
+              synced: 0
+            });
+          }
+        });
+      };
+
+      tx.oncomplete = () => resolve(updatedSession);
+      tx.onerror = (e) => reject(e.target.error);
+    } catch (e) {
+      reject(e);
+    }
+  });
+}
+
+export async function cancelBlitzSession(sessionId = null) {
+  const db = await initDB();
+  const now = new Date().toISOString();
+
+  return new Promise((resolve, reject) => {
+    try {
+      const tx = db.transaction(['blitz_sessions', 'sync_queue'], 'readwrite');
+      const store = tx.objectStore('blitz_sessions');
+      const syncStore = tx.objectStore('sync_queue');
+
+      const getAllReq = store.getAll();
+      let hasCanceled = false;
+
+      getAllReq.onsuccess = () => {
+        const allSessions = getAllReq.result || [];
+        allSessions.forEach((session) => {
+          // Cancela a sessão alvo ou qualquer sessão que ainda esteja 'em_andamento'
+          if ((sessionId && session.id === sessionId) || (!sessionId && session.status === 'em_andamento') || (session.id === sessionId)) {
+            session.status = 'cancelada';
+            session.finished_at = session.finished_at || now;
+            session.updated_at = now;
+            hasCanceled = true;
+            store.put(session);
+
+            syncStore.add({
+              id: generateId(),
+              operation: 'UPSERT',
+              table_name: 'blitz_sessions',
+              record_id: session.id,
+              payload: session,
+              created_at: now,
+              synced: 0
+            });
+          }
+        });
+      };
+
+      tx.oncomplete = () => resolve(hasCanceled);
+      tx.onerror = (e) => reject(e.target.error);
+    } catch (e) {
+      reject(e);
+    }
+  });
+}
+
+export async function getAllBlitzSessions() {
+  const sessions = await getAllFromStore('blitz_sessions');
+  // Ordena por data de início decrescente (mais recentes primeiro)
+  return sessions.sort((a, b) => new Date(b.started_at || 0) - new Date(a.started_at || 0));
+}
+
+export async function saveBlitzItem({
+  id = null,
+  blitz_session_id,
+  product_id,
+  barcode,
+  requested_expiration_date,
+  result, // 'TEM' | 'NAO_TEM'
+  conference_id = null,
+  total_quantity = 0
+}) {
+  const now = new Date().toISOString();
+  const itemId = id || generateId();
+
+  const itemData = {
+    id: itemId,
+    blitz_session_id,
+    product_id,
+    barcode: String(barcode || '').trim(),
+    requested_expiration_date: String(requested_expiration_date || '').trim(),
+    result: result === 'TEM' ? 'TEM' : 'NAO_TEM',
+    conference_id: conference_id || null,
+    total_quantity: Number(total_quantity) || 0,
+    checked_at: now,
+    created_at: now,
+    updated_at: now
+  };
+
+  const db = await initDB();
+  return new Promise((resolve, reject) => {
+    try {
+      const tx = db.transaction(['blitz_items', 'sync_queue'], 'readwrite');
+      const itemStore = tx.objectStore('blitz_items');
+      const syncStore = tx.objectStore('sync_queue');
+
+      itemStore.put(itemData);
+
+      syncStore.add({
+        id: generateId(),
+        operation: 'UPSERT',
+        table_name: 'blitz_items',
+        record_id: itemData.id,
+        payload: itemData,
+        created_at: now,
+        synced: 0
+      });
+
+      tx.oncomplete = () => resolve(itemData);
+      tx.onerror = (e) => reject(e.target.error);
+    } catch (e) {
+      reject(e);
+    }
+  });
+}
+
+export async function getBlitzItemsBySessionId(sessionId) {
+  if (!sessionId) return [];
+  const db = await initDB();
+  return new Promise((resolve) => {
+    try {
+      const tx = db.transaction('blitz_items', 'readonly');
+      const store = tx.objectStore('blitz_items');
+      const index = store.index('blitz_session_id');
+      const req = index.getAll(sessionId);
+      req.onsuccess = () => {
+        const items = req.result || [];
+        items.sort((a, b) => new Date(b.checked_at || 0) - new Date(a.checked_at || 0));
+        resolve(items);
+      };
+      req.onerror = () => resolve([]);
+    } catch (e) {
+      resolve([]);
+    }
+  });
+}
+
+export async function getBlitzItemBySessionAndProduct(sessionId, productId) {
+  if (!sessionId || !productId) return null;
+  const db = await initDB();
+  return new Promise((resolve) => {
+    try {
+      const tx = db.transaction('blitz_items', 'readonly');
+      const store = tx.objectStore('blitz_items');
+      const index = store.index('session_product');
+      const req = index.get([sessionId, productId]);
+      req.onsuccess = () => resolve(req.result || null);
+      req.onerror = () => resolve(null);
+    } catch (e) {
+      resolve(null);
+    }
+  });
+}
+
+export async function getLastBlitzItemForProduct(productId) {
+  if (!productId) return null;
+  const db = await initDB();
+  return new Promise((resolve) => {
+    try {
+      const tx = db.transaction('blitz_items', 'readonly');
+      const store = tx.objectStore('blitz_items');
+      const index = store.index('product_id');
+      const req = index.getAll(productId);
+      req.onsuccess = () => {
+        const items = req.result || [];
+        if (items.length === 0) {
+          resolve(null);
+          return;
+        }
+        items.sort((a, b) => new Date(b.checked_at || 0) - new Date(a.checked_at || 0));
+        resolve(items[0]);
+      };
+      req.onerror = () => resolve(null);
+    } catch (e) {
+      resolve(null);
+    }
+  });
+}
+
+export async function getAllBlitzItemsForProduct(productId) {
+  if (!productId) return [];
+  const db = await initDB();
+  return new Promise((resolve) => {
+    try {
+      const tx = db.transaction('blitz_items', 'readonly');
+      const store = tx.objectStore('blitz_items');
+      const index = store.index('product_id');
+      const req = index.getAll(productId);
+      req.onsuccess = () => {
+        const items = req.result || [];
+        items.sort((a, b) => new Date(b.checked_at || 0) - new Date(a.checked_at || 0));
+        resolve(items);
+      };
+      req.onerror = () => resolve([]);
+    } catch (e) {
+      resolve([]);
+    }
+  });
+}
+
+// ----------------------------------------------------
 // ZERAR / LIMPAR BANCO DE DADOS (IndexedDB e Supabase)
 // ----------------------------------------------------
 
@@ -1469,13 +1784,24 @@ export async function clearAllDatabaseData() {
   const db = await initDB();
   return new Promise((resolve, reject) => {
     try {
-      const stores = ['products', 'product_expirations', 'inventory_counts', 'count_sessions', 'sync_queue'];
+      const stores = [
+        'products',
+        'product_expirations',
+        'inventory_counts',
+        'count_sessions',
+        'blitz_sessions',
+        'blitz_items',
+        'sync_queue'
+      ];
       const tx = db.transaction(stores, 'readwrite');
       stores.forEach((storeName) => {
-        tx.objectStore(storeName).clear();
+        if (db.objectStoreNames.contains(storeName)) {
+          tx.objectStore(storeName).clear();
+        }
       });
       tx.oncomplete = () => {
         localStorage.removeItem('active_audit_session');
+        localStorage.removeItem('active_blitz_session_cache');
         resolve(true);
       };
       tx.onerror = (e) => reject(e.target.error);

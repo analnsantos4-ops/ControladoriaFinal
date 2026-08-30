@@ -34,9 +34,75 @@ export const LOCATIONS = [
   'PONTA DE GÔNDOLA',
   'ORELHA',
   'ILHA',
-  'CARRINHO',
-  'FRENTE DE LOJA'
+  'CARRINHO NA FRENTE DE LOJA'
 ];
+
+export const LOCATION_SHORT_NAMES = {
+  'DEPÓSITO': 'Depósito',
+  'GELADEIRA': 'Geladeira',
+  'PRATELEIRA': 'Prateleira',
+  'PONTA DE GÔNDOLA': 'P. Gôndola',
+  'ORELHA': 'Orelha',
+  'ILHA': 'Ilha',
+  'CARRINHO NA FRENTE DE LOJA': 'Carrinho Frente Loja',
+  'CARRINHO': 'Carrinho Frente Loja',
+  'FRENTE DE LOJA': 'Carrinho Frente Loja'
+};
+
+export const BLITZ_TYPES = [
+  {
+    id: 'alho_mercearia',
+    label: 'Alho e Mercearia',
+    sector: 'MERCEARIA',
+    icon: '🧄🛒',
+    days: [1, 2, 3],
+    daysLabel: 'Segunda a Quarta-feira',
+    desc: 'Alho e Mercearia (Segunda a Quarta-feira)'
+  },
+  {
+    id: 'bazar',
+    label: 'Bazar',
+    sector: 'BAZAR',
+    icon: '🧺',
+    days: [4],
+    daysLabel: 'Quinta-feira',
+    desc: 'Bazar e Utilidades (Quinta-feira)'
+  },
+  {
+    id: 'bebidas',
+    label: 'Bebidas',
+    sector: 'BEBIDAS',
+    icon: '🍾',
+    days: [5, 6],
+    daysLabel: 'Sexta-feira e Sábado',
+    desc: 'Bebidas e Adega (Sexta-feira e Sábado)'
+  },
+  {
+    id: 'alho',
+    label: 'Apenas Alho',
+    sector: 'ALHO',
+    icon: '🧄',
+    days: [1, 2, 3],
+    daysLabel: 'Segunda a Quarta-feira',
+    desc: 'Conferência específica do setor de Alho'
+  },
+  {
+    id: 'mercearia',
+    label: 'Apenas Mercearia',
+    sector: 'MERCEARIA',
+    icon: '🛒',
+    days: [1, 2, 3],
+    daysLabel: 'Segunda a Quarta-feira',
+    desc: 'Conferência específica da Mercearia'
+  }
+];
+
+export function getSuggestedBlitzType() {
+  const day = new Date().getDay(); // 0: Dom, 1: Seg, 2: Ter, 3: Qua, 4: Qui, 5: Sex, 6: Sab
+  if (day === 4) return 'bazar'; // Quinta-feira: Bazar
+  if (day === 5 || day === 6) return 'bebidas'; // Sexta-feira e Sábado: Bebidas
+  return 'alho_mercearia'; // Segunda a Quarta-feira (e Domingo): Alho e Mercearia
+}
 
 // Gera ID único
 export function generateId() {

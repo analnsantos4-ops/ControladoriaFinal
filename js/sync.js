@@ -64,12 +64,40 @@ CREATE TABLE IF NOT EXISTS public.inventory_counts (
   updated_at TIMESTAMPTZ DEFAULT NOW()
 );
 
+-- 4. Tabela de Sessões de Blitz Semanal
+CREATE TABLE IF NOT EXISTS public.blitz_sessions (
+  id TEXT PRIMARY KEY,
+  blitz_type TEXT NOT NULL,
+  started_at TIMESTAMPTZ DEFAULT NOW(),
+  finished_at TIMESTAMPTZ,
+  status TEXT DEFAULT 'em_andamento',
+  created_at TIMESTAMPTZ DEFAULT NOW(),
+  updated_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+-- 5. Tabela de Itens e Conferências da Blitz Semanal
+CREATE TABLE IF NOT EXISTS public.blitz_items (
+  id TEXT PRIMARY KEY,
+  blitz_session_id TEXT NOT NULL,
+  product_id TEXT NOT NULL,
+  barcode TEXT NOT NULL,
+  requested_expiration_date TEXT NOT NULL,
+  result TEXT NOT NULL,
+  conference_id TEXT,
+  total_quantity NUMERIC DEFAULT 0,
+  checked_at TIMESTAMPTZ DEFAULT NOW(),
+  created_at TIMESTAMPTZ DEFAULT NOW(),
+  updated_at TIMESTAMPTZ DEFAULT NOW()
+);
+
 -- Permissões e Segurança
 GRANT USAGE ON SCHEMA public TO anon, authenticated, service_role;
 GRANT ALL ON ALL TABLES IN SCHEMA public TO anon, authenticated, service_role;
 ALTER TABLE public.products DISABLE ROW LEVEL SECURITY;
 ALTER TABLE public.product_expirations DISABLE ROW LEVEL SECURITY;
 ALTER TABLE public.inventory_counts DISABLE ROW LEVEL SECURITY;
+ALTER TABLE public.blitz_sessions DISABLE ROW LEVEL SECURITY;
+ALTER TABLE public.blitz_items DISABLE ROW LEVEL SECURITY;
 `;
 
 export function registerSyncStatusListener(callback) {
@@ -254,6 +282,34 @@ function cleanPayloadForSupabase(tableName, payload) {
     };
   }
 
+  if (tableName === 'blitz_sessions') {
+    return {
+      id: String(payload.id),
+      blitz_type: String(payload.blitz_type || 'mercearia'),
+      started_at: payload.started_at || new Date().toISOString(),
+      finished_at: payload.finished_at || null,
+      status: String(payload.status || 'em_andamento'),
+      created_at: payload.created_at || new Date().toISOString(),
+      updated_at: new Date().toISOString()
+    };
+  }
+
+  if (tableName === 'blitz_items') {
+    return {
+      id: String(payload.id),
+      blitz_session_id: String(payload.blitz_session_id),
+      product_id: String(payload.product_id),
+      barcode: String(payload.barcode || ''),
+      requested_expiration_date: String(payload.requested_expiration_date || ''),
+      result: String(payload.result || 'TEM'),
+      conference_id: payload.conference_id || null,
+      total_quantity: Number(payload.total_quantity) || 0,
+      checked_at: payload.checked_at || new Date().toISOString(),
+      created_at: payload.created_at || new Date().toISOString(),
+      updated_at: new Date().toISOString()
+    };
+  }
+
   return payload;
 }
 
@@ -340,6 +396,15 @@ async function pushToSupabase(tableName, operation, rawPayload, skipParentCheck 
     }
     
     const errText = await response.text();
+
+    // Se a tabela blitz_sessions ou blitz_items ainda não foi criada no Supabase (PGRST205 / 404), não trava a sincronização
+    if ((response.status === 404 || errText.includes('PGRST205') || errText.includes('schema cache')) && (tableName === 'blitz_sessions' || tableName === 'blitz_items')) {
+      console.info(`[Supabase ${tableName}] Tabela opcional ainda não criada no Supabase SQL Editor. Operação armazenada localmente.`);
+      lastSyncError = null;
+      lastSyncErrorCode = null;
+      return true; // marca o item na fila para não bloquear o sync de produtos e contagens
+    }
+
     console.warn(`[Supabase ${tableName}] Status ${response.status}:`, errText);
 
     // Se o erro for de coluna 'is_triaged' ou 'triaged_at' ainda não criada no Supabase, envia sem essas colunas para não travar a fila
@@ -385,7 +450,9 @@ export async function processSyncQueue() {
         'products': 1,
         'product_expirations': 2,
         'count_sessions': 3,
-        'inventory_counts': 4
+        'inventory_counts': 4,
+        'blitz_sessions': 5,
+        'blitz_items': 6
       };
 
       const sortedQueue = [...queue].sort((a, b) => {
@@ -441,30 +508,43 @@ export async function pullFromSupabase() {
       }
     };
 
-    const [products, expirations, counts] = await Promise.all([
+    const [products, expirations, counts, blitzSessions, blitzItems] = await Promise.all([
       fetchTable('products'),
       fetchTable('product_expirations'),
-      fetchTable('inventory_counts')
+      fetchTable('inventory_counts'),
+      fetchTable('blitz_sessions'),
+      fetchTable('blitz_items')
     ]);
 
-    if (!products && !expirations && !counts) {
+    if (!products && !expirations && !counts && !blitzSessions && !blitzItems) {
       return false;
     }
 
-    // Carrega produtos e validades locais ANTES de abrir a transação de escrita para não inativar a transaction
+    let hasActualChanges = false;
+
+    // Carrega produtos, validades e sessões locais ANTES de abrir a transação de escrita para não inativar a transaction
     let localProducts = [];
     let localExps = [];
+    let localBlitzSessions = [];
     if (Array.isArray(products) && products.length > 0) {
       localProducts = await getAllFromStore('products');
     }
     if (Array.isArray(expirations) && expirations.length > 0) {
       localExps = await getAllFromStore('product_expirations');
     }
+    if (Array.isArray(blitzSessions) && blitzSessions.length > 0) {
+      localBlitzSessions = await getAllFromStore('blitz_sessions');
+    }
     const localMap = new Map(localProducts.map((p) => [p.id, p]));
     const localExpMap = new Map(localExps.map((e) => [e.id, e]));
+    const localBlitzMap = new Map(localBlitzSessions.map((s) => [s.id, s]));
 
     const db = await initDB();
-    const tx = db.transaction(['products', 'product_expirations', 'inventory_counts'], 'readwrite');
+    const storesToOpen = ['products', 'product_expirations', 'inventory_counts'];
+    if (db.objectStoreNames.contains('blitz_sessions')) storesToOpen.push('blitz_sessions');
+    if (db.objectStoreNames.contains('blitz_items')) storesToOpen.push('blitz_items');
+
+    const tx = db.transaction(storesToOpen, 'readwrite');
     const prodStore = tx.objectStore('products');
     const expStore = tx.objectStore('product_expirations');
     const countStore = tx.objectStore('inventory_counts');
@@ -475,7 +555,11 @@ export async function pullFromSupabase() {
         if (local && local.image && !p.image) {
           p.image = local.image;
         }
-        prodStore.put(p);
+        // Verifica se houve mudança antes de gravar
+        if (!local || local.updated_at !== p.updated_at || local.total_quantity !== p.total_quantity) {
+          hasActualChanges = true;
+          prodStore.put(p);
+        }
       });
     }
 
@@ -483,14 +567,15 @@ export async function pullFromSupabase() {
       expirations.forEach((e) => {
         const local = localExpMap.get(e.id);
         if (local) {
-          // Se localmente estiver triado e o Supabase vier com null/undefined (ou se local tiver sido alterado mais recente),
-          // preserva o estado de triagem para não reverter
           if (local.is_triaged && (e.is_triaged === undefined || e.is_triaged === null)) {
             e.is_triaged = true;
             e.triaged_at = local.triaged_at || e.triaged_at;
           }
         }
-        expStore.put(e);
+        if (!local || local.updated_at !== e.updated_at || local.is_triaged !== e.is_triaged) {
+          hasActualChanges = true;
+          expStore.put(e);
+        }
       });
     }
 
@@ -498,12 +583,29 @@ export async function pullFromSupabase() {
       counts.forEach((c) => countStore.put(c));
     }
 
+    if (Array.isArray(blitzSessions) && blitzSessions.length > 0 && db.objectStoreNames.contains('blitz_sessions')) {
+      const blitzStore = tx.objectStore('blitz_sessions');
+      blitzSessions.forEach((s) => {
+        const local = localBlitzMap.get(s.id);
+        // Se localmente já está finalizada ou cancelada, não regride para em_andamento
+        if (local && (local.status === 'finalizada' || local.status === 'cancelada') && s.status === 'em_andamento') {
+          return;
+        }
+        blitzStore.put(s);
+      });
+    }
+
+    if (Array.isArray(blitzItems) && blitzItems.length > 0 && db.objectStoreNames.contains('blitz_items')) {
+      const blitzItemStore = tx.objectStore('blitz_items');
+      blitzItems.forEach((it) => blitzItemStore.put(it));
+    }
+
     lastSyncError = null;
     lastSyncErrorCode = null;
 
     return new Promise((resolve) => {
       tx.oncomplete = () => {
-        if (typeof window !== 'undefined') {
+        if (hasActualChanges && typeof window !== 'undefined') {
           window.dispatchEvent(new CustomEvent('supabase-data-updated', {
             detail: { productsCount: products?.length || 0, countsCount: counts?.length || 0 }
           }));
@@ -584,10 +686,12 @@ export async function wipeSupabaseCloudData() {
   if (!SUPABASE_URL || !SUPABASE_PUBLISHABLE_KEY) return false;
   const headers = getSupabaseGetHeaders();
   try {
-    await fetch(`${SUPABASE_URL}/rest/v1/inventory_counts?id=neq.none`, { method: 'DELETE', headers });
-    await fetch(`${SUPABASE_URL}/rest/v1/product_expirations?id=neq.none`, { method: 'DELETE', headers });
-    await fetch(`${SUPABASE_URL}/rest/v1/count_sessions?id=neq.none`, { method: 'DELETE', headers });
-    await fetch(`${SUPABASE_URL}/rest/v1/products?id=neq.none`, { method: 'DELETE', headers });
+    await fetch(`${SUPABASE_URL}/rest/v1/blitz_items?id=neq.none`, { method: 'DELETE', headers }).catch(() => {});
+    await fetch(`${SUPABASE_URL}/rest/v1/blitz_sessions?id=neq.none`, { method: 'DELETE', headers }).catch(() => {});
+    await fetch(`${SUPABASE_URL}/rest/v1/inventory_counts?id=neq.none`, { method: 'DELETE', headers }).catch(() => {});
+    await fetch(`${SUPABASE_URL}/rest/v1/product_expirations?id=neq.none`, { method: 'DELETE', headers }).catch(() => {});
+    await fetch(`${SUPABASE_URL}/rest/v1/count_sessions?id=neq.none`, { method: 'DELETE', headers }).catch(() => {});
+    await fetch(`${SUPABASE_URL}/rest/v1/products?id=neq.none`, { method: 'DELETE', headers }).catch(() => {});
     lastSyncError = null;
     lastSyncErrorCode = null;
     return true;
