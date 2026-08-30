@@ -696,19 +696,10 @@ async function recordBlitzItemNaoTem(product, requestedDate, existingItemId = nu
 
 // Abre a conferência para contagem do produto na Blitz
 async function startBlitzConferenceForProduct(product, requestedDate) {
-  if (!currentActiveBlitzSession) return;
+  if (!currentActiveBlitzSession || !product || !requestedDate) return;
 
-  // Garante que a data de validade existe para o produto
   const expirations = await getProductExpirations(product.id);
-  let targetExp = expirations.find(e => e.expiration_date === requestedDate);
-
-  if (!targetExp) {
-    // Cria a validade caso ainda não exista
-    targetExp = await saveProductExpiration({
-      product_id: product.id,
-      expiration_date: requestedDate
-    });
-  }
+  const targetExp = expirations.find((e) => e.expiration_date === requestedDate);
 
   // Configura contexto da Blitz no módulo de inventário
   setBlitzConferenceContext({
@@ -718,8 +709,9 @@ async function startBlitzConferenceForProduct(product, requestedDate) {
     requestedDate: requestedDate
   });
 
-  // Abre conferência padrão com os 7 locais
-  openConferenceForProduct(product, targetExp.id);
+  // Abre conferência passando o identificador da data (sem salvar no banco de dados ainda)
+  const targetExpIdentifier = targetExp?.id || requestedDate;
+  await openConferenceForProduct(product, targetExpIdentifier);
 }
 
 // ----------------------------------------------------

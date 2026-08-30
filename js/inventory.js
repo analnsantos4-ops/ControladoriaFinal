@@ -70,11 +70,39 @@ async function renderExpirationSelector(productId, preselectedExpirationId = nul
   const container = document.getElementById('conf-expirations-container');
   if (!container) return;
 
-  // Se o produto não tiver nenhuma validade ainda, cria uma validade padrão (Hoje)
+  let targetExp = null;
+
+  if (preselectedExpirationId) {
+    targetExp = expirations.find(
+      (e) => String(e.id) === String(preselectedExpirationId) || e.expiration_date === preselectedExpirationId
+    );
+
+    // Se a validade procurada ainda não estiver no banco (ex: data informada na Blitz), cria como candidato em memória SEM salvar no DB
+    if (!targetExp && typeof preselectedExpirationId === 'string' && preselectedExpirationId.includes('-')) {
+      targetExp = {
+        id: 'temp_' + preselectedExpirationId,
+        product_id: productId,
+        expiration_date: preselectedExpirationId,
+        is_temporary: true
+      };
+      expirations.push(targetExp);
+    }
+  }
+
+  // Se o produto não tiver nenhuma validade cadastrada ainda, oferece uma data candidata em memória
   if (expirations.length === 0) {
     const today = getTodayISO();
-    const createdExp = await saveProductExpiration(productId, today);
-    expirations = [createdExp.expiration];
+    targetExp = {
+      id: 'temp_' + today,
+      product_id: productId,
+      expiration_date: today,
+      is_temporary: true
+    };
+    expirations = [targetExp];
+  }
+
+  if (!targetExp && expirations.length > 0) {
+    targetExp = expirations[0];
   }
 
   let html = `
@@ -84,7 +112,7 @@ async function renderExpirationSelector(productId, preselectedExpirationId = nul
   `;
 
   expirations.forEach((exp) => {
-    const isSelected = preselectedExpirationId ? String(exp.id) === String(preselectedExpirationId) : false;
+    const isSelected = targetExp && (String(exp.id) === String(targetExp.id) || exp.expiration_date === targetExp.expiration_date);
     html += `
       <button type="button" class="btn-exp-chip ${isSelected ? 'selected' : ''}" data-expid="${exp.id}" data-date="${exp.expiration_date}">
         📅 ${formatDateBR(exp.expiration_date)}
@@ -116,7 +144,7 @@ async function renderExpirationSelector(productId, preselectedExpirationId = nul
       container.querySelectorAll('.btn-exp-chip').forEach((c) => c.classList.remove('selected'));
       chip.classList.add('selected');
       const expId = chip.getAttribute('data-expid');
-      const expObj = expirations.find((x) => String(x.id) === String(expId));
+      const expObj = expirations.find((x) => String(x.id) === String(expId) || x.expiration_date === expId);
       if (expObj) await selectExpirationForCounting(expObj);
     });
   });
@@ -133,17 +161,12 @@ async function renderExpirationSelector(productId, preselectedExpirationId = nul
       showToast('⚠ Selecione a data', 'warning');
       return;
     }
-    const res = await saveProductExpiration(productId, val);
-    await renderExpirationSelector(productId, res.expiration.id);
+    // Adiciona como candidata em memória sem gravar no banco de dados imediatamente
+    await renderExpirationSelector(productId, val);
   });
 
-  // Auto-seleção inicial
-  let targetExp = preselectedExpirationId ? expirations.find(e => String(e.id) === String(preselectedExpirationId)) : expirations[0];
+  // Auto-seleção inicial estrita
   if (targetExp) {
-    const chips = container.querySelectorAll('.btn-exp-chip:not(.btn-add-new-date)');
-    chips.forEach(c => {
-      if (String(c.getAttribute('data-expid')) === String(targetExp.id)) c.classList.add('selected');
-    });
     await selectExpirationForCounting(targetExp);
   }
 }
@@ -168,13 +191,19 @@ async function selectExpirationForCounting(expiration) {
   if (!countSection) return;
 
   countSection.classList.remove('hidden');
-  const latestInfo = await getLatestCountsForExpiration(expiration.id);
+
+  const isTemporary = expiration.is_temporary || String(expiration.id).startsWith('temp_');
+  let latestInfo = { countsByLocation: {}, total: 0, lastCountDate: null, hasPreviousCount: false };
+
+  if (!isTemporary) {
+    latestInfo = await getLatestCountsForExpiration(expiration.id);
+  }
   previousCountsForSelectedDate = latestInfo;
 
   // Alerta de contagem anterior e triagem
   const alertContainer = document.getElementById('conf-previous-count-alert');
   if (alertContainer) {
-    const isTriaged = expiration.is_triaged === true || expiration.is_triaged === 1 || expiration.is_triaged === 'true';
+    const isTriaged = !isTemporary && (expiration.is_triaged === true || expiration.is_triaged === 1 || expiration.is_triaged === 'true');
     let triageWarningHtml = '';
     if (isTriaged) {
       triageWarningHtml = `
@@ -317,13 +346,32 @@ export async function confirmConference() {
   }
 
   const counts = {};
+  let totalCount = 0;
   LOCATIONS.forEach((loc, idx) => {
-    counts[loc] = Number(document.getElementById(`loc-input-${idx}`)?.value) || 0;
+    const val = Number(document.getElementById(`loc-input-${idx}`)?.value) || 0;
+    counts[loc] = val;
+    totalCount += val;
   });
 
-  const session = getActiveSession();
+  const isTemporary = currentSelectedExpiration.is_temporary || String(currentSelectedExpiration.id).startsWith('temp_');
+
+  // Se for uma nova data (não gravada ainda) e a contagem estiver zerada, não grava data fantasma
+  if (isTemporary && totalCount === 0) {
+    showToast('⚠ Digite a quantidade contada nos locais para registrar esta nova validade.', 'warning', 3500);
+    return;
+  }
 
   try {
+    // Se a validade era apenas uma candidata temporária em memória, grava no banco agora que há quantidade confirmada
+    if (isTemporary) {
+      const expRes = await saveProductExpiration(currentAuditingProduct.id, currentSelectedExpiration.expiration_date);
+      if (expRes && expRes.expiration) {
+        currentSelectedExpiration = expRes.expiration;
+      }
+    }
+
+    const session = getActiveSession();
+
     const result = await saveInventoryCounts(
       currentAuditingProduct.id,
       currentSelectedExpiration.id,

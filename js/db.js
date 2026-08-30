@@ -449,7 +449,24 @@ export async function getExpirationByProductAndDate(productId, expirationDate) {
   });
 }
 
-export async function saveProductExpiration(productId, expirationDate) {
+export async function saveProductExpiration(productIdOrObj, expirationDateArg = null) {
+  let productId = productIdOrObj;
+  let expirationDate = expirationDateArg;
+
+  if (typeof productIdOrObj === 'object' && productIdOrObj !== null) {
+    productId = productIdOrObj.product_id || productIdOrObj.productId;
+    expirationDate = productIdOrObj.expiration_date || productIdOrObj.expirationDate;
+  }
+
+  if (!productId || !expirationDate) {
+    return { isNew: false, expiration: null };
+  }
+
+  // Normaliza formato da data se vier como YYYY-MM-DDTHH... ou DD/MM/YYYY
+  if (expirationDate.includes('T')) {
+    expirationDate = expirationDate.split('T')[0];
+  }
+
   const existing = await getExpirationByProductAndDate(productId, expirationDate);
   if (existing) {
     return { isNew: false, expiration: existing };

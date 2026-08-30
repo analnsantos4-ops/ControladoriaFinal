@@ -9,7 +9,7 @@ import { showView, showToast, setupButtonFeedbacks, openPhotoModal, getActiveVie
 import { startCameraScanner, stopCameraScanner, toggleTorch, switchCamera, toggleCameraZoom, scanBarcodeFromImageFile } from './scanner.js';
 import { renderDashboard } from './dashboard.js';
 import { openNewProductView, saveNewProduct, handleProductImageFile, openProductDetailView, updateNewProductTotalCalculation, populateSectorAndCorridorSelects } from './products.js';
-import { openConferenceForProduct, confirmConference, openCorridorAuditView, loadCorridorAuditProducts, exportCurrentCorridorWhatsApp } from './inventory.js';
+import { openConferenceForProduct, confirmConference, openCorridorAuditView, loadCorridorAuditProducts, exportCurrentCorridorWhatsApp, setBlitzConferenceContext, getBlitzConferenceContext } from './inventory.js';
 import { SETORS, CORRIDORS, formatDateBR, formatNumber, getDaysUntilExpiration } from './utils.js';
 import { openWhatsAppImportModal, formatMultipleProductsWhatsApp, openWhatsAppExportModal } from './whatsapp.js';
 import { initBlitzModule, getActiveBlitz, promptStartBlitz, handleBlitzBarcodeScanned, openBlitzDashboardView, openBlitzHistoryView, updateBlitzTopBarIndicator } from './blitz.js';
@@ -605,7 +605,13 @@ function setupEventListeners() {
   // 4. CONFERÊNCIA
   // --------------------------------------------------
   document.getElementById('btn-conf-back')?.addEventListener('click', () => {
-    showDashboardView();
+    const blitzCtx = getBlitzConferenceContext();
+    setBlitzConferenceContext(null);
+    if (blitzCtx) {
+      openBlitzDashboardView();
+    } else {
+      showDashboardView();
+    }
   });
 
   document.getElementById('btn-conf-confirm')?.addEventListener('click', () => {
