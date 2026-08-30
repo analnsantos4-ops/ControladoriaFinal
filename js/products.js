@@ -481,7 +481,7 @@ export async function openProductDetailView(productId) {
           ← VOLTAR PARA PRODUTOS CADASTRADOS
         </button>
         <button type="button" class="btn-danger-outline" id="btn-detail-delete-product">
-          🗑️ APAGAR PRODUTO (SENHA 2002)
+          🗑️ APAGAR PRODUTO (SENHA 200902)
         </button>
       </div>
     `;
@@ -511,7 +511,7 @@ export async function openProductDetailView(productId) {
       openWhatsAppExportModal(formatted, `Exportar ${product.name}`);
     });
 
-    // Apagar Produto Inteiro (Senha 2002)
+    // Apagar Produto Inteiro (Senha 200902)
     document.getElementById('btn-detail-delete-product')?.addEventListener('click', () => {
       promptSecurityPin(
         'APAGAR PRODUTO',

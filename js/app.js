@@ -2,7 +2,7 @@
 import '../style.css';
 
 // Orquestrador Principal do Aplicativo Controladoria - Ana Luiza
-import { isAuthenticated, verifyCode, logout } from './auth.js';
+import { isAuthenticated, verifyCode, verifyMasterSecurityPin, logout } from './auth.js';
 import { initDB, getProductByBarcode, getProductById, searchProducts, getAllProducts, getProductExpirations, getLatestCountsForExpiration, clearAllDatabaseData, toggleExpirationTriaged, sendProductExpirationToTriage, restoreProductExpirationFromTriage, runAutomaticTriageCleanup, getDatabaseStorageStats, TRIAGE_RETENTION_MS } from './db.js';
 import { initSyncEngine, registerSyncStatusListener, wipeSupabaseCloudData, triggerSyncNow, checkSupabaseHealth, syncAllLocalDataToSupabase, SUPABASE_SETUP_SQL, getSyncStatus, getSyncDiagnostics } from './sync.js';
 import { showView, showToast, setupButtonFeedbacks, openPhotoModal, getActiveView, promptTriageBarcodeConfirmation, promptSecurityPin } from './ui.js';
@@ -191,7 +191,7 @@ function setupEventListeners() {
     openCorridorAuditView();
   });
 
-  // [ 🗑️ ZERAR BASE DE DADOS COM CONFIRMAÇÃO DE SENHA 2002 ]
+  // [ 🗑️ ZERAR BASE DE DADOS COM CONFIRMAÇÃO DE SENHA 200902 ]
   const wipeModal = document.getElementById('modal-wipe-confirm');
   const wipePinInput = document.getElementById('input-wipe-pin');
   const wipePinError = document.getElementById('wipe-pin-error');
@@ -220,10 +220,10 @@ function setupEventListeners() {
 
   btnConfirmWipe?.addEventListener('click', async () => {
     const pin = wipePinInput?.value?.trim();
-    if (pin !== '2002') {
+    if (!verifyMasterSecurityPin(pin)) {
       if (wipePinError) {
         wipePinError.style.display = 'block';
-        wipePinError.textContent = 'Senha incorreta! Digite 2002.';
+        wipePinError.textContent = 'Senha incorreta! Digite 200902.';
       }
       if (wipePinInput) {
         wipePinInput.value = '';

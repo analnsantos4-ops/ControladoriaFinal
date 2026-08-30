@@ -1,6 +1,7 @@
 // Gerenciador de Interface, Telas, Modais e Toasts
 import { playBeep, triggerHaptic } from './utils.js';
 import { startCameraScanner, stopCameraScanner, toggleTorch, switchCamera, toggleCameraZoom } from './scanner.js';
+import { verifyMasterSecurityPin } from './auth.js';
 
 let activeViewId = 'view-login';
 
@@ -97,7 +98,7 @@ export function setupButtonFeedbacks() {
   });
 }
 
-// Modal de Confirmação com Senha de Segurança (2002)
+// Modal de Confirmação com Senha de Segurança (200902)
 export function promptSecurityPin(actionTitle, actionWarning, onConfirmed) {
   let modal = document.getElementById('security-pin-modal');
   if (!modal) {
@@ -114,13 +115,13 @@ export function promptSecurityPin(actionTitle, actionWarning, onConfirmed) {
         <span class="danger-icon">🔒</span>
         <div>
           <h3 class="modal-title" id="sec-pin-title">${actionTitle}</h3>
-          <p class="modal-subtitle">Confirmação de Segurança</p>
+          <p class="modal-subtitle">Autorização de Segurança</p>
         </div>
       </div>
 
       <div class="security-pin-body">
         <p class="security-warning-text" id="sec-pin-warning">${actionWarning}</p>
-        <p class="security-pin-instruction">Digite a senha de autorização (4 dígitos):</p>
+        <p class="security-pin-instruction">Digite a senha de segurança (200902):</p>
         
         <form id="form-sec-pin" autocomplete="off">
           <div class="pin-input-wrapper">
@@ -128,15 +129,15 @@ export function promptSecurityPin(actionTitle, actionWarning, onConfirmed) {
               type="password"
               id="security-pin-input"
               class="login-pin-field"
-              maxlength="4"
+              maxlength="6"
               inputmode="numeric"
-              placeholder="••••"
+              placeholder="••••••"
               autocomplete="one-time-code"
               required
             />
           </div>
 
-          <div id="sec-pin-error" class="login-error-text hidden">⚠ Senha incorreta!</div>
+          <div id="sec-pin-error" class="login-error-text hidden">⚠ Senha incorreta! Digite 200902.</div>
 
           <!-- Teclado Numérico Virtual para Facilitar -->
           <div class="virtual-numpad sec-numpad">
@@ -187,7 +188,7 @@ export function promptSecurityPin(actionTitle, actionWarning, onConfirmed) {
           pinField.value = '';
         } else if (val === 'backspace') {
           pinField.value = pinField.value.slice(0, -1);
-        } else if (pinField.value.length < 4) {
+        } else if (pinField.value.length < 6) {
           pinField.value += val;
         }
       }
@@ -201,14 +202,14 @@ export function promptSecurityPin(actionTitle, actionWarning, onConfirmed) {
   form?.addEventListener('submit', (e) => {
     e.preventDefault();
     const entered = pinField ? pinField.value.trim() : '';
-    if (entered === '2002') {
+    if (verifyMasterSecurityPin(entered)) {
       modal.classList.remove('open');
       if (typeof onConfirmed === 'function') {
         onConfirmed();
       }
     } else {
       if (errorMsg) {
-        errorMsg.textContent = '⚠ Senha incorreta! Acesso negado.';
+        errorMsg.textContent = '⚠ Senha incorreta! Digite 200902.';
         errorMsg.classList.remove('hidden');
       }
       triggerHaptic(50);
