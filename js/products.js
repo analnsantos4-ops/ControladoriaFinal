@@ -481,7 +481,7 @@ export async function openProductDetailView(productId) {
           ← VOLTAR PARA PRODUTOS CADASTRADOS
         </button>
         <button type="button" class="btn-danger-outline" id="btn-detail-delete-product">
-          🗑️ APAGAR PRODUTO (SENHA 200902)
+          🗑️ APAGAR PRODUTO (REQUER SENHA)
         </button>
       </div>
     `;

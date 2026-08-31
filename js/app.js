@@ -223,7 +223,7 @@ function setupEventListeners() {
     if (!verifyMasterSecurityPin(pin)) {
       if (wipePinError) {
         wipePinError.style.display = 'block';
-        wipePinError.textContent = 'Senha incorreta! Digite 200902.';
+        wipePinError.textContent = 'Senha incorreta! Digite a senha secreta de 6 dígitos.';
       }
       if (wipePinInput) {
         wipePinInput.value = '';

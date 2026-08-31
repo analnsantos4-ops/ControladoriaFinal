@@ -121,7 +121,7 @@ export function promptSecurityPin(actionTitle, actionWarning, onConfirmed) {
 
       <div class="security-pin-body">
         <p class="security-warning-text" id="sec-pin-warning">${actionWarning}</p>
-        <p class="security-pin-instruction">Digite a senha de segurança (200902):</p>
+        <p class="security-pin-instruction">Digite a senha secreta de 6 dígitos:</p>
         
         <form id="form-sec-pin" autocomplete="off">
           <div class="pin-input-wrapper">
@@ -137,7 +137,7 @@ export function promptSecurityPin(actionTitle, actionWarning, onConfirmed) {
             />
           </div>
 
-          <div id="sec-pin-error" class="login-error-text hidden">⚠ Senha incorreta! Digite 200902.</div>
+          <div id="sec-pin-error" class="login-error-text hidden">⚠ Senha incorreta! Digite a senha secreta de 6 dígitos.</div>
 
           <!-- Teclado Numérico Virtual para Facilitar -->
           <div class="virtual-numpad sec-numpad">
@@ -209,7 +209,7 @@ export function promptSecurityPin(actionTitle, actionWarning, onConfirmed) {
       }
     } else {
       if (errorMsg) {
-        errorMsg.textContent = '⚠ Senha incorreta! Digite 200902.';
+        errorMsg.textContent = '⚠ Senha incorreta! Digite a senha secreta de 6 dígitos.';
         errorMsg.classList.remove('hidden');
       }
       triggerHaptic(50);
