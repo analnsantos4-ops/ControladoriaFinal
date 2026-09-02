@@ -463,25 +463,30 @@ export function openWhatsAppImportModal() {
           </button>
         </div>
 
-        <!-- Opções Globais de Setor e Corredor (Obrigatórios) -->
+        <!-- Opções Globais de Setor e Corredor (Obrigatórios) - Compacto e Expansível -->
         <div class="wa-global-defaults-box">
-          <span class="defaults-title">📍 Aplicar Setor e Corredor em massa para todos:</span>
-          <div class="defaults-row">
-            <div class="defaults-select-wrap">
-              <label>Setor:</label>
-              <select id="wa-global-sector" class="form-select form-select-sm">
-                ${SETORS.map((s) => `<option value="${s}">${s}</option>`).join('')}
-              </select>
+          <button type="button" class="defaults-toggle-header" id="btn-toggle-wa-defaults">
+            <span class="defaults-title">📍 Aplicar Setor & Corredor em massa para todos</span>
+            <span class="defaults-toggle-icon" id="wa-defaults-toggle-icon">▼ Abrir</span>
+          </button>
+          <div id="wa-defaults-content" class="defaults-content hidden">
+            <div class="defaults-row">
+              <div class="defaults-select-wrap">
+                <label>Setor:</label>
+                <select id="wa-global-sector" class="form-select form-select-sm">
+                  ${SETORS.map((s) => `<option value="${s}">${s}</option>`).join('')}
+                </select>
+              </div>
+              <div class="defaults-select-wrap">
+                <label>Corredor:</label>
+                <select id="wa-global-corridor" class="form-select form-select-sm">
+                  ${CORRIDORS.map((c) => `<option value="${c}">${c}</option>`).join('')}
+                </select>
+              </div>
+              <button type="button" id="btn-wa-apply-defaults" class="btn-primary-mini btn-wa-apply-defaults">
+                Aplicar em Todos
+              </button>
             </div>
-            <div class="defaults-select-wrap">
-              <label>Corredor:</label>
-              <select id="wa-global-corridor" class="form-select form-select-sm">
-                ${CORRIDORS.map((c) => `<option value="${c}">${c}</option>`).join('')}
-              </select>
-            </div>
-            <button type="button" id="btn-wa-apply-defaults" class="btn-secondary-mini btn-wa-apply-defaults">
-              Aplicar em Todos
-            </button>
           </div>
         </div>
 
@@ -502,6 +507,18 @@ export function openWhatsAppImportModal() {
   // Fechar
   document.getElementById('btn-close-wa-import')?.addEventListener('click', () => modal.classList.remove('open'));
   document.getElementById('wa-import-backdrop')?.addEventListener('click', () => modal.classList.remove('open'));
+
+  // Toggle do bloco de Setor/Corredor em Massa
+  document.getElementById('btn-toggle-wa-defaults')?.addEventListener('click', () => {
+    const content = document.getElementById('wa-defaults-content');
+    const icon = document.getElementById('wa-defaults-toggle-icon');
+    if (content) {
+      const isHidden = content.classList.toggle('hidden');
+      if (icon) {
+        icon.textContent = isHidden ? '▼ Abrir' : '▲ Fechar';
+      }
+    }
+  });
 
   // Copiar Modelo Oficial
   document.getElementById('btn-copy-wa-template')?.addEventListener('click', async () => {
@@ -654,14 +671,14 @@ function renderParsedItemsList(items) {
           </button>
         </div>
 
-        <!-- 1. Nome do Produto (Largura Total e Bem Visível) -->
+        <!-- 1. Nome do Produto (Largura Total, Destaque e Tema Escuro) -->
         <div class="wa-field-group-full">
           <label class="wa-field-label">NOME DO PRODUTO:</label>
           <input
             type="text"
             class="form-input wa-name-input"
             data-pidx="${pIdx}"
-            value="${item.name}"
+            value="${(item.name || '').replace(/"/g, '&quot;')}"
             placeholder="Ex: HIDRATANTE CORPORAL NIVEA 400ML"
           />
         </div>
@@ -674,7 +691,7 @@ function renderParsedItemsList(items) {
               type="text"
               class="form-input wa-barcode-input"
               data-pidx="${pIdx}"
-              value="${item.barcode}"
+              value="${item.barcode || ''}"
               placeholder="789..."
               inputmode="numeric"
             />
@@ -685,10 +702,10 @@ function renderParsedItemsList(items) {
               ${item.image ? `<img src="${item.image}" alt="" class="wa-thumb-img" />` : `<div class="photo-placeholder-mini">SEM FOTO</div>`}
             </div>
             <div class="wa-photo-actions">
-              <button type="button" class="btn-wa-photo-action btn-wa-photo-cam" data-pidx="${pIdx}" title="Tirar foto com a câmera">
-                📷 Câmera
+              <button type="button" class="btn-wa-photo-action btn-wa-photo-cam" data-pidx="${pIdx}" title="Tirar foto">
+                📷 Foto
               </button>
-              <button type="button" class="btn-wa-photo-action btn-wa-photo-gal" data-pidx="${pIdx}" title="Escolher da galeria">
+              <button type="button" class="btn-wa-photo-action btn-wa-photo-gal" data-pidx="${pIdx}" title="Galeria">
                 🖼️ Galeria
               </button>
               <input type="file" id="wa-cam-file-${pIdx}" accept="image/*" capture="environment" class="hidden" />
@@ -697,7 +714,7 @@ function renderParsedItemsList(items) {
           </div>
         </div>
 
-        <!-- 3. Setor e Corredor (Espaçosos e com Texto Completo) -->
+        <!-- 3. Setor e Corredor (Lado a Lado em 2 Colunas) -->
         <div class="wa-loc-fields-row">
           <div class="wa-loc-col">
             <label class="wa-field-label">SETOR OBRIGATÓRIO:</label>
