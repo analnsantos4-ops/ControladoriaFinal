@@ -507,7 +507,7 @@ export async function openProductDetailView(productId) {
       // Pega a validade mais próxima ou a primeira
       const firstExp = expirations[0];
       const dateBR = firstExp ? formatDateBR(firstExp.expiration_date) : 'NÃO INFORMADA';
-      const formatted = formatSingleProductWhatsApp(product.name, product.barcode, dateBR, totalActiveStock);
+      const formatted = formatSingleProductWhatsApp(product.name, product.barcode, dateBR, totalActiveStock, product.corridor, product.sector);
       openWhatsAppExportModal(formatted, `Exportar ${product.name}`);
     });
 

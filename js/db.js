@@ -7,110 +7,183 @@ const DB_VERSION = 2;
 let dbInstance = null;
 let dbInitPromise = null;
 
-export function initDB() {
+export function invalidateDB() {
+  if (dbInstance) {
+    try {
+      dbInstance.close();
+    } catch (_) {}
+  }
+  dbInstance = null;
+  dbInitPromise = null;
+}
+
+export function initDB(force = false) {
+  if (force) {
+    invalidateDB();
+  }
   if (dbInstance) return Promise.resolve(dbInstance);
   if (dbInitPromise) return dbInitPromise;
 
   dbInitPromise = new Promise((resolve, reject) => {
-    const request = indexedDB.open(DB_NAME, DB_VERSION);
+    try {
+      const request = indexedDB.open(DB_NAME, DB_VERSION);
 
-    request.onupgradeneeded = (event) => {
-      const db = event.target.result;
+      request.onblocked = () => {
+        console.warn('Conexão com IndexedDB bloqueada por outra aba/processo.');
+      };
 
-      // 1. Tabela products (barcode UNIQUE)
-      if (!db.objectStoreNames.contains('products')) {
-        const productStore = db.createObjectStore('products', { keyPath: 'id' });
-        productStore.createIndex('barcode', 'barcode', { unique: true });
-        productStore.createIndex('sector', 'sector', { unique: false });
-        productStore.createIndex('corridor', 'corridor', { unique: false });
-        productStore.createIndex('name', 'name', { unique: false });
-        productStore.createIndex('updated_at', 'updated_at', { unique: false });
-      }
+      request.onupgradeneeded = (event) => {
+        const db = event.target.result;
 
-      // 2. Tabela product_expirations (product_id + expiration_date UNIQUE)
-      if (!db.objectStoreNames.contains('product_expirations')) {
-        const expStore = db.createObjectStore('product_expirations', { keyPath: 'id' });
-        expStore.createIndex('product_id', 'product_id', { unique: false });
-        expStore.createIndex('expiration_date', 'expiration_date', { unique: false });
-        expStore.createIndex('product_and_date', ['product_id', 'expiration_date'], { unique: true });
-      }
+        // 1. Tabela products (barcode UNIQUE)
+        if (!db.objectStoreNames.contains('products')) {
+          const productStore = db.createObjectStore('products', { keyPath: 'id' });
+          productStore.createIndex('barcode', 'barcode', { unique: true });
+          productStore.createIndex('sector', 'sector', { unique: false });
+          productStore.createIndex('corridor', 'corridor', { unique: false });
+          productStore.createIndex('name', 'name', { unique: false });
+          productStore.createIndex('updated_at', 'updated_at', { unique: false });
+        }
 
-      // 3. Tabela count_sessions
-      if (!db.objectStoreNames.contains('count_sessions')) {
-        const sessionStore = db.createObjectStore('count_sessions', { keyPath: 'id' });
-        sessionStore.createIndex('date', 'date', { unique: false });
-        sessionStore.createIndex('status', 'status', { unique: false });
-        sessionStore.createIndex('sector_corridor', ['sector', 'corridor'], { unique: false });
-      }
+        // 2. Tabela product_expirations (product_id + expiration_date UNIQUE)
+        if (!db.objectStoreNames.contains('product_expirations')) {
+          const expStore = db.createObjectStore('product_expirations', { keyPath: 'id' });
+          expStore.createIndex('product_id', 'product_id', { unique: false });
+          expStore.createIndex('expiration_date', 'expiration_date', { unique: false });
+          expStore.createIndex('product_and_date', ['product_id', 'expiration_date'], { unique: true });
+        }
 
-      // 4. Tabela inventory_counts
-      if (!db.objectStoreNames.contains('inventory_counts')) {
-        const countStore = db.createObjectStore('inventory_counts', { keyPath: 'id' });
-        countStore.createIndex('product_id', 'product_id', { unique: false });
-        countStore.createIndex('expiration_id', 'expiration_id', { unique: false });
-        countStore.createIndex('count_session_id', 'count_session_id', { unique: false });
-        countStore.createIndex('counted_at', 'counted_at', { unique: false });
-      }
+        // 3. Tabela count_sessions
+        if (!db.objectStoreNames.contains('count_sessions')) {
+          const sessionStore = db.createObjectStore('count_sessions', { keyPath: 'id' });
+          sessionStore.createIndex('date', 'date', { unique: false });
+          sessionStore.createIndex('status', 'status', { unique: false });
+          sessionStore.createIndex('sector_corridor', ['sector', 'corridor'], { unique: false });
+        }
 
-      // 5. Tabela sync_queue
-      if (!db.objectStoreNames.contains('sync_queue')) {
-        const syncStore = db.createObjectStore('sync_queue', { keyPath: 'id' });
-        syncStore.createIndex('synced', 'synced', { unique: false });
-        syncStore.createIndex('created_at', 'created_at', { unique: false });
-      }
+        // 4. Tabela inventory_counts
+        if (!db.objectStoreNames.contains('inventory_counts')) {
+          const countStore = db.createObjectStore('inventory_counts', { keyPath: 'id' });
+          countStore.createIndex('product_id', 'product_id', { unique: false });
+          countStore.createIndex('expiration_id', 'expiration_id', { unique: false });
+          countStore.createIndex('count_session_id', 'count_session_id', { unique: false });
+          countStore.createIndex('counted_at', 'counted_at', { unique: false });
+        }
 
-      // 6. Tabela blitz_sessions (Sessões de Blitz Semanal)
-      if (!db.objectStoreNames.contains('blitz_sessions')) {
-        const blitzStore = db.createObjectStore('blitz_sessions', { keyPath: 'id' });
-        blitzStore.createIndex('status', 'status', { unique: false });
-        blitzStore.createIndex('blitz_type', 'blitz_type', { unique: false });
-        blitzStore.createIndex('started_at', 'started_at', { unique: false });
-      }
+        // 5. Tabela sync_queue
+        if (!db.objectStoreNames.contains('sync_queue')) {
+          const syncStore = db.createObjectStore('sync_queue', { keyPath: 'id' });
+          syncStore.createIndex('synced', 'synced', { unique: false });
+          syncStore.createIndex('created_at', 'created_at', { unique: false });
+        }
 
-      // 7. Tabela blitz_items (Itens e conferências da Blitz)
-      if (!db.objectStoreNames.contains('blitz_items')) {
-        const itemStore = db.createObjectStore('blitz_items', { keyPath: 'id' });
-        itemStore.createIndex('blitz_session_id', 'blitz_session_id', { unique: false });
-        itemStore.createIndex('product_id', 'product_id', { unique: false });
-        itemStore.createIndex('session_product', ['blitz_session_id', 'product_id'], { unique: false });
-        itemStore.createIndex('checked_at', 'checked_at', { unique: false });
-      }
-    };
+        // 6. Tabela blitz_sessions (Sessões de Blitz Semanal)
+        if (!db.objectStoreNames.contains('blitz_sessions')) {
+          const blitzStore = db.createObjectStore('blitz_sessions', { keyPath: 'id' });
+          blitzStore.createIndex('status', 'status', { unique: false });
+          blitzStore.createIndex('blitz_type', 'blitz_type', { unique: false });
+          blitzStore.createIndex('started_at', 'started_at', { unique: false });
+        }
 
-    request.onsuccess = async (event) => {
-      const db = event.target.result;
-      dbInstance = db;
-      resolve(db);
-    };
+        // 7. Tabela blitz_items (Itens e conferências da Blitz)
+        if (!db.objectStoreNames.contains('blitz_items')) {
+          const itemStore = db.createObjectStore('blitz_items', { keyPath: 'id' });
+          itemStore.createIndex('blitz_session_id', 'blitz_session_id', { unique: false });
+          itemStore.createIndex('product_id', 'product_id', { unique: false });
+          itemStore.createIndex('session_product', ['blitz_session_id', 'product_id'], { unique: false });
+          itemStore.createIndex('checked_at', 'checked_at', { unique: false });
+        }
+      };
 
-    request.onerror = (event) => {
-      console.error('Erro ao abrir IndexedDB:', event.target.error);
+      request.onsuccess = (event) => {
+        const db = event.target.result;
+        dbInstance = db;
+        dbInitPromise = null;
+
+        db.onclose = () => {
+          console.warn('Conexão IndexedDB foi fechada. Resetando instância.');
+          dbInstance = null;
+          dbInitPromise = null;
+        };
+
+        db.onversionchange = () => {
+          console.warn('Mudança de versão do IndexedDB. Fechando conexão.');
+          try {
+            db.close();
+          } catch (_) {}
+          dbInstance = null;
+          dbInitPromise = null;
+        };
+
+        db.onerror = (e) => {
+          console.warn('Aviso de erro no IndexedDB:', e);
+        };
+
+        resolve(db);
+      };
+
+      request.onerror = (event) => {
+        console.error('Erro ao abrir IndexedDB:', event.target.error);
+        dbInstance = null;
+        dbInitPromise = null;
+        reject(event.target.error);
+      };
+    } catch (err) {
+      console.error('Exceção ao inicializar IndexedDB:', err);
+      dbInstance = null;
       dbInitPromise = null;
-      reject(event.target.error);
-    };
+      reject(err);
+    }
   });
 
   return dbInitPromise;
 }
 
+/**
+ * Cria uma transação segura com auto-recuperação caso a conexão esteja fechando/fechada.
+ */
+export async function getSafeTransaction(storeNames, mode = 'readonly') {
+  let db = await initDB();
+  try {
+    const tx = db.transaction(storeNames, mode);
+    return { db, tx };
+  } catch (err) {
+    const errMsg = (err && err.message) ? String(err.message).toLowerCase() : '';
+    const isConnError = err && (
+      err.name === 'InvalidStateError' ||
+      errMsg.includes('closing') ||
+      errMsg.includes('closed') ||
+      errMsg.includes('connection')
+    );
+    if (isConnError) {
+      console.warn('Conexão com IndexedDB estava fechando/fechada. Reconectando com segurança...');
+      dbInstance = null;
+      dbInitPromise = null;
+      db = await initDB(true);
+      const tx = db.transaction(storeNames, mode);
+      return { db, tx };
+    }
+    throw err;
+  }
+}
+
 // Leitura atômica de todos os itens de uma store
 export async function getAllFromStore(storeName) {
-  const db = await initDB();
-  return new Promise((resolve) => {
-    try {
-      const tx = db.transaction(storeName, 'readonly');
-      const store = tx.objectStore(storeName);
+  try {
+    const { tx } = await getSafeTransaction(storeName, 'readonly');
+    const store = tx.objectStore(storeName);
+    return new Promise((resolve) => {
       const req = store.getAll();
       req.onsuccess = () => resolve(req.result || []);
       req.onerror = (e) => {
-        console.warn(`Erro no getAll de ${storeName}:`, e.target.error);
+        console.warn(`Erro no getAll de ${storeName}:`, e.target?.error || e);
         resolve([]);
       };
-    } catch (err) {
-      console.warn(`Falha de transação em ${storeName}:`, err);
-      resolve([]);
-    }
-  });
+    });
+  } catch (err) {
+    console.warn(`Falha de transação em ${storeName}:`, err);
+    return [];
+  }
 }
 
 // ----------------------------------------------------
@@ -119,35 +192,33 @@ export async function getAllFromStore(storeName) {
 
 export async function getProductByBarcode(barcode) {
   if (!barcode) return null;
-  const db = await initDB();
-  return new Promise((resolve) => {
-    try {
-      const tx = db.transaction('products', 'readonly');
-      const store = tx.objectStore('products');
-      const index = store.index('barcode');
+  try {
+    const { tx } = await getSafeTransaction('products', 'readonly');
+    const store = tx.objectStore('products');
+    const index = store.index('barcode');
+    return new Promise((resolve) => {
       const req = index.get(barcode.trim());
       req.onsuccess = () => resolve(req.result || null);
       req.onerror = () => resolve(null);
-    } catch (e) {
-      resolve(null);
-    }
-  });
+    });
+  } catch (e) {
+    return null;
+  }
 }
 
 export async function getProductById(id) {
   if (!id) return null;
-  const db = await initDB();
-  return new Promise((resolve) => {
-    try {
-      const tx = db.transaction('products', 'readonly');
-      const store = tx.objectStore('products');
+  try {
+    const { tx } = await getSafeTransaction('products', 'readonly');
+    const store = tx.objectStore('products');
+    return new Promise((resolve) => {
       const req = store.get(id);
       req.onsuccess = () => resolve(req.result || null);
       req.onerror = () => resolve(null);
-    } catch (e) {
-      resolve(null);
-    }
-  });
+    });
+  } catch (e) {
+    return null;
+  }
 }
 
 export async function getAllProducts() {
@@ -236,45 +307,47 @@ export async function saveProduct(product) {
     updated_at: now
   };
 
-  const db = await initDB();
-  return new Promise((resolve, reject) => {
-    try {
-      const tx = db.transaction(['products', 'sync_queue'], 'readwrite');
-      const productStore = tx.objectStore('products');
-      const syncStore = tx.objectStore('sync_queue');
+  try {
+    const { tx } = await getSafeTransaction(['products', 'sync_queue'], 'readwrite');
+    return new Promise((resolve, reject) => {
+      try {
+        const productStore = tx.objectStore('products');
+        const syncStore = tx.objectStore('sync_queue');
 
-      productStore.put(productData);
+        productStore.put(productData);
 
-      // Adiciona na fila de sincronização
-      syncStore.add({
-        id: generateId(),
-        operation: 'UPSERT',
-        table_name: 'products',
-        record_id: productData.id,
-        payload: productData,
-        created_at: now,
-        synced: 0
-      });
+        // Adiciona na fila de sincronização
+        syncStore.add({
+          id: generateId(),
+          operation: 'UPSERT',
+          table_name: 'products',
+          record_id: productData.id,
+          payload: productData,
+          created_at: now,
+          synced: 0
+        });
 
-      tx.oncomplete = () => resolve(productData);
-      tx.onerror = (e) => reject(e.target.error);
-    } catch (e) {
-      reject(e);
-    }
-  });
+        tx.oncomplete = () => resolve(productData);
+        tx.onerror = (e) => reject(e.target?.error || e);
+      } catch (e) {
+        reject(e);
+      }
+    });
+  } catch (err) {
+    throw err;
+  }
 }
 
 // Exclui um produto por completo (produto, todas as validades e contagens)
 export async function deleteProduct(productId) {
   if (!productId) return false;
-  const db = await initDB();
   const now = new Date().toISOString();
 
   // 1. Busca todas as validades e contagens antes de deletar
   const expirations = await getProductExpirations(productId);
-  const counts = await new Promise((resolve) => {
+  const counts = await new Promise(async (resolve) => {
     try {
-      const tx = db.transaction('inventory_counts', 'readonly');
+      const { tx } = await getSafeTransaction('inventory_counts', 'readonly');
       const store = tx.objectStore('inventory_counts');
       const index = store.index('product_id');
       const req = index.getAll(productId);
@@ -285,72 +358,76 @@ export async function deleteProduct(productId) {
     }
   });
 
-  return new Promise((resolve, reject) => {
-    try {
-      const tx = db.transaction(['products', 'product_expirations', 'inventory_counts', 'sync_queue'], 'readwrite');
-      const prodStore = tx.objectStore('products');
-      const expStore = tx.objectStore('product_expirations');
-      const countStore = tx.objectStore('inventory_counts');
-      const syncStore = tx.objectStore('sync_queue');
+  try {
+    const { tx } = await getSafeTransaction(['products', 'product_expirations', 'inventory_counts', 'sync_queue'], 'readwrite');
+    return new Promise((resolve, reject) => {
+      try {
+        const prodStore = tx.objectStore('products');
+        const expStore = tx.objectStore('product_expirations');
+        const countStore = tx.objectStore('inventory_counts');
+        const syncStore = tx.objectStore('sync_queue');
 
-      // Remove o produto
-      prodStore.delete(productId);
-      syncStore.add({
-        id: generateId(),
-        operation: 'DELETE',
-        table_name: 'products',
-        record_id: productId,
-        payload: { id: productId },
-        created_at: now,
-        synced: 0
-      });
-
-      // Remove as validades associadas
-      expirations.forEach((exp) => {
-        expStore.delete(exp.id);
+        // Remove o produto
+        prodStore.delete(productId);
         syncStore.add({
           id: generateId(),
           operation: 'DELETE',
-          table_name: 'product_expirations',
-          record_id: exp.id,
-          payload: { id: exp.id },
+          table_name: 'products',
+          record_id: productId,
+          payload: { id: productId },
           created_at: now,
           synced: 0
         });
-      });
 
-      // Remove as contagens associadas
-      counts.forEach((cnt) => {
-        countStore.delete(cnt.id);
-        syncStore.add({
-          id: generateId(),
-          operation: 'DELETE',
-          table_name: 'inventory_counts',
-          record_id: cnt.id,
-          payload: { id: cnt.id },
-          created_at: now,
-          synced: 0
+        // Remove as validades associadas
+        expirations.forEach((exp) => {
+          expStore.delete(exp.id);
+          syncStore.add({
+            id: generateId(),
+            operation: 'DELETE',
+            table_name: 'product_expirations',
+            record_id: exp.id,
+            payload: { id: exp.id },
+            created_at: now,
+            synced: 0
+          });
         });
-      });
 
-      tx.oncomplete = () => resolve(true);
-      tx.onerror = (e) => reject(e.target.error);
-    } catch (e) {
-      reject(e);
-    }
-  });
+        // Remove as contagens associadas
+        counts.forEach((cnt) => {
+          countStore.delete(cnt.id);
+          syncStore.add({
+            id: generateId(),
+            operation: 'DELETE',
+            table_name: 'inventory_counts',
+            record_id: cnt.id,
+            payload: { id: cnt.id },
+            created_at: now,
+            synced: 0
+          });
+        });
+
+        tx.oncomplete = () => resolve(true);
+        tx.onerror = (e) => reject(e.target?.error || e);
+      } catch (e) {
+        reject(e);
+      }
+    });
+  } catch (err) {
+    console.error('Erro ao deletar produto:', err);
+    return false;
+  }
 }
 
 // Exclui uma data de validade específica e suas contagens
 export async function deleteProductExpiration(expirationId) {
   if (!expirationId) return false;
-  const db = await initDB();
   const now = new Date().toISOString();
 
   // Busca contagens dessa validade
-  const counts = await new Promise((resolve) => {
+  const counts = await new Promise(async (resolve) => {
     try {
-      const tx = db.transaction('inventory_counts', 'readonly');
+      const { tx } = await getSafeTransaction('inventory_counts', 'readonly');
       const store = tx.objectStore('inventory_counts');
       const index = store.index('expiration_id');
       const req = index.getAll(expirationId);
@@ -361,45 +438,50 @@ export async function deleteProductExpiration(expirationId) {
     }
   });
 
-  return new Promise((resolve, reject) => {
-    try {
-      const tx = db.transaction(['product_expirations', 'inventory_counts', 'sync_queue'], 'readwrite');
-      const expStore = tx.objectStore('product_expirations');
-      const countStore = tx.objectStore('inventory_counts');
-      const syncStore = tx.objectStore('sync_queue');
+  try {
+    const { tx } = await getSafeTransaction(['product_expirations', 'inventory_counts', 'sync_queue'], 'readwrite');
+    return new Promise((resolve, reject) => {
+      try {
+        const expStore = tx.objectStore('product_expirations');
+        const countStore = tx.objectStore('inventory_counts');
+        const syncStore = tx.objectStore('sync_queue');
 
-      // Remove a validade
-      expStore.delete(expirationId);
-      syncStore.add({
-        id: generateId(),
-        operation: 'DELETE',
-        table_name: 'product_expirations',
-        record_id: expirationId,
-        payload: { id: expirationId },
-        created_at: now,
-        synced: 0
-      });
-
-      // Remove contagens associadas
-      counts.forEach((cnt) => {
-        countStore.delete(cnt.id);
+        // Remove a validade
+        expStore.delete(expirationId);
         syncStore.add({
           id: generateId(),
           operation: 'DELETE',
-          table_name: 'inventory_counts',
-          record_id: cnt.id,
-          payload: { id: cnt.id },
+          table_name: 'product_expirations',
+          record_id: expirationId,
+          payload: { id: expirationId },
           created_at: now,
           synced: 0
         });
-      });
 
-      tx.oncomplete = () => resolve(true);
-      tx.onerror = (e) => reject(e.target.error);
-    } catch (e) {
-      reject(e);
-    }
-  });
+        // Remove contagens associadas
+        counts.forEach((cnt) => {
+          countStore.delete(cnt.id);
+          syncStore.add({
+            id: generateId(),
+            operation: 'DELETE',
+            table_name: 'inventory_counts',
+            record_id: cnt.id,
+            payload: { id: cnt.id },
+            created_at: now,
+            synced: 0
+          });
+        });
+
+        tx.oncomplete = () => resolve(true);
+        tx.onerror = (e) => reject(e.target?.error || e);
+      } catch (e) {
+        reject(e);
+      }
+    });
+  } catch (err) {
+    console.error('Erro ao deletar validade:', err);
+    return false;
+  }
 }
 
 // ----------------------------------------------------
@@ -412,12 +494,11 @@ export async function getAllExpirations() {
 
 export async function getProductExpirations(productId) {
   if (!productId) return [];
-  const db = await initDB();
-  return new Promise((resolve) => {
-    try {
-      const tx = db.transaction('product_expirations', 'readonly');
-      const store = tx.objectStore('product_expirations');
-      const index = store.index('product_id');
+  try {
+    const { tx } = await getSafeTransaction('product_expirations', 'readonly');
+    const store = tx.objectStore('product_expirations');
+    const index = store.index('product_id');
+    return new Promise((resolve) => {
       const req = index.getAll(productId);
       req.onsuccess = () => {
         const results = req.result || [];
@@ -426,27 +507,26 @@ export async function getProductExpirations(productId) {
         resolve(results);
       };
       req.onerror = () => resolve([]);
-    } catch (e) {
-      resolve([]);
-    }
-  });
+    });
+  } catch (e) {
+    return [];
+  }
 }
 
 export async function getExpirationByProductAndDate(productId, expirationDate) {
   if (!productId || !expirationDate) return null;
-  const db = await initDB();
-  return new Promise((resolve) => {
-    try {
-      const tx = db.transaction('product_expirations', 'readonly');
-      const store = tx.objectStore('product_expirations');
-      const index = store.index('product_and_date');
+  try {
+    const { tx } = await getSafeTransaction('product_expirations', 'readonly');
+    const store = tx.objectStore('product_expirations');
+    const index = store.index('product_and_date');
+    return new Promise((resolve) => {
       const req = index.get([productId, expirationDate]);
       req.onsuccess = () => resolve(req.result || null);
       req.onerror = () => resolve(null);
-    } catch (e) {
-      resolve(null);
-    }
-  });
+    });
+  } catch (e) {
+    return null;
+  }
 }
 
 export async function saveProductExpiration(productIdOrObj, expirationDateArg = null) {
@@ -481,31 +561,34 @@ export async function saveProductExpiration(productIdOrObj, expirationDateArg = 
     updated_at: now
   };
 
-  const db = await initDB();
-  return new Promise((resolve, reject) => {
-    try {
-      const tx = db.transaction(['product_expirations', 'sync_queue'], 'readwrite');
-      const expStore = tx.objectStore('product_expirations');
-      const syncStore = tx.objectStore('sync_queue');
+  try {
+    const { tx } = await getSafeTransaction(['product_expirations', 'sync_queue'], 'readwrite');
+    return new Promise((resolve, reject) => {
+      try {
+        const expStore = tx.objectStore('product_expirations');
+        const syncStore = tx.objectStore('sync_queue');
 
-      expStore.put(expData);
+        expStore.put(expData);
 
-      syncStore.add({
-        id: generateId(),
-        operation: 'INSERT',
-        table_name: 'product_expirations',
-        record_id: expData.id,
-        payload: expData,
-        created_at: now,
-        synced: 0
-      });
+        syncStore.add({
+          id: generateId(),
+          operation: 'INSERT',
+          table_name: 'product_expirations',
+          record_id: expData.id,
+          payload: expData,
+          created_at: now,
+          synced: 0
+        });
 
-      tx.oncomplete = () => resolve({ isNew: true, expiration: expData });
-      tx.onerror = (e) => reject(e.target.error);
-    } catch (e) {
-      reject(e);
-    }
-  });
+        tx.oncomplete = () => resolve({ isNew: true, expiration: expData });
+        tx.onerror = (e) => reject(e.target?.error || e);
+      } catch (e) {
+        reject(e);
+      }
+    });
+  } catch (err) {
+    throw err;
+  }
 }
 
 // ----------------------------------------------------
@@ -516,17 +599,16 @@ export async function getAllCounts() {
   return getAllFromStore('inventory_counts');
 }
 
-// Retorna as contagens mais recentes para cada local de uma validade específica
+// // Retorna as contagens mais recentes para cada local de uma validade específica
 export async function getLatestCountsForExpiration(expirationId) {
   if (!expirationId) {
     return { countsByLocation: {}, total: 0, lastCountDate: null, hasPreviousCount: false };
   }
-  const db = await initDB();
-  return new Promise((resolve) => {
-    try {
-      const tx = db.transaction('inventory_counts', 'readonly');
-      const store = tx.objectStore('inventory_counts');
-      const index = store.index('expiration_id');
+  try {
+    const { tx } = await getSafeTransaction('inventory_counts', 'readonly');
+    const store = tx.objectStore('inventory_counts');
+    const index = store.index('expiration_id');
+    return new Promise((resolve) => {
       const req = index.getAll(expirationId);
       req.onsuccess = () => {
         const counts = req.result || [];
@@ -567,16 +649,15 @@ export async function getLatestCountsForExpiration(expirationId) {
         });
       };
       req.onerror = () => resolve({ countsByLocation: {}, total: 0, lastCountDate: null, hasPreviousCount: false });
-    } catch (e) {
-      resolve({ countsByLocation: {}, total: 0, lastCountDate: null, hasPreviousCount: false });
-    }
-  });
+    });
+  } catch (e) {
+    return { countsByLocation: {}, total: 0, lastCountDate: null, hasPreviousCount: false };
+  }
 }
 
 // Salva uma nova rodada de conferência para um produto e validade, atualizando também a tabela de produtos
 export async function saveInventoryCounts(productId, expirationId, locationCounts, sessionId = null) {
   const now = new Date().toISOString();
-  const db = await initDB();
 
   const countRecords = [];
   let totalCount = 0;
@@ -611,73 +692,76 @@ export async function saveInventoryCounts(productId, expirationId, locationCount
     });
   });
 
-  return new Promise((resolve, reject) => {
-    try {
-      const tx = db.transaction(['products', 'inventory_counts', 'sync_queue'], 'readwrite');
-      const prodStore = tx.objectStore('products');
-      const countStore = tx.objectStore('inventory_counts');
-      const syncStore = tx.objectStore('sync_queue');
+  try {
+    const { tx } = await getSafeTransaction(['products', 'inventory_counts', 'sync_queue'], 'readwrite');
+    return new Promise((resolve, reject) => {
+      try {
+        const prodStore = tx.objectStore('products');
+        const countStore = tx.objectStore('inventory_counts');
+        const syncStore = tx.objectStore('sync_queue');
 
-      // 1. Atualiza o produto pai com os totais e locais diretamente
-      const prodReq = prodStore.get(productId);
-      prodReq.onsuccess = () => {
-        if (prodReq.result) {
-          const prod = prodReq.result;
-          prod.total_quantity = totalCount;
-          prod.deposit_qty = locQtyMap['DEPÓSITO'] || 0;
-          prod.fridge_qty = locQtyMap['GELADEIRA'] || 0;
-          prod.shelf_qty = locQtyMap['PRATELEIRA'] || 0;
-          prod.gondola_end_qty = locQtyMap['PONTA DE GÔNDOLA'] || 0;
-          prod.ear_qty = locQtyMap['ORELHA'] || 0;
-          prod.island_qty = locQtyMap['ILHA'] || 0;
-          prod.cart_qty = locQtyMap['CARRINHO'] || 0;
-          prod.checkout_qty = locQtyMap['FRENTE DE LOJA'] || 0;
-          prod.last_count_date = now;
-          prod.updated_at = now;
+        // 1. Atualiza o produto pai com os totais e locais diretamente
+        const prodReq = prodStore.get(productId);
+        prodReq.onsuccess = () => {
+          if (prodReq.result) {
+            const prod = prodReq.result;
+            prod.total_quantity = totalCount;
+            prod.deposit_qty = locQtyMap['DEPÓSITO'] || 0;
+            prod.fridge_qty = locQtyMap['GELADEIRA'] || 0;
+            prod.shelf_qty = locQtyMap['PRATELEIRA'] || 0;
+            prod.gondola_end_qty = locQtyMap['PONTA DE GÔNDOLA'] || 0;
+            prod.ear_qty = locQtyMap['ORELHA'] || 0;
+            prod.island_qty = locQtyMap['ILHA'] || 0;
+            prod.cart_qty = locQtyMap['CARRINHO'] || 0;
+            prod.checkout_qty = locQtyMap['FRENTE DE LOJA'] || 0;
+            prod.last_count_date = now;
+            prod.updated_at = now;
 
-          prodStore.put(prod);
+            prodStore.put(prod);
 
-          syncStore.add({
-            id: generateId(),
-            operation: 'UPSERT',
-            table_name: 'products',
-            record_id: prod.id,
-            payload: prod,
-            created_at: now,
-            synced: 0
+            syncStore.add({
+              id: generateId(),
+              operation: 'UPSERT',
+              table_name: 'products',
+              record_id: prod.id,
+              payload: prod,
+              created_at: now,
+              synced: 0
+            });
+          }
+
+          // 2. Salva os registros em inventory_counts após o produto
+          countRecords.forEach((record) => {
+            countStore.add(record);
+            syncStore.add({
+              id: generateId(),
+              operation: 'INSERT',
+              table_name: 'inventory_counts',
+              record_id: record.id,
+              payload: record,
+              created_at: now,
+              synced: 0
+            });
           });
-        }
+        };
 
-        // 2. Salva os registros em inventory_counts após o produto
-        countRecords.forEach((record) => {
-          countStore.add(record);
-          syncStore.add({
-            id: generateId(),
-            operation: 'INSERT',
-            table_name: 'inventory_counts',
-            record_id: record.id,
-            payload: record,
-            created_at: now,
-            synced: 0
-          });
-        });
-      };
-
-      tx.oncomplete = () => {
-        invalidateMetricsCache();
-        resolve({ total: totalCount, countDate: now });
-      };
-      tx.onerror = (e) => reject(e.target.error);
-    } catch (e) {
-      reject(e);
-    }
-  });
+        tx.oncomplete = () => {
+          invalidateMetricsCache();
+          resolve({ total: totalCount, countDate: now });
+        };
+        tx.onerror = (e) => reject(e.target?.error || e);
+      } catch (e) {
+        reject(e);
+      }
+    });
+  } catch (err) {
+    throw err;
+  }
 }
 
 // Salva Produto, Validade e Contagem em UMA ÚNICA transação atômica
 export async function saveCompleteProductWithCounts({ product, expirationDate, locationCounts }) {
   const now = new Date().toISOString();
-  const db = await initDB();
 
   let deposit = Number(locationCounts['DEPÓSITO'] || 0);
   let fridge = Number(locationCounts['GELADEIRA'] || 0);
@@ -734,77 +818,80 @@ export async function saveCompleteProductWithCounts({ product, expirationDate, l
     updated_at: now
   }));
 
-  return new Promise((resolve, reject) => {
-    try {
-      const tx = db.transaction(['products', 'product_expirations', 'inventory_counts', 'sync_queue'], 'readwrite');
-      const prodStore = tx.objectStore('products');
-      const expStore = tx.objectStore('product_expirations');
-      const countStore = tx.objectStore('inventory_counts');
-      const syncStore = tx.objectStore('sync_queue');
+  try {
+    const { tx } = await getSafeTransaction(['products', 'product_expirations', 'inventory_counts', 'sync_queue'], 'readwrite');
+    return new Promise((resolve, reject) => {
+      try {
+        const prodStore = tx.objectStore('products');
+        const expStore = tx.objectStore('product_expirations');
+        const countStore = tx.objectStore('inventory_counts');
+        const syncStore = tx.objectStore('sync_queue');
 
-      // 1. Salva Produto
-      prodStore.put(productData);
-      syncStore.add({
-        id: generateId(),
-        operation: 'UPSERT',
-        table_name: 'products',
-        record_id: productId,
-        payload: productData,
-        created_at: now,
-        synced: 0
-      });
-
-      // 2. Salva Validade
-      expStore.put(expirationData);
-      syncStore.add({
-        id: generateId(),
-        operation: 'INSERT',
-        table_name: 'product_expirations',
-        record_id: expirationId,
-        payload: expirationData,
-        created_at: now,
-        synced: 0
-      });
-
-      // 3. Salva Contagens dos 8 Locais
-      countRecords.forEach((cnt) => {
-        countStore.add(cnt);
+        // 1. Salva Produto
+        prodStore.put(productData);
         syncStore.add({
           id: generateId(),
-          operation: 'INSERT',
-          table_name: 'inventory_counts',
-          record_id: cnt.id,
-          payload: cnt,
+          operation: 'UPSERT',
+          table_name: 'products',
+          record_id: productId,
+          payload: productData,
           created_at: now,
           synced: 0
         });
-      });
 
-      tx.oncomplete = () => {
-        invalidateMetricsCache();
-        resolve({
-          product: productData,
-          expiration: expirationData,
-          counts: countRecords,
-          total: totalQty
+        // 2. Salva Validade
+        expStore.put(expirationData);
+        syncStore.add({
+          id: generateId(),
+          operation: 'INSERT',
+          table_name: 'product_expirations',
+          record_id: expirationId,
+          payload: expirationData,
+          created_at: now,
+          synced: 0
         });
-      };
-      tx.onerror = (e) => reject(e.target.error);
-    } catch (err) {
-      reject(err);
-    }
-  });
+
+        // 3. Salva Contagens dos 8 Locais
+        countRecords.forEach((cnt) => {
+          countStore.add(cnt);
+          syncStore.add({
+            id: generateId(),
+            operation: 'INSERT',
+            table_name: 'inventory_counts',
+            record_id: cnt.id,
+            payload: cnt,
+            created_at: now,
+            synced: 0
+          });
+        });
+
+        tx.oncomplete = () => {
+          invalidateMetricsCache();
+          resolve({
+            product: productData,
+            expiration: expirationData,
+            counts: countRecords,
+            total: totalQty
+          });
+        };
+        tx.onerror = (e) => reject(e.target?.error || e);
+      } catch (err) {
+        reject(err);
+      }
+    });
+  } catch (err) {
+    throw err;
+  }
 }
 
 // Retorna histórico completo de um produto (datas, totais e detalhamento por local)
 export async function getHistoryForProduct(productId) {
   if (!productId) return [];
-  const db = await initDB();
-  return new Promise((resolve) => {
-    try {
-      const tx = db.transaction('inventory_counts', 'readonly');
-      const store = tx.objectStore('inventory_counts');
-      const index = store.index('product_id');
+  try {
+    const { tx } = await getSafeTransaction('inventory_counts', 'readonly');
+    const store = tx.objectStore('inventory_counts');
+    const index = store.index('product_id');
+    return new Promise((resolve) => {
       const req = index.getAll(productId);
       req.onsuccess = () => {
         const allCounts = req.result || [];
@@ -830,10 +917,10 @@ export async function getHistoryForProduct(productId) {
         resolve(historyList);
       };
       req.onerror = () => resolve([]);
-    } catch (e) {
-      resolve([]);
-    }
-  });
+    });
+  } catch (e) {
+    return [];
+  }
 }
 
 // Retorna histórico por local para saber exatamente o que mudou (Ex: DEPÓSITO 04/08->90, 11/08->110)
@@ -1282,12 +1369,16 @@ export async function getDatabaseStorageStats() {
 
   for (const tableName of tables) {
     try {
-      const records = await new Promise((resolve) => {
-        const tx = db.transaction(tableName, 'readonly');
-        const store = tx.objectStore(tableName);
-        const req = store.getAll();
-        req.onsuccess = () => resolve(req.result || []);
-        req.onerror = () => resolve([]);
+      const records = await new Promise(async (resolve) => {
+        try {
+          const { tx } = await getSafeTransaction(tableName, 'readonly');
+          const store = tx.objectStore(tableName);
+          const req = store.getAll();
+          req.onsuccess = () => resolve(req.result || []);
+          req.onerror = () => resolve([]);
+        } catch (_) {
+          resolve([]);
+        }
       });
 
       const count = records.length;
@@ -1377,30 +1468,33 @@ export async function saveSession(session) {
     updated_at: now
   };
 
-  const db = await initDB();
-  return new Promise((resolve, reject) => {
-    try {
-      const tx = db.transaction(['count_sessions', 'sync_queue'], 'readwrite');
-      tx.objectStore('count_sessions').put(sessionData);
-      tx.objectStore('sync_queue').add({
-        id: generateId(),
-        operation: 'UPSERT',
-        table_name: 'count_sessions',
-        record_id: sessionData.id,
-        payload: sessionData,
-        created_at: now,
-        synced: 0
-      });
+  try {
+    const { tx } = await getSafeTransaction(['count_sessions', 'sync_queue'], 'readwrite');
+    return new Promise((resolve, reject) => {
+      try {
+        tx.objectStore('count_sessions').put(sessionData);
+        tx.objectStore('sync_queue').add({
+          id: generateId(),
+          operation: 'UPSERT',
+          table_name: 'count_sessions',
+          record_id: sessionData.id,
+          payload: sessionData,
+          created_at: now,
+          synced: 0
+        });
 
-      tx.oncomplete = () => {
-        localStorage.setItem('active_audit_session', JSON.stringify(sessionData));
-        resolve(sessionData);
-      };
-      tx.onerror = (e) => reject(e.target.error);
-    } catch (e) {
-      reject(e);
-    }
-  });
+        tx.oncomplete = () => {
+          localStorage.setItem('active_audit_session', JSON.stringify(sessionData));
+          resolve(sessionData);
+        };
+        tx.onerror = (e) => reject(e.target?.error || e);
+      } catch (e) {
+        reject(e);
+      }
+    });
+  } catch (err) {
+    throw err;
+  }
 }
 
 export function getActiveSession() {
@@ -1421,42 +1515,44 @@ export function clearActiveSession() {
 // ----------------------------------------------------
 
 export async function getUnsyncedQueue() {
-  const db = await initDB();
-  return new Promise((resolve) => {
-    try {
-      const tx = db.transaction('sync_queue', 'readonly');
-      const store = tx.objectStore('sync_queue');
-      const index = store.index('synced');
+  try {
+    const { tx } = await getSafeTransaction('sync_queue', 'readonly');
+    const store = tx.objectStore('sync_queue');
+    const index = store.index('synced');
+    return new Promise((resolve) => {
       const req = index.getAll(0);
       req.onsuccess = () => resolve(req.result || []);
       req.onerror = () => resolve([]);
-    } catch (e) {
-      resolve([]);
-    }
-  });
+    });
+  } catch (e) {
+    return [];
+  }
 }
 
 export async function markQueueItemSynced(id) {
-  const db = await initDB();
-  return new Promise((resolve, reject) => {
-    try {
-      const tx = db.transaction('sync_queue', 'readwrite');
-      const store = tx.objectStore('sync_queue');
-      const req = store.get(id);
+  try {
+    const { tx } = await getSafeTransaction('sync_queue', 'readwrite');
+    return new Promise((resolve, reject) => {
+      try {
+        const store = tx.objectStore('sync_queue');
+        const req = store.get(id);
 
-      req.onsuccess = () => {
-        if (req.result) {
-          req.result.synced = 1;
-          req.result.synced_at = new Date().toISOString();
-          store.put(req.result);
-        }
-        resolve();
-      };
-      req.onerror = () => reject(req.error);
-    } catch (e) {
-      reject(e);
-    }
-  });
+        req.onsuccess = () => {
+          if (req.result) {
+            req.result.synced = 1;
+            req.result.synced_at = new Date().toISOString();
+            store.put(req.result);
+          }
+          resolve();
+        };
+        req.onerror = () => reject(req.error);
+      } catch (e) {
+        reject(e);
+      }
+    });
+  } catch (err) {
+    console.warn('Erro ao marcar item sincronizado:', err);
+  }
 }
 
 // ----------------------------------------------------
@@ -1475,54 +1571,56 @@ export async function createBlitzSession({ blitz_type }) {
     updated_at: now
   };
 
-  const db = await initDB();
-  return new Promise((resolve, reject) => {
-    try {
-      const tx = db.transaction(['blitz_sessions', 'sync_queue'], 'readwrite');
-      const sessionStore = tx.objectStore('blitz_sessions');
-      const syncStore = tx.objectStore('sync_queue');
+  try {
+    const { tx } = await getSafeTransaction(['blitz_sessions', 'sync_queue'], 'readwrite');
+    return new Promise((resolve, reject) => {
+      try {
+        const sessionStore = tx.objectStore('blitz_sessions');
+        const syncStore = tx.objectStore('sync_queue');
 
-      // Fecha preventivamente qualquer outra sessão anterior que tenha ficado em aberto
-      const getAllReq = sessionStore.getAll();
-      getAllReq.onsuccess = () => {
-        const allSessions = getAllReq.result || [];
-        allSessions.forEach((s) => {
-          if (s.status === 'em_andamento') {
-            s.status = 'finalizada';
-            s.finished_at = now;
-            s.updated_at = now;
-            sessionStore.put(s);
-          }
+        // Fecha preventivamente qualquer outra sessão anterior que tenha ficado em aberto
+        const getAllReq = sessionStore.getAll();
+        getAllReq.onsuccess = () => {
+          const allSessions = getAllReq.result || [];
+          allSessions.forEach((s) => {
+            if (s.status === 'em_andamento') {
+              s.status = 'finalizada';
+              s.finished_at = now;
+              s.updated_at = now;
+              sessionStore.put(s);
+            }
+          });
+        };
+
+        sessionStore.put(session);
+
+        syncStore.add({
+          id: generateId(),
+          operation: 'UPSERT',
+          table_name: 'blitz_sessions',
+          record_id: session.id,
+          payload: session,
+          created_at: now,
+          synced: 0
         });
-      };
 
-      sessionStore.put(session);
-
-      syncStore.add({
-        id: generateId(),
-        operation: 'UPSERT',
-        table_name: 'blitz_sessions',
-        record_id: session.id,
-        payload: session,
-        created_at: now,
-        synced: 0
-      });
-
-      tx.oncomplete = () => resolve(session);
-      tx.onerror = (e) => reject(e.target.error);
-    } catch (e) {
-      reject(e);
-    }
-  });
+        tx.oncomplete = () => resolve(session);
+        tx.onerror = (e) => reject(e.target?.error || e);
+      } catch (e) {
+        reject(e);
+      }
+    });
+  } catch (err) {
+    throw err;
+  }
 }
 
 export async function getActiveBlitzSession() {
-  const db = await initDB();
-  return new Promise((resolve) => {
-    try {
-      const tx = db.transaction('blitz_sessions', 'readonly');
-      const store = tx.objectStore('blitz_sessions');
-      const index = store.index('status');
+  try {
+    const { tx } = await getSafeTransaction('blitz_sessions', 'readonly');
+    const store = tx.objectStore('blitz_sessions');
+    const index = store.index('status');
+    return new Promise((resolve) => {
       const req = index.getAll('em_andamento');
       req.onsuccess = () => {
         const list = req.result || [];
@@ -1535,118 +1633,125 @@ export async function getActiveBlitzSession() {
         resolve(list[0]);
       };
       req.onerror = () => resolve(null);
-    } catch (e) {
-      resolve(null);
-    }
-  });
+    });
+  } catch (e) {
+    return null;
+  }
 }
 
 export async function getBlitzSessionById(id) {
   if (!id) return null;
-  const db = await initDB();
-  return new Promise((resolve) => {
-    try {
-      const tx = db.transaction('blitz_sessions', 'readonly');
-      const store = tx.objectStore('blitz_sessions');
+  try {
+    const { tx } = await getSafeTransaction('blitz_sessions', 'readonly');
+    const store = tx.objectStore('blitz_sessions');
+    return new Promise((resolve) => {
       const req = store.get(id);
       req.onsuccess = () => resolve(req.result || null);
       req.onerror = () => resolve(null);
-    } catch (e) {
-      resolve(null);
-    }
-  });
+    });
+  } catch (e) {
+    return null;
+  }
 }
 
 export async function finishBlitzSession(sessionId = null) {
-  const db = await initDB();
   const now = new Date().toISOString();
 
-  return new Promise((resolve, reject) => {
-    try {
-      const tx = db.transaction(['blitz_sessions', 'sync_queue'], 'readwrite');
-      const store = tx.objectStore('blitz_sessions');
-      const syncStore = tx.objectStore('sync_queue');
+  try {
+    const { tx } = await getSafeTransaction(['blitz_sessions', 'sync_queue'], 'readwrite');
+    return new Promise((resolve, reject) => {
+      try {
+        const store = tx.objectStore('blitz_sessions');
+        const syncStore = tx.objectStore('sync_queue');
 
-      const getAllReq = store.getAll();
-      let updatedSession = null;
+        const getAllReq = store.getAll();
+        let updatedSession = null;
 
-      getAllReq.onsuccess = () => {
-        const allSessions = getAllReq.result || [];
-        allSessions.forEach((session) => {
-          // Finaliza a sessão alvo ou qualquer sessão que ainda esteja 'em_andamento'
-          if ((sessionId && session.id === sessionId) || (!sessionId && session.status === 'em_andamento') || session.status === 'em_andamento') {
-            session.status = 'finalizada';
-            session.finished_at = session.finished_at || now;
-            session.updated_at = now;
-            if (!updatedSession || session.id === sessionId) {
-              updatedSession = session;
+        getAllReq.onsuccess = () => {
+          const allSessions = getAllReq.result || [];
+          allSessions.forEach((session) => {
+            // Finaliza a sessão alvo ou qualquer sessão que ainda esteja 'em_andamento'
+            if ((sessionId && session.id === sessionId) || (!sessionId && session.status === 'em_andamento') || session.status === 'em_andamento') {
+              session.status = 'finalizada';
+              session.finished_at = session.finished_at || now;
+              session.updated_at = now;
+              if (!updatedSession || session.id === sessionId) {
+                updatedSession = session;
+              }
+              store.put(session);
+
+              syncStore.add({
+                id: generateId(),
+                operation: 'UPSERT',
+                table_name: 'blitz_sessions',
+                record_id: session.id,
+                payload: session,
+                created_at: now,
+                synced: 0
+              });
             }
-            store.put(session);
+          });
+        };
 
-            syncStore.add({
-              id: generateId(),
-              operation: 'UPSERT',
-              table_name: 'blitz_sessions',
-              record_id: session.id,
-              payload: session,
-              created_at: now,
-              synced: 0
-            });
-          }
-        });
-      };
-
-      tx.oncomplete = () => resolve(updatedSession);
-      tx.onerror = (e) => reject(e.target.error);
-    } catch (e) {
-      reject(e);
-    }
-  });
+        tx.oncomplete = () => resolve(updatedSession);
+        tx.onerror = (e) => reject(e.target?.error || e);
+      } catch (e) {
+        reject(e);
+      }
+    });
+  } catch (err) {
+    console.error('Erro ao finalizar blitz:', err);
+    return null;
+  }
 }
 
 export async function cancelBlitzSession(sessionId = null) {
-  const db = await initDB();
   const now = new Date().toISOString();
 
-  return new Promise((resolve, reject) => {
-    try {
-      const tx = db.transaction(['blitz_sessions', 'sync_queue'], 'readwrite');
-      const store = tx.objectStore('blitz_sessions');
-      const syncStore = tx.objectStore('sync_queue');
+  try {
+    const { tx } = await getSafeTransaction(['blitz_sessions', 'sync_queue'], 'readwrite');
+    return new Promise((resolve, reject) => {
+      try {
+        const store = tx.objectStore('blitz_sessions');
+        const syncStore = tx.objectStore('sync_queue');
 
-      const getAllReq = store.getAll();
-      let hasCanceled = false;
+        const getAllReq = store.getAll();
+        let hasCanceled = false;
 
-      getAllReq.onsuccess = () => {
-        const allSessions = getAllReq.result || [];
-        allSessions.forEach((session) => {
-          // Cancela a sessão alvo ou qualquer sessão que ainda esteja 'em_andamento'
-          if ((sessionId && session.id === sessionId) || (!sessionId && session.status === 'em_andamento') || (session.id === sessionId)) {
-            session.status = 'cancelada';
-            session.finished_at = session.finished_at || now;
-            session.updated_at = now;
-            hasCanceled = true;
-            store.put(session);
+        getAllReq.onsuccess = () => {
+          const allSessions = getAllReq.result || [];
+          allSessions.forEach((session) => {
+            // Cancela a sessão alvo ou qualquer sessão que ainda esteja 'em_andamento'
+            if ((sessionId && session.id === sessionId) || (!sessionId && session.status === 'em_andamento') || (session.id === sessionId)) {
+              session.status = 'cancelada';
+              session.finished_at = session.finished_at || now;
+              session.updated_at = now;
+              hasCanceled = true;
+              store.put(session);
 
-            syncStore.add({
-              id: generateId(),
-              operation: 'UPSERT',
-              table_name: 'blitz_sessions',
-              record_id: session.id,
-              payload: session,
-              created_at: now,
-              synced: 0
-            });
-          }
-        });
-      };
+              syncStore.add({
+                id: generateId(),
+                operation: 'UPSERT',
+                table_name: 'blitz_sessions',
+                record_id: session.id,
+                payload: session,
+                created_at: now,
+                synced: 0
+              });
+            }
+          });
+        };
 
-      tx.oncomplete = () => resolve(hasCanceled);
-      tx.onerror = (e) => reject(e.target.error);
-    } catch (e) {
-      reject(e);
-    }
-  });
+        tx.oncomplete = () => resolve(hasCanceled);
+        tx.onerror = (e) => reject(e.target?.error || e);
+      } catch (e) {
+        reject(e);
+      }
+    });
+  } catch (err) {
+    console.error('Erro ao cancelar blitz:', err);
+    return false;
+  }
 }
 
 export async function getAllBlitzSessions() {
@@ -1682,41 +1787,43 @@ export async function saveBlitzItem({
     updated_at: now
   };
 
-  const db = await initDB();
-  return new Promise((resolve, reject) => {
-    try {
-      const tx = db.transaction(['blitz_items', 'sync_queue'], 'readwrite');
-      const itemStore = tx.objectStore('blitz_items');
-      const syncStore = tx.objectStore('sync_queue');
+  try {
+    const { tx } = await getSafeTransaction(['blitz_items', 'sync_queue'], 'readwrite');
+    return new Promise((resolve, reject) => {
+      try {
+        const itemStore = tx.objectStore('blitz_items');
+        const syncStore = tx.objectStore('sync_queue');
 
-      itemStore.put(itemData);
+        itemStore.put(itemData);
 
-      syncStore.add({
-        id: generateId(),
-        operation: 'UPSERT',
-        table_name: 'blitz_items',
-        record_id: itemData.id,
-        payload: itemData,
-        created_at: now,
-        synced: 0
-      });
+        syncStore.add({
+          id: generateId(),
+          operation: 'UPSERT',
+          table_name: 'blitz_items',
+          record_id: itemData.id,
+          payload: itemData,
+          created_at: now,
+          synced: 0
+        });
 
-      tx.oncomplete = () => resolve(itemData);
-      tx.onerror = (e) => reject(e.target.error);
-    } catch (e) {
-      reject(e);
-    }
-  });
+        tx.oncomplete = () => resolve(itemData);
+        tx.onerror = (e) => reject(e.target?.error || e);
+      } catch (e) {
+        reject(e);
+      }
+    });
+  } catch (err) {
+    throw err;
+  }
 }
 
 export async function getBlitzItemsBySessionId(sessionId) {
   if (!sessionId) return [];
-  const db = await initDB();
-  return new Promise((resolve) => {
-    try {
-      const tx = db.transaction('blitz_items', 'readonly');
-      const store = tx.objectStore('blitz_items');
-      const index = store.index('blitz_session_id');
+  try {
+    const { tx } = await getSafeTransaction('blitz_items', 'readonly');
+    const store = tx.objectStore('blitz_items');
+    const index = store.index('blitz_session_id');
+    return new Promise((resolve) => {
       const req = index.getAll(sessionId);
       req.onsuccess = () => {
         const items = req.result || [];
@@ -1724,37 +1831,35 @@ export async function getBlitzItemsBySessionId(sessionId) {
         resolve(items);
       };
       req.onerror = () => resolve([]);
-    } catch (e) {
-      resolve([]);
-    }
-  });
+    });
+  } catch (e) {
+    return [];
+  }
 }
 
 export async function getBlitzItemBySessionAndProduct(sessionId, productId) {
   if (!sessionId || !productId) return null;
-  const db = await initDB();
-  return new Promise((resolve) => {
-    try {
-      const tx = db.transaction('blitz_items', 'readonly');
-      const store = tx.objectStore('blitz_items');
-      const index = store.index('session_product');
+  try {
+    const { tx } = await getSafeTransaction('blitz_items', 'readonly');
+    const store = tx.objectStore('blitz_items');
+    const index = store.index('session_product');
+    return new Promise((resolve) => {
       const req = index.get([sessionId, productId]);
       req.onsuccess = () => resolve(req.result || null);
       req.onerror = () => resolve(null);
-    } catch (e) {
-      resolve(null);
-    }
-  });
+    });
+  } catch (e) {
+    return null;
+  }
 }
 
 export async function getLastBlitzItemForProduct(productId) {
   if (!productId) return null;
-  const db = await initDB();
-  return new Promise((resolve) => {
-    try {
-      const tx = db.transaction('blitz_items', 'readonly');
-      const store = tx.objectStore('blitz_items');
-      const index = store.index('product_id');
+  try {
+    const { tx } = await getSafeTransaction('blitz_items', 'readonly');
+    const store = tx.objectStore('blitz_items');
+    const index = store.index('product_id');
+    return new Promise((resolve) => {
       const req = index.getAll(productId);
       req.onsuccess = () => {
         const items = req.result || [];
@@ -1766,20 +1871,19 @@ export async function getLastBlitzItemForProduct(productId) {
         resolve(items[0]);
       };
       req.onerror = () => resolve(null);
-    } catch (e) {
-      resolve(null);
-    }
-  });
+    });
+  } catch (e) {
+    return null;
+  }
 }
 
 export async function getAllBlitzItemsForProduct(productId) {
   if (!productId) return [];
-  const db = await initDB();
-  return new Promise((resolve) => {
-    try {
-      const tx = db.transaction('blitz_items', 'readonly');
-      const store = tx.objectStore('blitz_items');
-      const index = store.index('product_id');
+  try {
+    const { tx } = await getSafeTransaction('blitz_items', 'readonly');
+    const store = tx.objectStore('blitz_items');
+    const index = store.index('product_id');
+    return new Promise((resolve) => {
       const req = index.getAll(productId);
       req.onsuccess = () => {
         const items = req.result || [];
@@ -1787,10 +1891,10 @@ export async function getAllBlitzItemsForProduct(productId) {
         resolve(items);
       };
       req.onerror = () => resolve([]);
-    } catch (e) {
-      resolve([]);
-    }
-  });
+    });
+  } catch (e) {
+    return [];
+  }
 }
 
 // ----------------------------------------------------
@@ -1798,33 +1902,35 @@ export async function getAllBlitzItemsForProduct(productId) {
 // ----------------------------------------------------
 
 export async function clearAllDatabaseData() {
-  const db = await initDB();
-  return new Promise((resolve, reject) => {
-    try {
-      const stores = [
-        'products',
-        'product_expirations',
-        'inventory_counts',
-        'count_sessions',
-        'blitz_sessions',
-        'blitz_items',
-        'sync_queue'
-      ];
-      const tx = db.transaction(stores, 'readwrite');
-      stores.forEach((storeName) => {
-        if (db.objectStoreNames.contains(storeName)) {
+  const stores = [
+    'products',
+    'product_expirations',
+    'inventory_counts',
+    'count_sessions',
+    'blitz_sessions',
+    'blitz_items',
+    'sync_queue'
+  ];
+  try {
+    const { tx } = await getSafeTransaction(stores, 'readwrite');
+    return new Promise((resolve, reject) => {
+      try {
+        stores.forEach((storeName) => {
           tx.objectStore(storeName).clear();
-        }
-      });
-      tx.oncomplete = () => {
-        localStorage.removeItem('active_audit_session');
-        localStorage.removeItem('active_blitz_session_cache');
-        resolve(true);
-      };
-      tx.onerror = (e) => reject(e.target.error);
-    } catch (err) {
-      reject(err);
-    }
-  });
+        });
+        tx.oncomplete = () => {
+          localStorage.removeItem('active_audit_session');
+          localStorage.removeItem('active_blitz_session_cache');
+          resolve(true);
+        };
+        tx.onerror = (e) => reject(e.target?.error || e);
+      } catch (err) {
+        reject(err);
+      }
+    });
+  } catch (err) {
+    console.error('Erro ao limpar dados:', err);
+    throw err;
+  }
 }
 

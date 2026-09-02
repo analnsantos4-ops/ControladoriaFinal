@@ -449,7 +449,7 @@ function showConferenceSavedModal(product, expiration, total, blitzContext = nul
   modal.classList.add('open');
 
   document.getElementById('btn-saved-export-wa')?.addEventListener('click', () => {
-    const formatted = formatSingleProductWhatsApp(product.name, product.barcode, formatDateBR(expiration.expiration_date), total);
+    const formatted = formatSingleProductWhatsApp(product.name, product.barcode, formatDateBR(expiration.expiration_date), total, product.corridor, product.sector);
     openWhatsAppExportModal(formatted, `Conferência ${product.name}`);
   });
 

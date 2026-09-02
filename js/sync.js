@@ -1,6 +1,6 @@
 // Mecanismo de Sincronização em Tempo Real Online/Offline com Supabase
 import { SUPABASE_URL, SUPABASE_PUBLISHABLE_KEY } from './supabase-config.js';
-import { getUnsyncedQueue, markQueueItemSynced, initDB, getAllFromStore } from './db.js';
+import { getUnsyncedQueue, markQueueItemSynced, initDB, getAllFromStore, getSafeTransaction, getProductById } from './db.js';
 
 let isSyncing = false;
 let syncStatusCallbacks = [];
@@ -328,17 +328,7 @@ async function pushToSupabase(tableName, operation, rawPayload, skipParentCheck 
       const prodId = rawPayload.product_id;
       if (prodId) {
         try {
-          const db = await initDB();
-          const prod = await new Promise((res) => {
-            try {
-              const tx = db.transaction('products', 'readonly');
-              const req = tx.objectStore('products').get(prodId);
-              req.onsuccess = () => res(req.result || null);
-              req.onerror = () => res(null);
-            } catch (_) {
-              res(null);
-            }
-          });
+          const prod = await getProductById(prodId);
           if (prod) {
             await pushToSupabase('products', 'UPSERT', prod, true);
           }
@@ -349,10 +339,9 @@ async function pushToSupabase(tableName, operation, rawPayload, skipParentCheck 
     // Se for inventory_counts, garante que a validade pai também existe no Supabase
     if (!skipParentCheck && tableName === 'inventory_counts' && rawPayload.expiration_id) {
       try {
-        const db = await initDB();
+        const { tx } = await getSafeTransaction('product_expirations', 'readonly');
         const exp = await new Promise((res) => {
           try {
-            const tx = db.transaction('product_expirations', 'readonly');
             const req = tx.objectStore('product_expirations').get(rawPayload.expiration_id);
             req.onsuccess = () => res(req.result || null);
             req.onerror = () => res(null);
@@ -539,12 +528,7 @@ export async function pullFromSupabase() {
     const localExpMap = new Map(localExps.map((e) => [e.id, e]));
     const localBlitzMap = new Map(localBlitzSessions.map((s) => [s.id, s]));
 
-    const db = await initDB();
-    const storesToOpen = ['products', 'product_expirations', 'inventory_counts'];
-    if (db.objectStoreNames.contains('blitz_sessions')) storesToOpen.push('blitz_sessions');
-    if (db.objectStoreNames.contains('blitz_items')) storesToOpen.push('blitz_items');
-
-    const tx = db.transaction(storesToOpen, 'readwrite');
+    const { db, tx } = await getSafeTransaction(['products', 'product_expirations', 'inventory_counts', 'blitz_sessions', 'blitz_items'], 'readwrite');
     const prodStore = tx.objectStore('products');
     const expStore = tx.objectStore('product_expirations');
     const countStore = tx.objectStore('inventory_counts');
