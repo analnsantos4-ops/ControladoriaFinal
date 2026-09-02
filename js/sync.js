@@ -19,7 +19,7 @@ CREATE TABLE IF NOT EXISTS public.products (
   barcode TEXT NOT NULL,
   name TEXT NOT NULL,
   sector TEXT DEFAULT 'MERCEARIA',
-  corridor TEXT DEFAULT 'CORREDOR 01',
+  corridor TEXT DEFAULT 'Corredor 1',
   image TEXT,
   total_quantity NUMERIC DEFAULT 0,
   deposit_qty NUMERIC DEFAULT 0,
@@ -68,6 +68,8 @@ CREATE TABLE IF NOT EXISTS public.inventory_counts (
 CREATE TABLE IF NOT EXISTS public.blitz_sessions (
   id TEXT PRIMARY KEY,
   blitz_type TEXT NOT NULL,
+  sector TEXT DEFAULT 'MERCEARIA',
+  user_name TEXT DEFAULT 'Ana Luiza',
   started_at TIMESTAMPTZ DEFAULT NOW(),
   finished_at TIMESTAMPTZ,
   status TEXT DEFAULT 'em_andamento',
@@ -75,20 +77,61 @@ CREATE TABLE IF NOT EXISTS public.blitz_sessions (
   updated_at TIMESTAMPTZ DEFAULT NOW()
 );
 
+-- Adiciona colunas na blitz_sessions caso a tabela já exista
+ALTER TABLE public.blitz_sessions ADD COLUMN IF NOT EXISTS sector TEXT DEFAULT 'MERCEARIA';
+ALTER TABLE public.blitz_sessions ADD COLUMN IF NOT EXISTS user_name TEXT DEFAULT 'Ana Luiza';
+
 -- 5. Tabela de Itens e Conferências da Blitz Semanal
 CREATE TABLE IF NOT EXISTS public.blitz_items (
   id TEXT PRIMARY KEY,
   blitz_session_id TEXT NOT NULL,
-  product_id TEXT NOT NULL,
+  product_id TEXT,
   barcode TEXT NOT NULL,
-  requested_expiration_date TEXT NOT NULL,
-  result TEXT NOT NULL,
-  conference_id TEXT,
+  sector TEXT DEFAULT 'MERCEARIA',
+  requested_expiration_date TEXT,
+  previous_quantity NUMERIC DEFAULT 0,
   total_quantity NUMERIC DEFAULT 0,
+  difference NUMERIC DEFAULT 0,
+  result TEXT NOT NULL,
+  locations JSONB DEFAULT '[]'::jsonb,
+  conference_id TEXT,
+  user_id TEXT,
+  user_name TEXT DEFAULT 'Ana Luiza',
+  is_new_expiration BOOLEAN DEFAULT FALSE,
+  notes TEXT,
   checked_at TIMESTAMPTZ DEFAULT NOW(),
   created_at TIMESTAMPTZ DEFAULT NOW(),
   updated_at TIMESTAMPTZ DEFAULT NOW()
 );
+
+-- Adiciona colunas na blitz_items caso a tabela já exista
+ALTER TABLE public.blitz_items ADD COLUMN IF NOT EXISTS sector TEXT DEFAULT 'MERCEARIA';
+ALTER TABLE public.blitz_items ADD COLUMN IF NOT EXISTS previous_quantity NUMERIC DEFAULT 0;
+ALTER TABLE public.blitz_items ADD COLUMN IF NOT EXISTS difference NUMERIC DEFAULT 0;
+ALTER TABLE public.blitz_items ADD COLUMN IF NOT EXISTS locations JSONB DEFAULT '[]'::jsonb;
+ALTER TABLE public.blitz_items ADD COLUMN IF NOT EXISTS user_id TEXT;
+ALTER TABLE public.blitz_items ADD COLUMN IF NOT EXISTS user_name TEXT DEFAULT 'Ana Luiza';
+ALTER TABLE public.blitz_items ADD COLUMN IF NOT EXISTS is_new_expiration BOOLEAN DEFAULT FALSE;
+ALTER TABLE public.blitz_items ADD COLUMN IF NOT EXISTS notes TEXT;
+
+-- Atualização dos nomes de corredores existentes para a nova padronização
+UPDATE public.products SET corridor = 'Corredor 1' WHERE corridor IN ('CORREDOR 01', 'CORREDOR 1', '01');
+UPDATE public.products SET corridor = 'Corredor 2' WHERE corridor IN ('CORREDOR 02', 'CORREDOR 2', '02');
+UPDATE public.products SET corridor = 'Corredor 3' WHERE corridor IN ('CORREDOR 03', 'CORREDOR 3', '03');
+UPDATE public.products SET corridor = 'Corredor 4' WHERE corridor IN ('CORREDOR 04', 'CORREDOR 4', '04');
+UPDATE public.products SET corridor = 'Corredor 5' WHERE corridor IN ('CORREDOR 05', 'CORREDOR 5', '05');
+UPDATE public.products SET corridor = 'Corredor 6' WHERE corridor IN ('CORREDOR 06', 'CORREDOR 6', '06');
+UPDATE public.products SET corridor = 'Corredor 7' WHERE corridor IN ('CORREDOR 07', 'CORREDOR 7', '07');
+UPDATE public.products SET corridor = 'Corredor 8' WHERE corridor IN ('CORREDOR 08', 'CORREDOR 8', '08');
+UPDATE public.products SET corridor = 'Corredor 9' WHERE corridor IN ('CORREDOR 09', 'CORREDOR 9', '09');
+UPDATE public.products SET corridor = 'Corredor 10' WHERE corridor IN ('CORREDOR 10', '10');
+UPDATE public.products SET corridor = 'Corredor 11' WHERE corridor IN ('CORREDOR 11', '11');
+UPDATE public.products SET corridor = 'Corredor 12' WHERE corridor IN ('CORREDOR 12', '12');
+UPDATE public.products SET corridor = 'Corredor 13' WHERE corridor IN ('CORREDOR 13', '13');
+UPDATE public.products SET corridor = 'Corredor 14' WHERE corridor IN ('CORREDOR 14', '14');
+UPDATE public.products SET corridor = 'Adega' WHERE UPPER(corridor) LIKE '%ADEGA%';
+UPDATE public.products SET corridor = 'Perfumaria' WHERE UPPER(corridor) LIKE '%PERFUMARIA%';
+UPDATE public.products SET corridor = 'Zona do Alho' WHERE UPPER(corridor) LIKE '%ALHO%';
 
 -- Permissões e Segurança
 GRANT USAGE ON SCHEMA public TO anon, authenticated, service_role;

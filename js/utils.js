@@ -10,21 +10,23 @@ export const SETORS = [
 ];
 
 export const CORRIDORS = [
-  'CORREDOR 01',
-  'CORREDOR 02',
-  'CORREDOR 03',
-  'CORREDOR 04',
-  'CORREDOR 05',
-  'CORREDOR 06',
-  'CORREDOR 07',
-  'CORREDOR 08',
-  'CORREDOR 09',
-  'CORREDOR 10',
-  'CORREDOR 11',
-  'CORREDOR 12',
-  'CORREDOR 13',
-  'CORREDOR 14',
-  'ADEGA'
+  'Corredor 1',
+  'Corredor 2',
+  'Corredor 3',
+  'Corredor 4',
+  'Corredor 5',
+  'Corredor 6',
+  'Corredor 7',
+  'Corredor 8',
+  'Corredor 9',
+  'Corredor 10',
+  'Corredor 11',
+  'Corredor 12',
+  'Corredor 13',
+  'Corredor 14',
+  'Adega',
+  'Perfumaria',
+  'Zona do Alho'
 ];
 
 export const LOCATIONS = [
@@ -49,59 +51,117 @@ export const LOCATION_SHORT_NAMES = {
   'FRENTE DE LOJA': 'Carrinho Frente Loja'
 };
 
-export const BLITZ_TYPES = [
-  {
-    id: 'alho_mercearia',
-    label: 'Alho e Mercearia',
-    sector: 'MERCEARIA',
-    icon: '🧄🛒',
-    days: [1, 2, 3],
-    daysLabel: 'Segunda a Quarta-feira',
-    desc: 'Alho e Mercearia (Segunda a Quarta-feira)'
-  },
-  {
-    id: 'bazar',
-    label: 'Bazar',
-    sector: 'BAZAR',
-    icon: '🧺',
-    days: [4],
-    daysLabel: 'Quinta-feira',
-    desc: 'Bazar e Utilidades (Quinta-feira)'
-  },
-  {
-    id: 'bebidas',
-    label: 'Bebidas',
-    sector: 'BEBIDAS',
-    icon: '🍾',
-    days: [5, 6],
-    daysLabel: 'Sexta-feira e Sábado',
-    desc: 'Bebidas e Adega (Sexta-feira e Sábado)'
-  },
-  {
-    id: 'alho',
-    label: 'Apenas Alho',
-    sector: 'ALHO',
-    icon: '🧄',
-    days: [1, 2, 3],
-    daysLabel: 'Segunda a Quarta-feira',
-    desc: 'Conferência específica do setor de Alho'
-  },
-  {
-    id: 'mercearia',
-    label: 'Apenas Mercearia',
-    sector: 'MERCEARIA',
-    icon: '🛒',
-    days: [1, 2, 3],
-    daysLabel: 'Segunda a Quarta-feira',
-    desc: 'Conferência específica da Mercearia'
-  }
+export const BLITZ_SECTORS = [
+  { id: 'mercearia', label: 'Mercearia', icon: '🛒', desc: 'Mercearia em geral, alimentos secos e matinais', schedule: 'Segunda a Quarta' },
+  { id: 'bazar', label: 'Bazar', icon: '🧺', desc: 'Utilidades domésticas, descartáveis e bazar', schedule: 'Quinta-feira' },
+  { id: 'bebidas', label: 'Bebidas', icon: '🍾', desc: 'Bebidas, adega, sucos, refrigerantes e cervejas', schedule: 'Sexta e Sábado' },
+  { id: 'alho', label: 'Alho', icon: '🧄', desc: 'Alho a granel, encartelado e processados', schedule: 'Setor Complementar' },
+  { id: 'perfumaria', label: 'Perfumaria', icon: '🧴', desc: 'Higiene pessoal, cosméticos e cuidados', schedule: 'Setor Complementar' },
+  { id: 'limpeza', label: 'Limpeza', icon: '🧹', desc: 'Produtos químicos, sabões e saneantes', schedule: 'Setor Complementar' }
 ];
+
+export const BLITZ_LOCATIONS = [
+  'Área de venda',
+  'Depósito',
+  'Geladeira',
+  'Prateleira',
+  'Ponta de gôndola',
+  'Orelha',
+  'Ilha',
+  'Carrinho frente de loja',
+  'Outros'
+];
+
+export const BLITZ_TYPES = BLITZ_SECTORS.map(s => ({
+  id: s.id,
+  label: s.label,
+  sector: s.label.toUpperCase(),
+  icon: s.icon,
+  desc: s.desc,
+  schedule: s.schedule
+}));
 
 export function getSuggestedBlitzType() {
   const day = new Date().getDay(); // 0: Dom, 1: Seg, 2: Ter, 3: Qua, 4: Qui, 5: Sex, 6: Sab
-  if (day === 4) return 'bazar'; // Quinta-feira: Bazar
-  if (day === 5 || day === 6) return 'bebidas'; // Sexta-feira e Sábado: Bebidas
-  return 'alho_mercearia'; // Segunda a Quarta-feira (e Domingo): Alho e Mercearia
+  // Cronograma oficial Ana Luiza:
+  // Segunda até quarta - mercearia
+  if (day >= 1 && day <= 3) return 'mercearia';
+  // Quinta - Bazar
+  if (day === 4) return 'bazar';
+  // Sexta e sábado - bebida
+  if (day === 5 || day === 6) return 'bebidas';
+  // Domingo (ou padrão): Mercearia
+  return 'mercearia';
+}
+
+/**
+ * Calcula o tempo decorrido dinamicamente conforme regra da Blitz Semanal:
+ * - "Hoje"
+ * - "Há 1 dia"
+ * - "Há X dias"
+ * - "Há 1 semana" (7 dias)
+ * - "Há 2 semanas" (14 dias)
+ * - "Há X semanas"
+ * - "Há 1 mês" (30 dias)
+ * - "Há X meses"
+ */
+export function formatTimeAgoDynamic(dateStrOrISO) {
+  if (!dateStrOrISO) return '';
+  const targetDate = new Date(dateStrOrISO);
+  if (isNaN(targetDate.getTime())) return '';
+
+  const now = new Date();
+  const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  const refDay = new Date(targetDate.getFullYear(), targetDate.getMonth(), targetDate.getDate());
+
+  const diffMs = today.getTime() - refDay.getTime();
+  const diffDays = Math.round(diffMs / (1000 * 60 * 60 * 24));
+
+  if (diffDays <= 0) {
+    return 'Hoje';
+  } else if (diffDays === 1) {
+    return 'Há 1 dia';
+  } else if (diffDays < 7) {
+    return `Há ${diffDays} dias`;
+  } else if (diffDays === 7) {
+    return 'Há 1 semana';
+  } else if (diffDays === 14) {
+    return 'Há 2 semanas';
+  } else if (diffDays === 21) {
+    return 'Há 3 semanas';
+  } else if (diffDays >= 28 && diffDays <= 31) {
+    return 'Há 1 mês';
+  } else if (diffDays > 31 && diffDays < 60) {
+    return 'Há 1 mês';
+  } else if (diffDays >= 60) {
+    const months = Math.floor(diffDays / 30);
+    return `Há ${months} meses`;
+  } else {
+    const weeks = Math.floor(diffDays / 7);
+    return `Há ${weeks} semanas`;
+  }
+}
+
+/**
+ * Retorna data formatada com dia da semana:
+ * Ex: "02/09/2026 — quarta-feira"
+ */
+export function formatDateWithWeekday(dateStrOrISO) {
+  if (!dateStrOrISO) return '';
+  const d = new Date(dateStrOrISO);
+  if (isNaN(d.getTime())) return '';
+  const weekdays = [
+    'domingo',
+    'segunda-feira',
+    'terça-feira',
+    'quarta-feira',
+    'quinta-feira',
+    'sexta-feira',
+    'sábado'
+  ];
+  const dateFormatted = d.toLocaleDateString('pt-BR');
+  const weekday = weekdays[d.getDay()];
+  return `${dateFormatted} — ${weekday}`;
 }
 
 // Gera ID único

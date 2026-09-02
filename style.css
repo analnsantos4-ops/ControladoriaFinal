@@ -1527,16 +1527,16 @@ button {
 .compact-grid {
   display: grid !important;
   grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
-  gap: 8px !important;
+  gap: 10px !important;
   width: 100% !important;
   box-sizing: border-box !important;
 }
 
 .loc-mini-card {
   background: var(--bg-card-elevated, #18181c) !important;
-  border: 1px solid var(--border-color, #2a2a30) !important;
-  border-radius: 8px !important;
-  padding: 8px 10px !important;
+  border: 1.5px solid var(--border-color, #2a2a30) !important;
+  border-radius: 10px !important;
+  padding: 10px 8px !important;
   display: flex !important;
   flex-direction: column !important;
   align-items: center !important;
@@ -1548,13 +1548,12 @@ button {
 }
 
 .loc-mini-card label {
-  font-size: 0.72rem !important;
+  font-size: 0.74rem !important;
   font-weight: 800 !important;
-  color: var(--text-secondary, #a1a1aa) !important;
+  color: var(--text-secondary, #d4d4d8) !important;
   text-align: center !important;
-  white-space: nowrap !important;
-  overflow: hidden !important;
-  text-overflow: ellipsis !important;
+  white-space: normal !important;
+  line-height: 1.2 !important;
   width: 100% !important;
   letter-spacing: 0.3px !important;
 }
@@ -1563,24 +1562,27 @@ button {
   width: 100% !important;
   min-width: 0 !important;
   max-width: 100% !important;
-  height: 44px !important;
+  height: 48px !important;
+  min-height: 48px !important;
   background: #09090b !important;
-  border: 1px solid #3f3f46 !important;
-  border-radius: 6px !important;
+  border: 1.5px solid #3f3f46 !important;
+  border-radius: 8px !important;
   text-align: center !important;
-  font-size: 1.25rem !important;
+  font-size: 1.35rem !important;
   font-weight: 900 !important;
-  color: #f4f4f5 !important;
-  padding: 0 6px !important;
+  color: #10b981 !important;
+  padding: 2px 4px !important;
   box-sizing: border-box !important;
   -moz-appearance: textfield !important;
+  line-height: 44px !important;
 }
 
 .new-count-input:focus {
   border-color: #10b981 !important;
   background: #000 !important;
   outline: none !important;
-  box-shadow: 0 0 0 2px rgba(16, 185, 129, 0.25) !important;
+  box-shadow: 0 0 0 3px rgba(16, 185, 129, 0.3) !important;
+  color: #34d399 !important;
 }
 
 .new-count-input::-webkit-outer-spin-button,
@@ -1924,6 +1926,8 @@ button {
 .exp-alert-card.status-15-days, .exp-alert-card[class*="15_days"] { border-left: 3px solid var(--accent-orange); }
 .exp-alert-card.status-30-days, .exp-alert-card[class*="30_days"] { border-left: 3px solid var(--accent-yellow); }
 .exp-alert-card.status-triaged { border-left: 3px solid var(--accent-green); }
+.exp-alert-card.status-zero-qty { border-left: 3px solid #52525b; opacity: 0.82; }
+.tag-zero-qty { background: rgba(113, 113, 122, 0.2) !important; color: #a1a1aa !important; border: 1px solid rgba(113, 113, 122, 0.4) !important; }
 
 .exp-alert-top-row {
   display: flex;
@@ -2379,11 +2383,15 @@ button {
 .modal-card {
   position: relative;
   width: 100%;
-  max-width: 380px;
+  max-width: 440px;
+  max-height: calc(100dvh - 28px);
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+  box-sizing: border-box;
   background: var(--bg-card);
   border: 1px solid var(--border-highlight);
   border-radius: var(--radius-lg);
-  padding: 24px 20px;
+  padding: 20px;
   text-align: center;
   z-index: 10;
   animation: modalPop 0.2s ease-out;
@@ -3713,21 +3721,38 @@ button {
 
   .compact-grid {
     grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
-    gap: 4px !important;
+    gap: 8px !important;
   }
 
   .loc-mini-card {
-    padding: 4px 6px !important;
+    padding: 8px 6px !important;
+    border-radius: 8px !important;
+    background: #18181c !important;
+    border: 1px solid #2a2a30 !important;
   }
 
   .loc-mini-card label {
-    font-size: 0.68rem !important;
+    font-size: 0.72rem !important;
+    font-weight: 800 !important;
+    white-space: normal !important;
+    line-height: 1.2 !important;
+    color: #d4d4d8 !important;
   }
 
   .new-count-input {
-    width: 48px !important;
-    height: 28px !important;
-    font-size: 0.88rem !important;
+    width: 100% !important;
+    max-width: 100% !important;
+    min-width: 0 !important;
+    height: 44px !important;
+    min-height: 44px !important;
+    font-size: 1.25rem !important;
+    font-weight: 900 !important;
+    color: #10b981 !important;
+    background: #09090b !important;
+    border: 1.5px solid #3f3f46 !important;
+    border-radius: 6px !important;
+    padding: 0 4px !important;
+    text-align: center !important;
   }
 
   #modal-edit-product .modal-card {
@@ -3944,6 +3969,63 @@ button {
   height: 100% !important;
   object-fit: cover !important;
 }
+
+/* ===================================================================
+   OTIMIZAÇÕES ESPECÍFICAS DE PWA PARA IPHONE E ANDROID
+   (Evita cortes de tela, zoom acidental e respeita safe areas)
+   =================================================================== */
+
+html, body {
+  min-height: 100dvh;
+  overscroll-behavior-y: none;
+}
+
+/* Safe areas para iPhone (Dynamic Island / Notch e Home Indicator) */
+.app-top-bar {
+  padding-top: max(10px, env(safe-area-inset-top)) !important;
+}
+
+main, .dashboard-main-content, .scanner-manual-box, .conference-main-content {
+  padding-bottom: max(20px, env(safe-area-inset-bottom));
+}
+
+/* Previne zoom automático do iOS Safari ao focar em inputs */
+@media screen and (max-width: 768px) {
+  input[type="text"],
+  input[type="number"],
+  input[type="date"],
+  input[type="password"],
+  select,
+  textarea {
+    font-size: 16px !important;
+  }
+}
+
+/* Touch targets confortáveis para dedos em PWA mobile */
+button, input, select {
+  touch-action: manipulation;
+}
+
+/* Garante que nenhum texto ou card ultrapasse a largura da tela no mobile */
+* {
+  box-sizing: border-box;
+}
+
+.modal-card {
+  max-width: calc(100vw - 20px) !important;
+  margin: 0 auto;
+}
+
+/* Ajuste fino do scanner para telas de proporção alta (iPhone e Android) */
+@media (max-height: 700px) {
+  .scanner-viewport-container {
+    height: 44vh !important;
+  }
+  .scanner-target-box {
+    height: 140px !important;
+  }
+}
+
 
 
 

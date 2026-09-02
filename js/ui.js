@@ -476,77 +476,94 @@ export function promptTriageBarcodeConfirmation({ product, expiration, onConfirm
 }
 
 // Modal de Confirmação Genérico e Amigável (Evita bloqueios de window.confirm em iframes)
-export function promptConfirmDialog({
-  title = 'Confirmação',
-  message = 'Deseja confirmar esta ação?',
-  confirmText = 'CONFIRMAR',
-  cancelText = 'CANCELAR',
-  confirmStyle = 'primary', // 'primary' | 'danger' | 'warning'
-  icon = '❓',
-  onConfirm,
-  onCancel
-}) {
-  let modal = document.getElementById('generic-confirm-modal');
-  if (!modal) {
-    modal = document.createElement('div');
-    modal.id = 'generic-confirm-modal';
-    modal.className = 'custom-modal';
-    document.body.appendChild(modal);
+export function promptConfirmDialog(optionsOrTitle, maybeMessage = '', maybeOptions = {}) {
+  let opts = {};
+  if (typeof optionsOrTitle === 'string') {
+    opts = {
+      title: optionsOrTitle,
+      message: maybeMessage,
+      ...maybeOptions
+    };
+  } else if (optionsOrTitle && typeof optionsOrTitle === 'object') {
+    opts = { ...optionsOrTitle };
   }
 
-  let confirmBtnBg = '#10b981';
-  let confirmBtnColor = '#022c22';
-  let confirmBorder = 'transparent';
+  const {
+    title = 'Confirmação',
+    message = 'Deseja confirmar esta ação?',
+    confirmText = 'CONFIRMAR',
+    cancelText = 'CANCELAR',
+    confirmStyle = 'primary', // 'primary' | 'danger' | 'warning'
+    icon = '❓',
+    onConfirm,
+    onCancel
+  } = opts;
 
-  if (confirmStyle === 'danger') {
-    confirmBtnBg = '#ef4444';
-    confirmBtnColor = '#ffffff';
-  } else if (confirmStyle === 'warning') {
-    confirmBtnBg = '#f59e0b';
-    confirmBtnColor = '#000000';
-  }
+  return new Promise((resolve) => {
+    let modal = document.getElementById('generic-confirm-modal');
+    if (!modal) {
+      modal = document.createElement('div');
+      modal.id = 'generic-confirm-modal';
+      modal.className = 'custom-modal';
+      document.body.appendChild(modal);
+    }
 
-  modal.innerHTML = `
-    <div class="modal-backdrop" id="generic-confirm-backdrop"></div>
-    <div class="modal-card" style="padding: 20px; max-width: 420px; width: 100%; box-sizing: border-box;">
-      <div style="display: flex; align-items: center; gap: 12px; margin-bottom: 12px;">
-        <span style="font-size: 1.6rem;">${icon}</span>
-        <div>
-          <h3 style="font-size: 1.05rem; font-weight: 900; color: #f4f4f5; margin: 0;">${title}</h3>
+    let confirmBtnBg = '#10b981';
+    let confirmBtnColor = '#022c22';
+    let confirmBorder = 'transparent';
+
+    if (confirmStyle === 'danger') {
+      confirmBtnBg = '#ef4444';
+      confirmBtnColor = '#ffffff';
+    } else if (confirmStyle === 'warning') {
+      confirmBtnBg = '#f59e0b';
+      confirmBtnColor = '#000000';
+    }
+
+    modal.innerHTML = `
+      <div class="modal-backdrop" id="generic-confirm-backdrop"></div>
+      <div class="modal-card" style="padding: 20px; max-width: 420px; width: 100%; box-sizing: border-box;">
+        <div style="display: flex; align-items: center; gap: 12px; margin-bottom: 12px;">
+          <span style="font-size: 1.6rem;">${icon}</span>
+          <div>
+            <h3 style="font-size: 1.05rem; font-weight: 900; color: #f4f4f5; margin: 0;">${title}</h3>
+          </div>
+        </div>
+
+        <div style="font-size: 0.85rem; color: #d4d4d8; line-height: 1.45; margin-bottom: 18px;">
+          ${message}
+        </div>
+
+        <div style="display: flex; gap: 8px;">
+          <button type="button" id="btn-generic-cancel" class="btn-secondary" style="flex: 1; height: 44px; justify-content: center; font-weight: 800; font-size: 0.82rem;">
+            ${cancelText}
+          </button>
+          <button type="button" id="btn-generic-confirm" class="btn-primary" style="flex: 1.2; height: 44px; justify-content: center; background: ${confirmBtnBg}; color: ${confirmBtnColor}; border: 1px solid ${confirmBorder}; font-weight: 900; font-size: 0.82rem;">
+            ${confirmText}
+          </button>
         </div>
       </div>
+    `;
 
-      <div style="font-size: 0.85rem; color: #d4d4d8; line-height: 1.45; margin-bottom: 18px;">
-        ${message}
-      </div>
+    modal.classList.add('open');
 
-      <div style="display: flex; gap: 8px;">
-        <button type="button" id="btn-generic-cancel" class="btn-secondary" style="flex: 1; height: 44px; justify-content: center; font-weight: 800; font-size: 0.82rem;">
-          ${cancelText}
-        </button>
-        <button type="button" id="btn-generic-confirm" class="btn-primary" style="flex: 1.2; height: 44px; justify-content: center; background: ${confirmBtnBg}; color: ${confirmBtnColor}; border: 1px solid ${confirmBorder}; font-weight: 900; font-size: 0.82rem;">
-          ${confirmText}
-        </button>
-      </div>
-    </div>
-  `;
+    const closeModal = () => modal.classList.remove('open');
 
-  modal.classList.add('open');
+    const handleCancel = () => {
+      closeModal();
+      if (typeof onCancel === 'function') onCancel();
+      resolve(false);
+    };
 
-  const closeModal = () => modal.classList.remove('open');
+    const handleConfirm = () => {
+      closeModal();
+      if (typeof onConfirm === 'function') onConfirm();
+      resolve(true);
+    };
 
-  const handleCancel = () => {
-    closeModal();
-    if (typeof onCancel === 'function') onCancel();
-  };
-
-  const handleConfirm = () => {
-    closeModal();
-    if (typeof onConfirm === 'function') onConfirm();
-  };
-
-  document.getElementById('generic-confirm-backdrop')?.addEventListener('click', handleCancel);
-  document.getElementById('btn-generic-cancel')?.addEventListener('click', handleCancel);
-  document.getElementById('btn-generic-confirm')?.addEventListener('click', handleConfirm);
+    document.getElementById('generic-confirm-backdrop')?.addEventListener('click', handleCancel);
+    document.getElementById('btn-generic-cancel')?.addEventListener('click', handleCancel);
+    document.getElementById('btn-generic-confirm')?.addEventListener('click', handleConfirm);
+  });
 }
 

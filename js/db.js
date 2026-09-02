@@ -291,7 +291,7 @@ export async function saveProduct(product) {
     name: product.name ? product.name.trim() : '',
     image: product.image !== undefined ? product.image : (existing?.image || ''),
     sector: product.sector || existing?.sector || 'MERCEARIA',
-    corridor: product.corridor || existing?.corridor || 'CORREDOR 01',
+    corridor: product.corridor || existing?.corridor || 'Corredor 1',
     total_quantity: totalQty,
     deposit_qty: depositQty,
     fridge_qty: fridgeQty,
@@ -782,7 +782,7 @@ export async function saveCompleteProductWithCounts({ product, expirationDate, l
     name: product.name ? product.name.trim().toUpperCase() : '',
     image: product.image || '',
     sector: product.sector || 'MERCEARIA',
-    corridor: product.corridor || 'CORREDOR 01',
+    corridor: product.corridor || 'Corredor 1',
     total_quantity: totalQty,
     deposit_qty: deposit,
     fridge_qty: fridge,
@@ -964,10 +964,11 @@ export async function getDashboardMetrics() {
 
   await runAutomaticTriageCleanup();
 
-  // Carrega apenas produtos e validades (ignora a tabela pesada de histórico de contagens para máxima velocidade)
-  const [products, allExpirations] = await Promise.all([
+  // Carrega produtos, validades e histórico de contagens recentes
+  const [products, allExpirations, allCounts] = await Promise.all([
     getAllProducts(),
-    getAllExpirations()
+    getAllExpirations(),
+    getAllCounts()
   ]);
 
   // Mapeia produto por id
@@ -976,6 +977,31 @@ export async function getDashboardMetrics() {
   products.forEach((p) => {
     productMap[p.id] = p;
     totalAllUnits += Number(p.total_quantity) || 0;
+  });
+
+  // Mapeia contagens recentes por expiration_id para determinar a quantidade precisa de cada lote/data
+  const latestCountByExp = {};
+  allCounts.forEach((item) => {
+    if (!item.expiration_id) return;
+    if (!latestCountByExp[item.expiration_id]) {
+      latestCountByExp[item.expiration_id] = {};
+    }
+    const locMap = latestCountByExp[item.expiration_id];
+    const prev = locMap[item.location_type];
+    const itemTime = new Date(item.counted_at || item.created_at || 0).getTime();
+    const prevTime = prev ? new Date(prev.counted_at || prev.created_at || 0).getTime() : 0;
+    if (!prev || itemTime >= prevTime) {
+      locMap[item.location_type] = item;
+    }
+  });
+
+  const expQuantityMap = {};
+  Object.entries(latestCountByExp).forEach(([expId, locMap]) => {
+    let sum = 0;
+    Object.values(locMap).forEach((rec) => {
+      sum += Number(rec.quantity) || 0;
+    });
+    expQuantityMap[expId] = sum;
   });
 
   // Categorização das validades
@@ -999,15 +1025,27 @@ export async function getDashboardMetrics() {
     const product = productMap[exp.product_id];
     if (!product) return;
 
-    const units = Number(product.total_quantity) || 0;
+    // Se houver contagens registradas para a validade, usamos a quantidade dela.
+    // Caso contrário, usamos a quantidade total cadastrada no produto.
+    let units = 0;
+    if (expQuantityMap[exp.id] !== undefined) {
+      units = expQuantityMap[exp.id];
+    } else {
+      units = Number(product.total_quantity) || 0;
+    }
+
     const days = getDaysUntilExpiration(exp.expiration_date);
     const isTriaged = exp.is_triaged === true || exp.is_triaged === 1 || exp.is_triaged === 'true';
+
+    // REGRA DE OURO: SE O PRODUTO TEM 0 UNIDADES NA DATA, ELE NÃO VENCE!
+    // Somente se tiver 1 ou mais unidades (units >= 1) é que vence e aciona alertas.
+    const hasUnits = units >= 1;
 
     if (isTriaged) {
       triagedProductsSet.add(product.id);
       triagedUnits += units;
-    } else {
-      // Apenas produtos ATIVOS (não triados) entram nos alertas e contadores de gôndola/estoque
+    } else if (hasUnits) {
+      // Apenas produtos COM ESTOQUE (1 ou mais unidades) entram nos alertas de vencimento/vencidos
       if (days < 0) {
         expiredProductsSet.add(product.id);
         expiredUnits += units;
@@ -1022,7 +1060,7 @@ export async function getDashboardMetrics() {
         upTo30DaysUnits += units;
       }
 
-      if (days >= 0 && days <= 60 && units > 0) {
+      if (days >= 0 && days <= 60) {
         upcomingList.push({
           productId: product.id,
           expirationId: exp.id,
@@ -1559,11 +1597,14 @@ export async function markQueueItemSynced(id) {
 // BLITZ SEMANAL (blitz_sessions e blitz_items)
 // ----------------------------------------------------
 
-export async function createBlitzSession({ blitz_type }) {
+export async function createBlitzSession({ blitz_type, sector, user_name }) {
   const now = new Date().toISOString();
+  const normalizedSector = (sector || blitz_type || 'MERCEARIA').toUpperCase();
   const session = {
     id: generateId(),
-    blitz_type: blitz_type || 'mercearia',
+    blitz_type: blitz_type || normalizedSector.toLowerCase(),
+    sector: normalizedSector,
+    user_name: user_name || 'Ana Luiza',
     started_at: now,
     finished_at: null,
     status: 'em_andamento',
@@ -1763,25 +1804,44 @@ export async function getAllBlitzSessions() {
 export async function saveBlitzItem({
   id = null,
   blitz_session_id,
-  product_id,
+  product_id = null,
   barcode,
-  requested_expiration_date,
-  result, // 'TEM' | 'NAO_TEM'
+  sector = 'MERCEARIA',
+  requested_expiration_date = '',
+  previous_quantity = 0,
+  total_quantity = 0,
+  difference = 0,
+  result = 'TEM', // 'TEM' | 'NAO_TEM' | 'NAO_IDENTIFICADO'
+  locations = [],
   conference_id = null,
-  total_quantity = 0
+  user_id = null,
+  user_name = 'Ana Luiza',
+  is_new_expiration = false,
+  notes = ''
 }) {
   const now = new Date().toISOString();
   const itemId = id || generateId();
+  const prevQty = Number(previous_quantity) || 0;
+  const totQty = Number(total_quantity) || 0;
+  const diff = difference !== undefined && difference !== null ? Number(difference) : (totQty - prevQty);
 
   const itemData = {
     id: itemId,
     blitz_session_id,
-    product_id,
+    product_id: product_id || null,
     barcode: String(barcode || '').trim(),
+    sector: String(sector || 'MERCEARIA').toUpperCase(),
     requested_expiration_date: String(requested_expiration_date || '').trim(),
-    result: result === 'TEM' ? 'TEM' : 'NAO_TEM',
+    previous_quantity: prevQty,
+    total_quantity: totQty,
+    difference: diff,
+    result: (result === 'TEM' || result === 'NAO_TEM' || result === 'NAO_IDENTIFICADO') ? result : 'TEM',
+    locations: Array.isArray(locations) ? locations : [],
     conference_id: conference_id || null,
-    total_quantity: Number(total_quantity) || 0,
+    user_id: user_id || null,
+    user_name: user_name || 'Ana Luiza',
+    is_new_expiration: Boolean(is_new_expiration),
+    notes: String(notes || ''),
     checked_at: now,
     created_at: now,
     updated_at: now
@@ -1853,6 +1913,69 @@ export async function getBlitzItemBySessionAndProduct(sessionId, productId) {
   }
 }
 
+export async function getBlitzItemBySessionProductAndDate(sessionId, productId, expirationDate) {
+  if (!sessionId || !productId || !expirationDate) return null;
+  try {
+    const items = await getBlitzItemsBySessionId(sessionId);
+    return items.find(it => it.product_id === productId && it.requested_expiration_date === expirationDate) || null;
+  } catch (e) {
+    return null;
+  }
+}
+
+/**
+ * Consulta a última conferência da Blitz para a combinação EXATA: PRODUTO + DATA DE VALIDADE
+ */
+export async function getLastBlitzItemForProductAndDate(productId, expirationDate) {
+  if (!productId || !expirationDate) return null;
+  try {
+    const { tx } = await getSafeTransaction('blitz_items', 'readonly');
+    const store = tx.objectStore('blitz_items');
+    const index = store.index('product_id');
+    return new Promise((resolve) => {
+      const req = index.getAll(productId);
+      req.onsuccess = () => {
+        const items = req.result || [];
+        const matching = items.filter(it => it.requested_expiration_date === expirationDate);
+        if (matching.length === 0) {
+          resolve(null);
+          return;
+        }
+        matching.sort((a, b) => new Date(b.checked_at || 0) - new Date(a.checked_at || 0));
+        resolve(matching[0]);
+      };
+      req.onerror = () => resolve(null);
+    });
+  } catch (e) {
+    return null;
+  }
+}
+
+/**
+ * Retorna todo o histórico de contagens anteriores da combinação PRODUTO + DATA DE VALIDADE
+ * Ordenado do mais recente para o mais antigo
+ */
+export async function getAllBlitzItemsForProductAndDate(productId, expirationDate) {
+  if (!productId || !expirationDate) return [];
+  try {
+    const { tx } = await getSafeTransaction('blitz_items', 'readonly');
+    const store = tx.objectStore('blitz_items');
+    const index = store.index('product_id');
+    return new Promise((resolve) => {
+      const req = index.getAll(productId);
+      req.onsuccess = () => {
+        const items = req.result || [];
+        const matching = items.filter(it => it.requested_expiration_date === expirationDate);
+        matching.sort((a, b) => new Date(b.checked_at || 0) - new Date(a.checked_at || 0));
+        resolve(matching);
+      };
+      req.onerror = () => resolve([]);
+    });
+  } catch (e) {
+    return [];
+  }
+}
+
 export async function getLastBlitzItemForProduct(productId) {
   if (!productId) return null;
   try {
@@ -1895,6 +2018,81 @@ export async function getAllBlitzItemsForProduct(productId) {
   } catch (e) {
     return [];
   }
+}
+
+export async function getAllBlitzItems() {
+  return getAllFromStore('blitz_items');
+}
+
+/**
+ * Salva conferência da Blitz e atualiza o estoque físico atual da validade (substituindo a quantidade física atual,
+ * MAS NUNCA apagando o histórico em blitz_items ou inventory_counts).
+ */
+export async function saveBlitzConferenceRecord({
+  sessionId,
+  productId,
+  barcode,
+  sector,
+  requestedDate,
+  previousQuantity = 0,
+  newQuantity = 0,
+  result, // 'TEM' | 'NAO_TEM' | 'NAO_IDENTIFICADO'
+  locations = [], // [{ location: 'Depósito', quantity: 70 }, ...]
+  userName = 'Ana Luiza',
+  isNewExpiration = false
+}) {
+  const diff = Number(newQuantity) - Number(previousQuantity);
+
+  // 1. Salva o registro imutável no histórico da Blitz
+  const blitzItem = await saveBlitzItem({
+    blitz_session_id: sessionId,
+    product_id: productId || null,
+    barcode: barcode,
+    sector: sector,
+    requested_expiration_date: requestedDate,
+    previous_quantity: Number(previousQuantity) || 0,
+    total_quantity: Number(newQuantity) || 0,
+    difference: diff,
+    result: result,
+    locations: locations,
+    user_name: userName,
+    is_new_expiration: isNewExpiration
+  });
+
+  // 2. Se for um produto cadastrado e houver data, atualiza o estoque físico atual
+  if (productId && requestedDate && result !== 'NAO_IDENTIFICADO') {
+    try {
+      // Garante que a data de validade existe no cadastro
+      let expRecord = await getExpirationByProductAndDate(productId, requestedDate);
+      if (!expRecord) {
+        const res = await saveProductExpiration(productId, requestedDate);
+        expRecord = res.expiration;
+      }
+
+      if (expRecord && expRecord.id) {
+        // Converte as localizações em mapa para saveInventoryCounts
+        const locMap = {};
+        if (result === 'TEM' && locations && locations.length > 0) {
+          locations.forEach(loc => {
+            const lName = String(loc.location || '').toUpperCase();
+            locMap[lName] = (locMap[lName] || 0) + (Number(loc.quantity) || 0);
+          });
+        } else {
+          // Se NÃO TEM, zera os locais principais
+          locMap['DEPÓSITO'] = 0;
+          locMap['ÁREA DE VENDA'] = 0;
+          locMap['PRATELEIRA'] = 0;
+        }
+
+        // Salva as contagens atuais no inventário (mantendo histórico e atualizando o produto)
+        await saveInventoryCounts(productId, expRecord.id, locMap, sessionId);
+      }
+    } catch (e) {
+      console.warn('[Blitz] Aviso ao atualizar estoque atual da validade:', e);
+    }
+  }
+
+  return blitzItem;
 }
 
 // ----------------------------------------------------

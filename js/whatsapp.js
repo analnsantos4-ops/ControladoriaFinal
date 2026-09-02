@@ -150,14 +150,20 @@ function parseQuantityString(str) {
 
 /**
  * Normaliza qualquer texto de corredor para a lista oficial CORRIDORS
- * Aceita: "04", "4", "Corredor 04", "Corredor 4", "C04", "C4", "Adega", etc.
+ * Aceita: "04", "4", "Corredor 4", "C4", "Adega", "Perfumaria", "Zona do Alho", etc.
  */
 export function resolveCorridorString(rawStr) {
   if (!rawStr || typeof rawStr !== 'string') return '';
   const clean = rawStr.trim().toUpperCase().replace(/[*_~`]/g, '');
 
   if (clean.includes('ADEGA')) {
-    return 'ADEGA';
+    return 'Adega';
+  }
+  if (clean.includes('PERFUMARIA')) {
+    return 'Perfumaria';
+  }
+  if (clean.includes('ALHO')) {
+    return 'Zona do Alho';
   }
 
   // Tenta extrair número de 1 a 14
@@ -165,11 +171,11 @@ export function resolveCorridorString(rawStr) {
   if (numMatch && numMatch[1]) {
     const num = parseInt(numMatch[1], 10);
     if (num >= 1 && num <= 14) {
-      return `CORREDOR ${String(num).padStart(2, '0')}`;
+      return `Corredor ${num}`;
     }
   }
 
-  // Match exato
+  // Match exato ou aproximado
   const exact = CORRIDORS.find((c) => c.toUpperCase() === clean);
   if (exact) return exact;
 

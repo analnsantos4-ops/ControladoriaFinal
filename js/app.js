@@ -515,7 +515,7 @@ function setupEventListeners() {
     const secSelect = document.getElementById('corridor-audit-sector-select');
     const corSelect = document.getElementById('corridor-audit-corridor-select');
     const sector = secSelect ? secSelect.value : 'MERCEARIA';
-    const corridor = corSelect ? corSelect.value : 'CORREDOR 01';
+    const corridor = corSelect ? corSelect.value : 'Corredor 1';
     await exportCurrentCorridorWhatsApp(sector, corridor);
   });
 
@@ -667,7 +667,7 @@ function setupEventListeners() {
 
   document.getElementById('corridor-audit-sector-select')?.addEventListener('change', (e) => {
     const sec = e.target.value;
-    const cor = document.getElementById('corridor-audit-corridor-select')?.value || 'CORREDOR 01';
+    const cor = document.getElementById('corridor-audit-corridor-select')?.value || 'Corredor 1';
     loadCorridorAuditProducts(sec, cor);
   });
 
@@ -972,17 +972,34 @@ async function renderExpirationsList(filterType = 'ALL') {
       const days = getDaysUntilExpiration(exp.expiration_date);
       const isTriaged = exp.is_triaged === true || exp.is_triaged === 1 || exp.is_triaged === 'true';
 
+      // Quantidade específica da validade:
+      let units = 0;
+      if (latest && latest.hasPreviousCount) {
+        units = Number(latest.total) || 0;
+      } else if (exps.length === 1 && Number(p.total_quantity) > 0) {
+        units = Number(p.total_quantity) || 0;
+      } else {
+        units = Number(latest?.total) || 0;
+      }
+
+      // REGRA: Se tem 0 unidades na data, NÃO VENCE! Somente vence se tiver 1 ou mais unidades.
+      const hasUnits = units >= 1;
+
       let category = 'OK';
-      if (days < 0) category = 'EXPIRED';
-      else if (days <= 15) category = '15_DAYS';
-      else if (days <= 30) category = '30_DAYS';
+      if (hasUnits) {
+        if (days < 0) category = 'EXPIRED';
+        else if (days <= 15) category = '15_DAYS';
+        else if (days <= 30) category = '30_DAYS';
+      } else {
+        category = 'ZERO_UNITS';
+      }
 
       let include = false;
       if (filterType === 'ALL') {
         // Na aba Todos, exibimos todos os produtos ativos (não triados)
         include = !isTriaged;
       } else if (filterType === 'EXPIRED') {
-        // Apenas vencidos que AINDA NÃO foram retirados para triagem
+        // Apenas vencidos COM 1 OU MAIS UNIDADES que AINDA NÃO foram retirados para triagem
         include = category === 'EXPIRED' && !isTriaged;
       } else if (filterType === '15_DAYS') {
         include = (category === 'EXPIRED' || category === '15_DAYS') && !isTriaged;
@@ -1000,7 +1017,7 @@ async function renderExpirationsList(filterType = 'ALL') {
           daysUntil: days,
           category,
           isTriaged,
-          units: latest.total
+          units
         });
       }
     }
@@ -1079,6 +1096,10 @@ async function renderExpirationsList(filterType = 'ALL') {
             </div>
           </div>
         `;
+      } else if (item.category === 'ZERO_UNITS' || item.units <= 0) {
+        badgeClass = 'tag-normal tag-zero-qty';
+        cardStatusClass = 'status-zero-qty';
+        tagText = '⚪ 0 UNIDADES (NÃO VENCE)';
       } else if (item.daysUntil < 0) {
         badgeClass = 'tag-expired';
         cardStatusClass = 'status-expired';
@@ -1092,6 +1113,8 @@ async function renderExpirationsList(filterType = 'ALL') {
         cardStatusClass = 'status-30-days';
         tagText = `🟡 VENCE EM ${item.daysUntil} DIAS`;
       }
+
+      const isZeroUnits = item.category === 'ZERO_UNITS' || item.units <= 0;
 
       return `
       <div class="exp-alert-card ${cardStatusClass}" id="exp-card-${item.expiration.id}" data-prodid="${item.product.id}" data-expid="${item.expiration.id}">
@@ -1111,7 +1134,7 @@ async function renderExpirationsList(filterType = 'ALL') {
             </div>
             <div class="exp-alert-loc-row">
               <span>${item.product.sector} · ${item.product.corridor}</span>
-              <span>Lote/Qtd: <strong>${formatNumber(item.units)} un</strong></span>
+              <span>Lote/Qtd: <strong>${formatNumber(item.units)} un</strong>${isZeroUnits ? ' <em style="font-size:0.7rem; color:#71717a; font-style:normal;">(Sem estoque)</em>' : ''}</span>
             </div>
           </div>
           <div class="exp-alert-action-col">
@@ -1247,10 +1270,25 @@ async function exportCurrentExpirationsWhatsApp() {
       const days = getDaysUntilExpiration(exp.expiration_date);
       const isTriaged = exp.is_triaged === true || exp.is_triaged === 1 || exp.is_triaged === 'true';
 
+      let units = 0;
+      if (latest && latest.hasPreviousCount) {
+        units = Number(latest.total) || 0;
+      } else if (exps.length === 1 && Number(p.total_quantity) > 0) {
+        units = Number(p.total_quantity) || 0;
+      } else {
+        units = Number(latest?.total) || 0;
+      }
+
+      const hasUnits = units >= 1;
+
       let category = 'OK';
-      if (days < 0) category = 'EXPIRED';
-      else if (days <= 15) category = '15_DAYS';
-      else if (days <= 30) category = '30_DAYS';
+      if (hasUnits) {
+        if (days < 0) category = 'EXPIRED';
+        else if (days <= 15) category = '15_DAYS';
+        else if (days <= 30) category = '30_DAYS';
+      } else {
+        category = 'ZERO_UNITS';
+      }
 
       let include = false;
       if (filterType === 'ALL') include = !isTriaged;
@@ -1264,7 +1302,7 @@ async function exportCurrentExpirationsWhatsApp() {
           name: p.name,
           barcode: p.barcode,
           expirationDateBR: formatDateBR(exp.expiration_date),
-          quantity: latest.total,
+          quantity: units,
           daysUntil: days
         });
       }

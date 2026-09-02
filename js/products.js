@@ -109,7 +109,7 @@ export async function saveNewProduct() {
   const barcode = barcodeInput ? barcodeInput.value.trim() : '';
   const name = nameInput ? nameInput.value.trim() : '';
   const sector = sectorSelect ? sectorSelect.value : 'MERCEARIA';
-  const corridor = corridorSelect ? corridorSelect.value : 'CORREDOR 01';
+  const corridor = corridorSelect ? corridorSelect.value : 'Corredor 1';
   let expDate = expDateInput ? expDateInput.value.trim() : '';
 
   if (!barcode) {
@@ -370,7 +370,8 @@ export async function openProductDetailView(productId) {
                 <div class="exp-item-row ${isTriaged ? 'row-triaged' : ''}">
                   <div class="exp-item-info">
                     <span class="exp-date-label">📅 ${formatDateBR(exp.expiration_date)}</span>
-                    <span class="exp-units-pill">${formatNumber(exp.unitsTotal || 0)} un.</span>
+                    <span class="exp-units-pill" style="${(exp.unitsTotal || 0) <= 0 ? 'background: #1f1f23; color: #71717a; border-color: #27272a;' : ''}">${formatNumber(exp.unitsTotal || 0)} un.</span>
+                    ${(exp.unitsTotal || 0) <= 0 ? `<span class="exp-badge" style="background: rgba(113, 113, 122, 0.2); color: #a1a1aa; font-weight: 800; font-size: 0.68rem; padding: 2px 6px; border-radius: 4px;">SEM ESTOQUE (NÃO VENCE)</span>` : ''}
                     ${isTriaged ? `<span class="exp-badge tag-triaged">📦 TRIAGEM</span>` : ''}
                   </div>
                   <div class="exp-item-actions">
@@ -803,7 +804,7 @@ export async function openEditProductModal(product) {
   const sectorEl = document.getElementById('edit-prod-sector');
   const corridorEl = document.getElementById('edit-prod-corridor');
   if (sectorEl) sectorEl.value = product.sector || 'MERCEARIA';
-  if (corridorEl) corridorEl.value = product.corridor || 'CORREDOR 01';
+  if (corridorEl) corridorEl.value = product.corridor || 'Corredor 1';
 
   // Gerenciamento de foto na edição
   const fileCamera = document.getElementById('file-camera-edit');
@@ -861,7 +862,7 @@ export async function openEditProductModal(product) {
     const barcode = document.getElementById('edit-prod-barcode')?.value?.trim() || '';
     const name = document.getElementById('edit-prod-name')?.value?.trim() || '';
     const sector = sectorEl?.value || 'MERCEARIA';
-    const corridor = corridorEl?.value || 'CORREDOR 01';
+    const corridor = corridorEl?.value || 'Corredor 1';
 
     if (!barcode) {
       showToast('Código de barras é obrigatório', 'warning');

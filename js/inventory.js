@@ -472,7 +472,7 @@ function showConferenceSavedModal(product, expiration, total, blitzContext = nul
 /**
  * Funções de Auditoria por Corredor
  */
-export async function openCorridorAuditView(sector = 'MERCEARIA', corridor = 'CORREDOR 01') {
+export async function openCorridorAuditView(sector = 'MERCEARIA', corridor = 'Corredor 1') {
   populateCorridorAuditFilters(sector, corridor);
   await loadCorridorAuditProducts(sector, corridor);
   showView('view-corridor-audit');
