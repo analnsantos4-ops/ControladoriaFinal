@@ -184,26 +184,32 @@ export function getTodayISO() {
 // Data formatada para visualização DD/MM/AAAA
 export function formatDateBR(dateString) {
   if (!dateString) return '--/--/----';
+  const clean = String(dateString).trim().split('T')[0];
+  if (!clean) return '--/--/----';
   // If ISO YYYY-MM-DD
-  if (dateString.includes('-')) {
-    const parts = dateString.split('-');
-    if (parts.length === 3) {
+  if (clean.includes('-')) {
+    const parts = clean.split('-');
+    if (parts.length === 3 && parts[0].length === 4) {
       return `${parts[2].padStart(2, '0')}/${parts[1].padStart(2, '0')}/${parts[0]}`;
     }
   }
-  return dateString;
+  return clean;
 }
 
 // Converte DD/MM/AAAA para ISO YYYY-MM-DD
 export function parseDateBRtoISO(dateStringBR) {
   if (!dateStringBR) return '';
-  if (dateStringBR.includes('/')) {
-    const parts = dateStringBR.split('/');
+  const clean = String(dateStringBR).trim().split('T')[0];
+  if (clean.includes('/')) {
+    const parts = clean.split('/');
     if (parts.length === 3) {
-      return `${parts[2]}-${parts[1].padStart(2, '0')}-${parts[0].padStart(2, '0')}`;
+      const day = parts[0].padStart(2, '0');
+      const month = parts[1].padStart(2, '0');
+      const year = parts[2].length === 2 ? `20${parts[2]}` : parts[2];
+      return `${year}-${month}-${day}`;
     }
   }
-  return dateStringBR;
+  return clean;
 }
 
 // Retorna diferença de dias até a validade

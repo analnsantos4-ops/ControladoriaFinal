@@ -275,7 +275,7 @@ export async function openProductDetailView(productId) {
   }
 
   const expirations = await getProductExpirations(productId);
-  const history = await getHistoryForProduct(productId);
+  const history = await getHistoryForProduct(productId, product.barcode);
   const locationHistory = await getLocationHistoryForProduct(productId);
 
   // Calcula estoque ativo (na loja) e estoque em triagem
@@ -426,15 +426,27 @@ export async function openProductDetailView(productId) {
             : `
           <div class="history-timeline">
             ${history
-              .slice(0, 8)
+              .slice(0, 10)
               .map((h) => {
                 const dateBR = formatDateBR(h.date ? h.date.split('T')[0] : '');
+                const timeStr = h.date && h.date.includes('T') ? new Date(h.date).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }) : '';
+                const isBlitz = h.origin === 'blitz';
                 return `
-                <div class="history-item">
-                  <div class="history-item-header">
-                    <span class="history-date">${dateBR}</span>
-                    <span class="history-total">→ ${formatNumber(h.total)} unidades</span>
+                <div class="history-item" style="${isBlitz ? 'border-left: 3px solid #3b82f6; padding-left: 8px;' : ''}">
+                  <div class="history-item-header" style="display: flex; justify-content: space-between; align-items: center;">
+                    <div style="display: flex; align-items: center; gap: 6px;">
+                      <span class="history-date">${dateBR}${timeStr ? ` às ${timeStr}` : ''}</span>
+                      ${isBlitz ? `<span style="background: rgba(59, 130, 246, 0.2); color: #60a5fa; font-size: 0.68rem; font-weight: 800; padding: 1px 6px; border-radius: 4px; border: 1px solid rgba(59, 130, 246, 0.4);">⚡ BLITZ SEMANAL</span>` : ''}
+                    </div>
+                    <span class="history-total" style="${h.result === 'NAO_TEM' ? 'color: #ef4444;' : ''}">
+                      ${h.result === 'NAO_TEM' ? '❌ NÃO TEM (0 un)' : `→ ${formatNumber(h.total)} unidades`}
+                    </span>
                   </div>
+                  ${isBlitz && h.requestedDate ? `
+                    <div style="font-size: 0.74rem; color: #fbbf24; font-weight: 700; margin-top: 2px;">
+                      Validade conferida: ${formatDateBR(h.requestedDate)} ${h.userName ? `• Conferente: ${h.userName}` : ''}
+                    </div>
+                  ` : ''}
                   <div class="history-locations-tags">
                     ${Object.entries(h.locations)
                       .filter(([_, q]) => q > 0)

@@ -10,6 +10,7 @@
 import {
   initDB,
   createBlitzSession,
+  updateBlitzSessionPeriod,
   getActiveBlitzSession,
   getBlitzSessionById,
   finishBlitzSession,
@@ -20,7 +21,9 @@ import {
   getBlitzItemBySessionProductAndDate,
   getBlitzItemBySessionBarcodeAndDate,
   getLastBlitzItemForProductAndDate,
+  getLastBlitzItemForBarcodeAndDate,
   getAllBlitzItemsForProductAndDate,
+  getAllBlitzItemsForBarcode,
   getAllBlitzItems,
   saveBlitzConferenceRecord,
   getProductByBarcode,
@@ -100,7 +103,14 @@ export function updateBlitzTopBarIndicator() {
     return;
   }
 
-  const periodLabel = currentActiveBlitzSession.period_label || 'Geral';
+  let periodLabel = currentActiveBlitzSession.period_label;
+  if (!periodLabel || periodLabel.includes('--/--/----') || periodLabel === 'Geral') {
+    if (currentActiveBlitzSession.start_date && currentActiveBlitzSession.end_date) {
+      periodLabel = `${formatDateBR(currentActiveBlitzSession.start_date)} → ${formatDateBR(currentActiveBlitzSession.end_date)}`;
+    } else {
+      periodLabel = 'Definir Período';
+    }
+  }
   const startedAtTime = currentActiveBlitzSession.started_at
     ? new Date(currentActiveBlitzSession.started_at).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })
     : '--:--';
@@ -274,8 +284,8 @@ function showStartBlitzModal() {
   const next30 = new Date();
   next30.setDate(next30.getDate() + 30);
 
-  const defaultStart = formatDateBR(today.toISOString().split('T')[0]);
-  const defaultEnd = formatDateBR(next30.toISOString().split('T')[0]);
+  const defaultStartISO = today.toISOString().split('T')[0];
+  const defaultEndISO = next30.toISOString().split('T')[0];
 
   modal.innerHTML = `
     <div class="modal-backdrop" id="modal-start-blitz-backdrop"></div>
@@ -293,42 +303,36 @@ function showStartBlitzModal() {
       <div style="background: rgba(245, 158, 11, 0.1); border: 1px solid rgba(245, 158, 11, 0.35); border-radius: 8px; padding: 10px; margin-bottom: 14px;">
         <div style="font-size: 0.78rem; color: #fef08a; line-height: 1.4;">
           <strong>Conferência com Listagem Física:</strong><br>
-          Informe o período da blitz que consta no papel que você recebeu. O sistema registrará os seus bips para esse período.
+          Informe o período da blitz que consta no papel que você recebeu. Toque no calendário para selecionar.
         </div>
       </div>
 
       <form id="form-start-blitz-period" style="display: flex; flex-direction: column; gap: 12px;">
         <div class="form-group" style="margin-bottom: 0;">
           <label for="input-blitz-start-date" style="font-size: 0.76rem; font-weight: 800; color: #a1a1aa; text-transform: uppercase;">
-            📅 Data Inicial (DD/MM/AAAA):
+            📅 Data Inicial:
           </label>
           <input
-            type="text"
+            type="date"
             id="input-blitz-start-date"
             class="form-input form-input-lg"
-            placeholder="01/09/2026"
-            value="${defaultStart}"
-            maxlength="10"
-            inputmode="numeric"
+            value="${defaultStartISO}"
             required
-            style="font-size: 1.1rem; font-weight: 800; text-align: center; border-color: #f59e0b; height: 46px;"
+            style="font-size: 1.15rem; font-weight: 800; text-align: center; border-color: #f59e0b; height: 50px; color-scheme: dark; cursor: pointer;"
           />
         </div>
 
         <div class="form-group" style="margin-bottom: 0;">
           <label for="input-blitz-end-date" style="font-size: 0.76rem; font-weight: 800; color: #a1a1aa; text-transform: uppercase;">
-            📅 Data Final (DD/MM/AAAA):
+            📅 Data Final:
           </label>
           <input
-            type="text"
+            type="date"
             id="input-blitz-end-date"
             class="form-input form-input-lg"
-            placeholder="01/10/2026"
-            value="${defaultEnd}"
-            maxlength="10"
-            inputmode="numeric"
+            value="${defaultEndISO}"
             required
-            style="font-size: 1.1rem; font-weight: 800; text-align: center; border-color: #f59e0b; height: 46px;"
+            style="font-size: 1.15rem; font-weight: 800; text-align: center; border-color: #f59e0b; height: 50px; color-scheme: dark; cursor: pointer;"
           />
         </div>
 
@@ -356,23 +360,6 @@ function showStartBlitzModal() {
   const startInput = document.getElementById('input-blitz-start-date');
   const endInput = document.getElementById('input-blitz-end-date');
 
-  // Máscara de data DD/MM/AAAA
-  const applyDateMask = (input) => {
-    input?.addEventListener('input', (e) => {
-      let val = e.target.value.replace(/\D/g, '');
-      if (val.length > 8) val = val.substring(0, 8);
-      if (val.length >= 5) {
-        val = val.substring(0, 2) + '/' + val.substring(2, 4) + '/' + val.substring(4);
-      } else if (val.length >= 3) {
-        val = val.substring(0, 2) + '/' + val.substring(2);
-      }
-      e.target.value = val;
-    });
-  };
-
-  applyDateMask(startInput);
-  applyDateMask(endInput);
-
   // Presets de período
   modal.querySelectorAll('.btn-quick-period').forEach(btn => {
     btn.addEventListener('click', () => {
@@ -381,18 +368,18 @@ function showStartBlitzModal() {
       if (preset === 'month') {
         const firstDay = new Date(now.getFullYear(), now.getMonth(), 1);
         const lastDay = new Date(now.getFullYear(), now.getMonth() + 1, 0);
-        if (startInput) startInput.value = formatDateBR(firstDay.toISOString().split('T')[0]);
-        if (endInput) endInput.value = formatDateBR(lastDay.toISOString().split('T')[0]);
+        if (startInput) startInput.value = firstDay.toISOString().split('T')[0];
+        if (endInput) endInput.value = lastDay.toISOString().split('T')[0];
       } else if (preset === '30d') {
         const end = new Date(now);
         end.setDate(end.getDate() + 30);
-        if (startInput) startInput.value = formatDateBR(now.toISOString().split('T')[0]);
-        if (endInput) endInput.value = formatDateBR(end.toISOString().split('T')[0]);
+        if (startInput) startInput.value = now.toISOString().split('T')[0];
+        if (endInput) endInput.value = end.toISOString().split('T')[0];
       } else if (preset === 'next_month') {
         const firstDay = new Date(now.getFullYear(), now.getMonth() + 1, 1);
         const lastDay = new Date(now.getFullYear(), now.getMonth() + 2, 0);
-        if (startInput) startInput.value = formatDateBR(firstDay.toISOString().split('T')[0]);
-        if (endInput) endInput.value = formatDateBR(lastDay.toISOString().split('T')[0]);
+        if (startInput) startInput.value = firstDay.toISOString().split('T')[0];
+        if (endInput) endInput.value = lastDay.toISOString().split('T')[0];
       }
     });
   });
@@ -407,13 +394,13 @@ function showStartBlitzModal() {
     const sDateRaw = startInput?.value?.trim();
     const eDateRaw = endInput?.value?.trim();
 
-    if (!sDateRaw || sDateRaw.length < 8) {
-      showToast('Informe a data inicial válida (DD/MM/AAAA)', 'warning');
+    if (!sDateRaw) {
+      showToast('Selecione a data inicial no calendário', 'warning');
       startInput?.focus();
       return;
     }
-    if (!eDateRaw || eDateRaw.length < 8) {
-      showToast('Informe a data final válida (DD/MM/AAAA)', 'warning');
+    if (!eDateRaw) {
+      showToast('Selecione a data final no calendário', 'warning');
       endInput?.focus();
       return;
     }
@@ -424,10 +411,19 @@ function showStartBlitzModal() {
 }
 
 // Inicia a sessão com as datas informadas e abre a tela da Blitz
-export async function startNewBlitzSession(startDateBR, endDateBR) {
+export async function startNewBlitzSession(startDateInput, endDateInput) {
   try {
-    const sDateISO = parseDateBRtoISO(startDateBR);
-    const eDateISO = parseDateBRtoISO(endDateBR);
+    let sDateISO = startDateInput ? (startDateInput.includes('/') ? parseDateBRtoISO(startDateInput) : String(startDateInput).trim().split('T')[0]) : null;
+    let eDateISO = endDateInput ? (endDateInput.includes('/') ? parseDateBRtoISO(endDateInput) : String(endDateInput).trim().split('T')[0]) : null;
+
+    if (!sDateISO || !eDateISO) {
+      const today = new Date();
+      const next30 = new Date();
+      next30.setDate(next30.getDate() + 30);
+      sDateISO = sDateISO || today.toISOString().split('T')[0];
+      eDateISO = eDateISO || next30.toISOString().split('T')[0];
+    }
+
     const periodLabel = `${formatDateBR(sDateISO)} → ${formatDateBR(eDateISO)}`;
 
     showToast(`Iniciando Blitz: ${periodLabel}...`, 'sync', 1000);
@@ -451,6 +447,148 @@ export async function startNewBlitzSession(startDateBR, endDateBR) {
     console.error('Erro ao iniciar Blitz:', err);
     showToast('Erro ao criar sessão da Blitz', 'warning');
   }
+}
+
+// Modal para alterar ou definir o período da blitz em andamento
+export async function promptEditActiveBlitzPeriod(session) {
+  let modal = document.getElementById('modal-edit-blitz-period');
+  if (!modal) {
+    modal = document.createElement('div');
+    modal.id = 'modal-edit-blitz-period';
+    modal.className = 'modal';
+    document.body.appendChild(modal);
+  }
+
+  const today = new Date();
+  const todayISO = today.toISOString().split('T')[0];
+  const next30 = new Date();
+  next30.setDate(next30.getDate() + 30);
+  const next30ISO = next30.toISOString().split('T')[0];
+
+  const currentStart = session.start_date || todayISO;
+  const currentEnd = session.end_date || next30ISO;
+
+  modal.innerHTML = `
+    <div class="modal-backdrop" id="modal-edit-blitz-period-backdrop"></div>
+    <div class="modal-card" style="padding: 20px; max-width: 400px; width: 100%; box-sizing: border-box;">
+      <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 12px;">
+        <h3 style="font-size: 1.1rem; font-weight: 900; color: #f4f4f5; margin: 0; display: flex; align-items: center; gap: 8px;">
+          📅 <span>Definir Período da Blitz</span>
+        </h3>
+        <button type="button" id="btn-close-edit-blitz-period" class="btn-icon-link" style="color: #a1a1aa; font-size: 1.3rem;">✕</button>
+      </div>
+
+      <p style="font-size: 0.8rem; color: #a1a1aa; margin: 0 0 12px 0;">
+        Escolha as datas da listagem no calendário. A alteração é salva imediatamente sem perder os itens já conferidos.
+      </p>
+
+      <form id="form-edit-blitz-period" style="display: flex; flex-direction: column; gap: 12px;">
+        <div class="form-group" style="margin-bottom: 0;">
+          <label for="input-edit-blitz-start" style="font-size: 0.76rem; font-weight: 800; color: #a1a1aa; text-transform: uppercase;">
+            📅 Data Inicial:
+          </label>
+          <input
+            type="date"
+            id="input-edit-blitz-start"
+            class="form-input form-input-lg"
+            value="${currentStart}"
+            required
+            style="font-size: 1.15rem; font-weight: 800; text-align: center; border-color: #f59e0b; height: 50px; color-scheme: dark; cursor: pointer;"
+          />
+        </div>
+
+        <div class="form-group" style="margin-bottom: 0;">
+          <label for="input-edit-blitz-end" style="font-size: 0.76rem; font-weight: 800; color: #a1a1aa; text-transform: uppercase;">
+            📅 Data Final:
+          </label>
+          <input
+            type="date"
+            id="input-edit-blitz-end"
+            class="form-input form-input-lg"
+            value="${currentEnd}"
+            required
+            style="font-size: 1.15rem; font-weight: 800; text-align: center; border-color: #f59e0b; height: 50px; color-scheme: dark; cursor: pointer;"
+          />
+        </div>
+
+        <!-- Atalhos Rápidos -->
+        <div style="display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; margin-top: 2px;">
+          <button type="button" class="btn-edit-quick-period btn-secondary" data-preset="month" style="padding: 6px; font-size: 0.72rem; font-weight: 800; justify-content: center;">Este Mês</button>
+          <button type="button" class="btn-edit-quick-period btn-secondary" data-preset="30d" style="padding: 6px; font-size: 0.72rem; font-weight: 800; justify-content: center;">+30 Dias</button>
+          <button type="button" class="btn-edit-quick-period btn-secondary" data-preset="next_month" style="padding: 6px; font-size: 0.72rem; font-weight: 800; justify-content: center;">Próximo Mês</button>
+        </div>
+
+        <div style="display: flex; gap: 8px; margin-top: 8px;">
+          <button type="button" id="btn-cancel-edit-blitz-period" class="btn-secondary" style="flex: 1; height: 46px; justify-content: center;">
+            Cancelar
+          </button>
+          <button type="submit" class="btn-primary" style="flex: 1.2; height: 46px; justify-content: center; background: #f59e0b; color: #000; font-weight: 900; font-size: 0.95rem;">
+            💾 SALVAR PERÍODO
+          </button>
+        </div>
+      </form>
+    </div>
+  `;
+
+  modal.classList.add('open');
+
+  const startInput = document.getElementById('input-edit-blitz-start');
+  const endInput = document.getElementById('input-edit-blitz-end');
+
+  modal.querySelectorAll('.btn-edit-quick-period').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const preset = btn.getAttribute('data-preset');
+      const now = new Date();
+      if (preset === 'month') {
+        const firstDay = new Date(now.getFullYear(), now.getMonth(), 1);
+        const lastDay = new Date(now.getFullYear(), now.getMonth() + 1, 0);
+        if (startInput) startInput.value = firstDay.toISOString().split('T')[0];
+        if (endInput) endInput.value = lastDay.toISOString().split('T')[0];
+      } else if (preset === '30d') {
+        const end = new Date(now);
+        end.setDate(end.getDate() + 30);
+        if (startInput) startInput.value = now.toISOString().split('T')[0];
+        if (endInput) endInput.value = end.toISOString().split('T')[0];
+      } else if (preset === 'next_month') {
+        const firstDay = new Date(now.getFullYear(), now.getMonth() + 1, 1);
+        const lastDay = new Date(now.getFullYear(), now.getMonth() + 2, 0);
+        if (startInput) startInput.value = firstDay.toISOString().split('T')[0];
+        if (endInput) endInput.value = lastDay.toISOString().split('T')[0];
+      }
+    });
+  });
+
+  const closeModal = () => modal.classList.remove('open');
+  document.getElementById('modal-edit-blitz-period-backdrop')?.addEventListener('click', closeModal);
+  document.getElementById('btn-close-edit-blitz-period')?.addEventListener('click', closeModal);
+  document.getElementById('btn-cancel-edit-blitz-period')?.addEventListener('click', closeModal);
+
+  document.getElementById('form-edit-blitz-period')?.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const sDate = startInput?.value?.trim();
+    const eDate = endInput?.value?.trim();
+
+    if (!sDate || !eDate) {
+      showToast('Selecione as datas inicial e final no calendário', 'warning');
+      return;
+    }
+
+    const newLabel = `${formatDateBR(sDate)} → ${formatDateBR(eDate)}`;
+    const updated = await updateBlitzSessionPeriod(session.id, {
+      start_date: sDate,
+      end_date: eDate,
+      period_label: newLabel
+    });
+
+    if (updated) {
+      currentActiveBlitzSession = updated;
+      setActiveBlitz(updated);
+      showToast(`✓ Período atualizado: ${newLabel}`, 'success', 2000);
+      closeModal();
+      openBlitzDashboardView();
+      triggerSyncNow().catch(e => console.warn('Sync error:', e));
+    }
+  });
 }
 
 // ----------------------------------------------------
@@ -482,7 +620,13 @@ export async function openBlitzDashboardView() {
     }
   });
 
-  const periodLabel = session.period_label || `${formatDateBR(session.start_date)} → ${formatDateBR(session.end_date)}`;
+  let periodLabel = session.period_label;
+  if (!periodLabel || periodLabel.includes('--/--/----') || periodLabel === 'Geral') {
+    if (session.start_date && session.end_date) {
+      periodLabel = `${formatDateBR(session.start_date)} → ${formatDateBR(session.end_date)}`;
+    }
+  }
+  const hasValidPeriod = Boolean(periodLabel && !periodLabel.includes('--/--/----') && periodLabel !== 'Geral');
 
   const container = document.getElementById('view-blitz-dashboard');
   if (!container) return;
@@ -505,8 +649,11 @@ export async function openBlitzDashboardView() {
               <h2 style="font-size: 1.05rem; font-weight: 900; color: #f4f4f5; margin: 0;">
                 BLITZ ATIVA
               </h2>
-              <div style="font-size: 0.88rem; font-weight: 800; color: #fbbf24; margin-top: 2px;">
-                📅 Período: ${periodLabel}
+              <div style="font-size: 0.88rem; font-weight: 800; color: #fbbf24; margin-top: 3px; display: flex; align-items: center; gap: 8px; flex-wrap: wrap;">
+                <span>📅 Período: <strong id="blitz-active-period-text" style="cursor: pointer; text-decoration: underline dotted;">${hasValidPeriod ? periodLabel : '<span style="color: #ef4444; font-weight: 900;">Não Definido</span>'}</strong></span>
+                <button type="button" id="btn-edit-active-blitz-period" style="background: rgba(245, 158, 11, 0.15); border: 1px solid rgba(245, 158, 11, 0.4); color: #fbbf24; padding: 2px 8px; border-radius: 6px; font-size: 0.72rem; font-weight: 800; cursor: pointer; display: inline-flex; align-items: center; gap: 4px;">
+                  ✏️ ${hasValidPeriod ? 'Alterar' : 'Definir Agora'}
+                </button>
               </div>
             </div>
           </div>
@@ -626,6 +773,14 @@ export async function openBlitzDashboardView() {
 
   document.getElementById('btn-blitz-dash-history')?.addEventListener('click', () => {
     openBlitzHistoryView();
+  });
+
+  document.getElementById('btn-edit-active-blitz-period')?.addEventListener('click', () => {
+    promptEditActiveBlitzPeriod(session);
+  });
+
+  document.getElementById('blitz-active-period-text')?.addEventListener('click', () => {
+    promptEditActiveBlitzPeriod(session);
   });
 
   document.getElementById('btn-blitz-big-scan')?.addEventListener('click', () => {
@@ -836,17 +991,32 @@ function promptUnregisteredProductBlitz(barcode) {
     openBlitzQuickRegisterModal(barcode);
   });
 
-  // Opção: CONTINUAR SEM CADASTRAR (Guarda código, data solicitada, hora, etc.)
-  document.getElementById('btn-blitz-continue-unregistered')?.addEventListener('click', () => {
+  // Opção: CONTINUAR SEM CADASTRAR (Guarda produto no banco de dados para manter histórico semanal permanente)
+  document.getElementById('btn-blitz-continue-unregistered')?.addEventListener('click', async () => {
     closeModal();
-    const provisionalProduct = {
-      id: null,
-      barcode: barcode,
-      name: `PRODUTO NÃO CADASTRADO (${barcode})`,
-      sector: 'GERAL',
-      corridor: '01'
-    };
-    promptRequestedExpirationDate(provisionalProduct);
+    showToast('Guardando produto no banco...', 'sync', 800);
+    try {
+      let savedProd = await getProductByBarcode(barcode);
+      if (!savedProd) {
+        savedProd = await saveProduct({
+          barcode: String(barcode).trim(),
+          name: `PRODUTO ${String(barcode).trim()}`,
+          sector: currentActiveBlitzSession?.sector || 'GERAL',
+          corridor: '01'
+        });
+        triggerSyncNow().catch(e => console.warn('Sync error:', e));
+      }
+      promptRequestedExpirationDate(savedProd);
+    } catch (e) {
+      console.warn('Erro ao auto-salvar produto provisório:', e);
+      promptRequestedExpirationDate({
+        id: null,
+        barcode: barcode,
+        name: `PRODUTO ${barcode}`,
+        sector: currentActiveBlitzSession?.sector || 'GERAL',
+        corridor: '01'
+      });
+    }
   });
 }
 
@@ -958,7 +1128,7 @@ function openBlitzQuickRegisterModal(barcode) {
 // 5. QUAL A DATA SOLICITADA? (MANUAL DO PAPEL)
 // ----------------------------------------------------
 
-export function promptRequestedExpirationDate(product) {
+export async function promptRequestedExpirationDate(product) {
   let modal = document.getElementById('modal-blitz-date-prompt');
   if (!modal) {
     modal = document.createElement('div');
@@ -967,12 +1137,93 @@ export function promptRequestedExpirationDate(product) {
     document.body.appendChild(modal);
   }
 
+  // Busca validades já cadastradas no banco deste produto se existirem
+  let knownExpirations = [];
+  if (product && product.id) {
+    try {
+      knownExpirations = (await getProductExpirations(product.id)) || [];
+    } catch (err) {
+      console.warn('Erro ao buscar validades do produto:', err);
+    }
+  }
+
+  // Busca histórico de conferências anteriores para este produto ou código
+  let pastBlitzItems = [];
+  try {
+    if (product?.id) {
+      pastBlitzItems = await getAllBlitzItemsForProduct(product.id);
+    } else if (product?.barcode) {
+      pastBlitzItems = await getAllBlitzItemsForBarcode(product.barcode);
+    }
+  } catch (err) {
+    console.warn('Erro ao buscar blitz anteriores:', err);
+  }
+
+  // Agrupa datas conhecidas (cadastradas + encontradas no histórico semanal)
+  const dateMap = new Map();
+  knownExpirations.forEach(exp => {
+    if (exp.expiration_date) {
+      dateMap.set(exp.expiration_date, {
+        iso: exp.expiration_date,
+        lastQty: null,
+        lastDate: null
+      });
+    }
+  });
+
+  pastBlitzItems.forEach(item => {
+    const d = item.requested_expiration_date;
+    if (d) {
+      const existing = dateMap.get(d) || { iso: d, lastQty: null, lastDate: null };
+      if (existing.lastQty === null && item.result) {
+        existing.lastQty = item.result === 'TEM' ? Number(item.total_quantity) || 0 : 0;
+        existing.lastDate = item.checked_at ? formatDateBR(item.checked_at.split('T')[0]) : null;
+      }
+      dateMap.set(d, existing);
+    }
+  });
+
+  // Data padrão inicial: Início da Blitz ativa ou Hoje
+  const defaultDateISO = currentActiveBlitzSession?.start_date || getTodayISO();
+
+  // Chips de validades já cadastradas com histórico de quantidades anteriores
+  let knownChipsHtml = '';
+  if (dateMap.size > 0) {
+    const chipsList = Array.from(dateMap.values());
+    const chips = chipsList.map(info => {
+      const dateBR = formatDateBR(info.iso);
+      let subText = '';
+      if (info.lastQty !== null) {
+        subText = info.lastQty > 0
+          ? `<span style="font-size: 0.72rem; color: #34d399; font-weight: 700;">(Tinha ${info.lastQty} un${info.lastDate ? ` em ${info.lastDate}` : ''})</span>`
+          : `<span style="font-size: 0.72rem; color: #f87171; font-weight: 700;">(0 un / Não tem)</span>`;
+      }
+      return `
+        <button type="button" class="btn-known-chip btn-secondary" data-iso="${info.iso}" style="padding: 8px 10px; font-size: 0.82rem; font-weight: 800; border-color: rgba(16, 185, 129, 0.4); color: #10b981; border-radius: 8px; cursor: pointer; display: flex; align-items: center; justify-content: space-between; gap: 6px; width: 100%; text-align: left;">
+          <span>📅 ${dateBR}</span>
+          ${subText}
+        </button>
+      `;
+    }).join('');
+
+    knownChipsHtml = `
+      <div style="background: rgba(16, 185, 129, 0.08); border: 1px solid rgba(16, 185, 129, 0.3); border-radius: 10px; padding: 10px;">
+        <div style="font-size: 0.72rem; color: #10b981; font-weight: 800; text-transform: uppercase; margin-bottom: 6px;">
+          ⚡ Validades já registradas deste produto (Toque para usar):
+        </div>
+        <div style="display: flex; flex-direction: column; gap: 5px;">
+          ${chips}
+        </div>
+      </div>
+    `;
+  }
+
   modal.innerHTML = `
     <div class="modal-backdrop" id="modal-blitz-date-backdrop"></div>
-    <div class="modal-card" style="padding: 20px; max-width: 420px; width: 100%; box-sizing: border-box;">
+    <div class="modal-card" style="padding: 20px; max-width: 430px; width: 100%; box-sizing: border-box;">
       
       <!-- Cabeçalho do Produto -->
-      <div style="background: #18181c; border: 1px solid #27272a; border-radius: 10px; padding: 12px; margin-bottom: 14px;">
+      <div style="background: #18181c; border: 1px solid #27272a; border-radius: 10px; padding: 12px; margin-bottom: 12px;">
         <div style="font-size: 0.72rem; color: #10b981; font-weight: 800; text-transform: uppercase;">
           📦 PRODUTO BIPADO:
         </div>
@@ -985,36 +1236,75 @@ export function promptRequestedExpirationDate(product) {
       </div>
 
       <!-- Pergunta Principal: QUAL A DATA SOLICITADA? -->
-      <form id="form-blitz-requested-date" style="display: flex; flex-direction: column; gap: 10px;">
-        <div style="text-align: center; margin-bottom: 4px;">
-          <div style="font-size: 1.3rem; margin-bottom: 2px;">📅</div>
-          <label for="input-requested-date" style="font-size: 0.95rem; font-weight: 900; color: #fef08a; display: block;">
+      <form id="form-blitz-requested-date" style="display: flex; flex-direction: column; gap: 12px;">
+        <div style="text-align: center;">
+          <div style="font-size: 1.4rem; margin-bottom: 2px;">📅</div>
+          <div style="font-size: 1.05rem; font-weight: 900; color: #fef08a; display: block;">
             QUAL A DATA SOLICITADA?
-          </label>
+          </div>
           <div style="font-size: 0.74rem; color: #a1a1aa; margin-top: 2px;">
-            Olhe no papel físico e digite a validade solicitada:
+            Olhe no papel físico e escolha no calendário:
           </div>
         </div>
 
-        <div class="form-group" style="margin-bottom: 4px;">
-          <input
-            type="text"
-            id="input-requested-date"
-            class="form-input form-input-lg"
-            placeholder="04/09/2026"
-            maxlength="10"
-            inputmode="numeric"
-            required
-            autofocus
-            style="font-size: 1.35rem; font-weight: 900; text-align: center; border-color: #f59e0b; height: 52px; letter-spacing: 1px; color: #fef08a;"
-          />
+        <!-- BOX DO CALENDÁRIO TOUCH (NÃO PRECISA DIGITAR) -->
+        <div style="background: #18181c; border: 2px solid #f59e0b; border-radius: 12px; padding: 12px; display: flex; flex-direction: column; gap: 8px; box-shadow: 0 4px 14px rgba(245, 158, 11, 0.15);">
+          
+          <div style="display: flex; align-items: center; justify-content: space-between;">
+            <span style="font-size: 0.74rem; font-weight: 800; color: #fbbf24; text-transform: uppercase; letter-spacing: 0.5px;">
+              📆 CALENDÁRIO NA TELA:
+            </span>
+            <span style="font-size: 0.7rem; color: #10b981; font-weight: 700;">
+              Toque no campo ou botão
+            </span>
+          </div>
+
+          <!-- INPUT DE DATA COM CALENDÁRIO NATIVO DA TELA -->
+          <div style="position: relative; width: 100%;">
+            <input
+              type="date"
+              id="input-requested-date-picker"
+              class="form-input form-input-lg"
+              value="${defaultDateISO}"
+              required
+              style="width: 100%; height: 56px; font-size: 1.35rem; font-weight: 900; text-align: center; color: #fef08a; background: #121214; border: 1px solid #3f3f46; border-radius: 8px; color-scheme: dark; cursor: pointer; box-sizing: border-box; padding: 0 12px;"
+            />
+          </div>
+
+          <!-- FEEDBACK VISUAL EM FORMATO BRASILEIRO (DD/MM/AAAA) -->
+          <div style="display: flex; align-items: center; justify-content: space-between; padding: 6px 10px; background: rgba(16, 185, 129, 0.1); border-radius: 6px; border: 1px dashed rgba(16, 185, 129, 0.35);">
+            <span style="font-size: 0.75rem; color: #a1a1aa; font-weight: 700;">Validade Selecionada:</span>
+            <span id="requested-date-display-br" style="font-size: 1.2rem; font-weight: 900; color: #10b981; letter-spacing: 0.5px;">
+              ${formatDateBR(defaultDateISO)}
+            </span>
+          </div>
+
+          <!-- BOTÃO DESTACADO PARA ABRIR O CALENDÁRIO -->
+          <button type="button" id="btn-open-picker-explicit" style="width: 100%; height: 44px; background: #27272a; border: 1px solid #f59e0b; border-radius: 8px; color: #fbbf24; font-size: 0.88rem; font-weight: 900; cursor: pointer; display: flex; align-items: center; justify-content: center; gap: 8px;">
+            📅 ABRIR CALENDÁRIO
+          </button>
         </div>
 
-        <div style="display: flex; gap: 8px; margin-top: 6px;">
-          <button type="button" id="btn-cancel-req-date" class="btn-secondary" style="flex: 1; height: 46px; justify-content: center;">
+        ${knownChipsHtml}
+
+        <!-- ATALHOS RÁPIDOS DE DIAS -->
+        <div>
+          <div style="font-size: 0.68rem; color: #71717a; font-weight: 700; text-transform: uppercase; margin-bottom: 4px; text-align: center;">
+            Atalhos rápidos:
+          </div>
+          <div style="display: grid; grid-template-columns: repeat(4, 1fr); gap: 6px;">
+            <button type="button" class="btn-secondary btn-quick-date" data-days="0" style="padding: 7px 2px; font-size: 0.74rem; font-weight: 800; justify-content: center;">Hoje</button>
+            <button type="button" class="btn-secondary btn-quick-date" data-days="7" style="padding: 7px 2px; font-size: 0.74rem; font-weight: 800; justify-content: center;">+7 dias</button>
+            <button type="button" class="btn-secondary btn-quick-date" data-days="15" style="padding: 7px 2px; font-size: 0.74rem; font-weight: 800; justify-content: center;">+15 dias</button>
+            <button type="button" class="btn-secondary btn-quick-date" data-days="30" style="padding: 7px 2px; font-size: 0.74rem; font-weight: 800; justify-content: center;">+30 dias</button>
+          </div>
+        </div>
+
+        <div style="display: flex; gap: 8px; margin-top: 4px;">
+          <button type="button" id="btn-cancel-req-date" class="btn-secondary" style="flex: 1; height: 48px; justify-content: center; font-size: 0.9rem; font-weight: 800;">
             Cancelar
           </button>
-          <button type="submit" id="btn-confirm-req-date" class="btn-primary" style="flex: 1.3; height: 46px; justify-content: center; background: #f59e0b; color: #000; font-weight: 900; font-size: 0.95rem;">
+          <button type="submit" id="btn-confirm-req-date" class="btn-primary" style="flex: 1.3; height: 48px; justify-content: center; background: #f59e0b; color: #000; font-weight: 900; font-size: 0.98rem;">
             CONTINUAR ➔
           </button>
         </div>
@@ -1024,19 +1314,53 @@ export function promptRequestedExpirationDate(product) {
   `;
 
   modal.classList.add('open');
-  const dateInput = document.getElementById('input-requested-date');
-  setTimeout(() => dateInput?.focus(), 100);
 
-  // Máscara DD/MM/AAAA
-  dateInput?.addEventListener('input', (e) => {
-    let val = e.target.value.replace(/\D/g, '');
-    if (val.length > 8) val = val.substring(0, 8);
-    if (val.length >= 5) {
-      val = val.substring(0, 2) + '/' + val.substring(2, 4) + '/' + val.substring(4);
-    } else if (val.length >= 3) {
-      val = val.substring(0, 2) + '/' + val.substring(2);
-    }
-    e.target.value = val;
+  const pickerInput = document.getElementById('input-requested-date-picker');
+  const displayBr = document.getElementById('requested-date-display-br');
+
+  const updateDate = (isoVal) => {
+    if (!isoVal) return;
+    if (pickerInput) pickerInput.value = isoVal;
+    if (displayBr) displayBr.textContent = formatDateBR(isoVal);
+  };
+
+  const triggerCalendar = () => {
+    if (!pickerInput) return;
+    try {
+      if (typeof pickerInput.showPicker === 'function') {
+        pickerInput.showPicker();
+        return;
+      }
+    } catch (e) {}
+    pickerInput.focus();
+    pickerInput.click();
+  };
+
+  // Eventos para abrir o calendário
+  document.getElementById('btn-open-picker-explicit')?.addEventListener('click', triggerCalendar);
+  pickerInput?.addEventListener('click', triggerCalendar);
+
+  // Mudança de data no calendário
+  pickerInput?.addEventListener('input', (e) => updateDate(e.target.value));
+  pickerInput?.addEventListener('change', (e) => updateDate(e.target.value));
+
+  // Atalhos de dias
+  modal.querySelectorAll('.btn-quick-date').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      const days = parseInt(btn.getAttribute('data-days') || '0', 10);
+      const d = new Date();
+      d.setDate(d.getDate() + days);
+      const iso = d.toISOString().split('T')[0];
+      updateDate(iso);
+    });
+  });
+
+  // Chips de datas já cadastradas
+  modal.querySelectorAll('.btn-known-chip').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      const iso = btn.getAttribute('data-iso');
+      if (iso) updateDate(iso);
+    });
   });
 
   const closeModal = () => modal.classList.remove('open');
@@ -1048,18 +1372,17 @@ export function promptRequestedExpirationDate(product) {
 
   document.getElementById('form-blitz-requested-date')?.addEventListener('submit', async (e) => {
     e.preventDefault();
-    const rawDate = dateInput?.value?.trim();
-    if (!rawDate || rawDate.length < 8) {
-      showToast('Digite a data solicitada válida (DD/MM/AAAA)', 'warning');
-      dateInput?.focus();
+    const chosenISO = pickerInput?.value?.trim();
+    if (!chosenISO) {
+      showToast('Selecione uma data no calendário', 'warning');
+      triggerCalendar();
       return;
     }
 
-    const isoDate = parseDateBRtoISO(rawDate);
     closeModal();
 
     // 13. EVITAR DUPLICIDADE ACIDENTAL
-    await checkDuplicityAndPromptDecision(product, isoDate);
+    await checkDuplicityAndPromptDecision(product, chosenISO);
   });
 }
 
@@ -1087,7 +1410,7 @@ async function checkDuplicityAndPromptDecision(product, requestedDateISO) {
   }
 
   // Se não é duplicidade, segue direto para a pergunta TEM / NÃO TEM
-  showHasOrNotDecisionModal({
+  await showHasOrNotDecisionModal({
     product,
     requestedDate: requestedDateISO,
     existingItem: null
@@ -1151,9 +1474,9 @@ function showDuplicityWarningModal({ product, requestedDate, existingItem }) {
     startBlitzScanning();
   });
 
-  document.getElementById('btn-duplicity-redo')?.addEventListener('click', () => {
+  document.getElementById('btn-duplicity-redo')?.addEventListener('click', async () => {
     closeModal();
-    showHasOrNotDecisionModal({
+    await showHasOrNotDecisionModal({
       product,
       requestedDate,
       existingItem // Passa para substituir/atualizar
@@ -1162,10 +1485,10 @@ function showDuplicityWarningModal({ product, requestedDate, existingItem }) {
 }
 
 // ----------------------------------------------------
-// 6. PERGUNTAR SE TEM (TEM OU NÃO TEM)
+// 6. PERGUNTAR SE TEM (TEM OU NÃO TEM) COM HISTÓRICO ANTERIOR
 // ----------------------------------------------------
 
-function showHasOrNotDecisionModal({ product, requestedDate, existingItem = null }) {
+async function showHasOrNotDecisionModal({ product, requestedDate, existingItem = null }) {
   let modal = document.getElementById('modal-blitz-has-or-not');
   if (!modal) {
     modal = document.createElement('div');
@@ -1174,12 +1497,72 @@ function showHasOrNotDecisionModal({ product, requestedDate, existingItem = null
     document.body.appendChild(modal);
   }
 
+  // 1. Busca conferência anterior dessa MESMA validade (semana passada ou anterior)
+  let prevBlitz = null;
+  if (product?.id) {
+    prevBlitz = await getLastBlitzItemForProductAndDate(product.id, requestedDate);
+  }
+  if (!prevBlitz && product?.barcode) {
+    prevBlitz = await getLastBlitzItemForBarcodeAndDate(product.barcode, requestedDate);
+  }
+
+  // Se o item encontrado for o mesmo da sessão atual sendo refeito, busca o anterior no histórico
+  if (existingItem && prevBlitz && prevBlitz.id === existingItem.id) {
+    const all = product?.id
+      ? await getAllBlitzItemsForProductAndDate(product.id, requestedDate)
+      : (product?.barcode ? await getAllBlitzItemsForBarcode(product.barcode) : []);
+    prevBlitz = all.find(it => it.id !== existingItem.id && it.requested_expiration_date === requestedDate) || null;
+  }
+
+  let historyBannerHtml = '';
+  if (prevBlitz) {
+    const prevDate = prevBlitz.checked_at ? formatDateBR(prevBlitz.checked_at.split('T')[0]) : '';
+    const prevTime = prevBlitz.checked_at ? new Date(prevBlitz.checked_at).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }) : '';
+    const wasTem = prevBlitz.result === 'TEM';
+    const prevQty = Number(prevBlitz.total_quantity) || 0;
+    const prevUser = prevBlitz.user_name || 'Conferente';
+
+    let locsSummary = '';
+    if (prevBlitz.locations && prevBlitz.locations.length > 0) {
+      locsSummary = prevBlitz.locations
+        .filter(l => Number(l.quantity) > 0)
+        .map(l => `<span style="background: rgba(59, 130, 246, 0.25); border: 1px solid rgba(59, 130, 246, 0.4); padding: 2px 7px; border-radius: 4px; font-size: 0.74rem;">${l.location}: <strong>${formatNumber(l.quantity)} un</strong></span>`)
+        .join(' ');
+    }
+
+    historyBannerHtml = `
+      <div style="background: rgba(30, 58, 138, 0.35); border: 1.5px solid #3b82f6; border-radius: 10px; padding: 12px; margin-bottom: 14px; text-align: left;">
+        <div style="font-size: 0.72rem; color: #60a5fa; font-weight: 900; text-transform: uppercase; display: flex; align-items: center; gap: 5px;">
+          <span>🕒</span> <span>HISTÓRICO DA CONFERÊNCIA ANTERIOR:</span>
+        </div>
+        <div style="font-size: 0.88rem; font-weight: 800; color: #f0f9ff; margin-top: 5px; line-height: 1.35;">
+          No dia <strong>${prevDate}</strong>${prevTime ? ` às ${prevTime}` : ''}, essa validade ${wasTem ? `já tinha <strong>${formatNumber(prevQty)} unidades</strong>` : `estava registrada como <strong>NÃO TEM (0 un)</strong>`}
+        </div>
+        ${locsSummary ? `
+          <div style="margin-top: 6px; display: flex; flex-wrap: wrap; gap: 4px;">
+            ${locsSummary}
+          </div>
+        ` : ''}
+        <div style="font-size: 0.7rem; color: #94a3b8; margin-top: 5px;">
+          Conferido por: <strong>${prevUser}</strong>
+        </div>
+      </div>
+    `;
+  } else {
+    historyBannerHtml = `
+      <div style="background: rgba(39, 39, 42, 0.45); border: 1px solid #3f3f46; border-radius: 8px; padding: 8px 12px; margin-bottom: 14px; text-align: left; display: flex; align-items: center; gap: 6px;">
+        <span style="font-size: 0.85rem;">✨</span>
+        <span style="font-size: 0.76rem; color: #a1a1aa;">Primeira conferência registrada para esta data de validade.</span>
+      </div>
+    `;
+  }
+
   modal.innerHTML = `
     <div class="modal-backdrop" id="modal-blitz-hon-backdrop"></div>
     <div class="modal-card" style="padding: 20px; max-width: 420px; width: 100%; box-sizing: border-box;">
       
       <!-- Detalhes do Produto e Validade Solicitada -->
-      <div style="background: #18181c; border: 1px solid #27272a; border-radius: 10px; padding: 12px; margin-bottom: 14px;">
+      <div style="background: #18181c; border: 1px solid #27272a; border-radius: 10px; padding: 12px; margin-bottom: 12px;">
         <h3 style="font-size: 1rem; font-weight: 900; color: #f4f4f5; margin: 0 0 2px 0; line-height: 1.3;">
           ${product.name}
         </h3>
@@ -1189,7 +1572,7 @@ function showHasOrNotDecisionModal({ product, requestedDate, existingItem = null
       </div>
 
       <!-- Validade Solicitada Destaque -->
-      <div style="background: rgba(245, 158, 11, 0.12); border: 2px solid rgba(245, 158, 11, 0.5); border-radius: 10px; padding: 10px; text-align: center; margin-bottom: 14px;">
+      <div style="background: rgba(245, 158, 11, 0.12); border: 2px solid rgba(245, 158, 11, 0.5); border-radius: 10px; padding: 10px; text-align: center; margin-bottom: 12px;">
         <div style="font-size: 0.72rem; color: #fbbf24; font-weight: 800; text-transform: uppercase;">
           VALIDADE SOLICITADA NO PAPEL:
         </div>
@@ -1197,6 +1580,9 @@ function showHasOrNotDecisionModal({ product, requestedDate, existingItem = null
           ${formatDateBR(requestedDate)}
         </div>
       </div>
+
+      <!-- Informação do Histórico Anterior -->
+      ${historyBannerHtml}
 
       <!-- Pergunta Crucial -->
       <div style="font-size: 1.05rem; font-weight: 900; color: #f4f4f5; text-align: center; margin-bottom: 16px;">
@@ -1903,7 +2289,14 @@ async function renderBlitzHistorySessions(sessions) {
 
     const isOngoing = s.status === 'em_andamento';
     const isCanceled = s.status === 'cancelada';
-    const periodLabel = s.period_label || `${formatDateBR(s.start_date)} → ${formatDateBR(s.end_date)}`;
+    let periodLabel = s.period_label;
+    if (!periodLabel || periodLabel.includes('--/--/----') || periodLabel === 'Geral') {
+      if (s.start_date && s.end_date) {
+        periodLabel = `${formatDateBR(s.start_date)} → ${formatDateBR(s.end_date)}`;
+      } else {
+        periodLabel = 'Período não informado';
+      }
+    }
     const startedAtFormatted = new Date(s.started_at).toLocaleString('pt-BR');
 
     return `

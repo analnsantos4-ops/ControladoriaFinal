@@ -973,40 +973,77 @@ export async function saveCompleteProductWithCounts({ product, expirationDate, l
   }
 }
 
-// Retorna histórico completo de um produto (datas, totais e detalhamento por local)
-export async function getHistoryForProduct(productId) {
-  if (!productId) return [];
+// Retorna histórico completo de um produto (datas, totais, blitzes e detalhamento por local)
+export async function getHistoryForProduct(productId, barcode = null) {
+  if (!productId && !barcode) return [];
   try {
-    const { tx } = await getSafeTransaction('inventory_counts', 'readonly');
-    const store = tx.objectStore('inventory_counts');
-    const index = store.index('product_id');
-    return new Promise((resolve) => {
-      const req = index.getAll(productId);
-      req.onsuccess = () => {
-        const allCounts = req.result || [];
-        const groups = {};
+    const historyMap = {};
 
-        allCounts.forEach((item) => {
-          const dateKey = item.counted_at ? item.counted_at.substring(0, 16) : (item.created_at ? item.created_at.substring(0, 16) : 'data');
-          if (!groups[dateKey]) {
-            groups[dateKey] = {
-              date: item.counted_at || item.created_at,
-              locations: {},
-              total: 0,
-              expirationId: item.expiration_id
-            };
-          }
-          const q = Number(item.quantity) || 0;
-          groups[dateKey].locations[item.location_type] = q;
-          groups[dateKey].total += q;
-        });
+    // 1. Busca em inventory_counts
+    if (productId) {
+      const { tx } = await getSafeTransaction('inventory_counts', 'readonly');
+      const store = tx.objectStore('inventory_counts');
+      const index = store.index('product_id');
+      const counts = await new Promise((resolve) => {
+        const req = index.getAll(productId);
+        req.onsuccess = () => resolve(req.result || []);
+        req.onerror = () => resolve([]);
+      });
 
-        // Transforma em array e ordena por data decrescente
-        const historyList = Object.values(groups).sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
-        resolve(historyList);
-      };
-      req.onerror = () => resolve([]);
+      counts.forEach((item) => {
+        const dateKey = item.counted_at ? item.counted_at.substring(0, 16) : (item.created_at ? item.created_at.substring(0, 16) : 'data');
+        if (!historyMap[dateKey]) {
+          historyMap[dateKey] = {
+            date: item.counted_at || item.created_at,
+            locations: {},
+            total: 0,
+            expirationId: item.expiration_id,
+            origin: 'inventario'
+          };
+        }
+        const q = Number(item.quantity) || 0;
+        historyMap[dateKey].locations[item.location_type] = (historyMap[dateKey].locations[item.location_type] || 0) + q;
+        historyMap[dateKey].total += q;
+      });
+    }
+
+    // 2. Busca em blitz_items para que conferências de Blitz também componham o histórico semanal do produto
+    let blitzList = [];
+    if (productId) {
+      blitzList = await getAllBlitzItemsForProduct(productId);
+    }
+    if (barcode) {
+      const bList = await getAllBlitzItemsForBarcode(barcode);
+      bList.forEach(b => {
+        if (!blitzList.some(item => item.id === b.id)) {
+          blitzList.push(b);
+        }
+      });
+    }
+
+    blitzList.forEach((bItem) => {
+      const bDate = bItem.checked_at || bItem.created_at || new Date().toISOString();
+      const dateKey = `blitz_${bDate.substring(0, 16)}_${bItem.requested_expiration_date || ''}`;
+      if (!historyMap[dateKey]) {
+        const locs = {};
+        if (bItem.locations && Array.isArray(bItem.locations)) {
+          bItem.locations.forEach(l => {
+            locs[l.location] = Number(l.quantity) || 0;
+          });
+        }
+        historyMap[dateKey] = {
+          date: bDate,
+          locations: locs,
+          total: Number(bItem.total_quantity) || 0,
+          requestedDate: bItem.requested_expiration_date,
+          result: bItem.result,
+          userName: bItem.user_name,
+          origin: 'blitz'
+        };
+      }
     });
+
+    return Object.values(historyMap).sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
   } catch (e) {
     return [];
   }
@@ -1746,22 +1783,30 @@ export async function createBlitzSession({ blitz_type, sector, user_name, start_
   const now = new Date().toISOString();
   const normalizedSector = (sector || blitz_type || 'GERAL').toUpperCase();
   
+  // Garante datas limpas em formato ISO YYYY-MM-DD
+  let cleanStart = start_date ? (start_date.includes('/') ? parseDateBRtoISO(start_date) : start_date.split('T')[0]) : null;
+  let cleanEnd = end_date ? (end_date.includes('/') ? parseDateBRtoISO(end_date) : end_date.split('T')[0]) : null;
+
+  if (!cleanStart || !cleanEnd) {
+    const today = new Date();
+    const next30 = new Date();
+    next30.setDate(next30.getDate() + 30);
+    cleanStart = cleanStart || today.toISOString().split('T')[0];
+    cleanEnd = cleanEnd || next30.toISOString().split('T')[0];
+  }
+
   // Período formatado legível DD/MM/AAAA → DD/MM/AAAA
   let label = period_label;
-  if (!label && start_date && end_date) {
-    const sBR = formatDateBR(start_date);
-    const eBR = formatDateBR(end_date);
-    label = `${sBR} → ${eBR}`;
-  } else if (!label) {
-    label = 'Geral';
+  if (!label || label.includes('--/--/----') || label === 'Geral') {
+    label = `${formatDateBR(cleanStart)} → ${formatDateBR(cleanEnd)}`;
   }
 
   const session = {
     id: generateId(),
     blitz_type: blitz_type || 'periodo',
     sector: normalizedSector,
-    start_date: start_date || null,
-    end_date: end_date || null,
+    start_date: cleanStart,
+    end_date: cleanEnd,
     period_label: label,
     user_name: user_name || 'Ana Luiza',
     started_at: now,
@@ -1850,6 +1895,51 @@ export async function getBlitzSessionById(id) {
       req.onerror = () => resolve(null);
     });
   } catch (e) {
+    return null;
+  }
+}
+
+export async function updateBlitzSessionPeriod(sessionId, { start_date, end_date, period_label }) {
+  if (!sessionId) return null;
+  const now = new Date().toISOString();
+  try {
+    const cleanStart = start_date ? (start_date.includes('/') ? parseDateBRtoISO(start_date) : start_date.split('T')[0]) : null;
+    const cleanEnd = end_date ? (end_date.includes('/') ? parseDateBRtoISO(end_date) : end_date.split('T')[0]) : null;
+    const label = period_label || (cleanStart && cleanEnd ? `${formatDateBR(cleanStart)} → ${formatDateBR(cleanEnd)}` : null);
+
+    const { tx } = await getSafeTransaction(['blitz_sessions', 'sync_queue'], 'readwrite');
+    return new Promise((resolve, reject) => {
+      const store = tx.objectStore('blitz_sessions');
+      const syncStore = tx.objectStore('sync_queue');
+      const req = store.get(sessionId);
+      req.onsuccess = () => {
+        const session = req.result;
+        if (!session) {
+          resolve(null);
+          return;
+        }
+        if (cleanStart) session.start_date = cleanStart;
+        if (cleanEnd) session.end_date = cleanEnd;
+        if (label) session.period_label = label;
+        session.updated_at = now;
+        store.put(session);
+
+        syncStore.add({
+          id: generateId(),
+          operation: 'UPSERT',
+          table_name: 'blitz_sessions',
+          record_id: session.id,
+          payload: session,
+          created_at: now,
+          synced: 0
+        });
+
+        tx.oncomplete = () => resolve(session);
+      };
+      req.onerror = (e) => reject(e);
+    });
+  } catch (err) {
+    console.error('Erro ao atualizar período da blitz:', err);
     return null;
   }
 }
@@ -2106,6 +2196,8 @@ export async function getBlitzItemBySessionBarcodeAndDate(sessionId, barcode, ex
 export async function getLastBlitzItemForProductAndDate(productId, expirationDate) {
   if (!productId || !expirationDate) return null;
   try {
+    const cleanExp = String(expirationDate).trim().split('T')[0];
+    const cleanExpBR = formatDateBR(cleanExp);
     const { tx } = await getSafeTransaction('blitz_items', 'readonly');
     const store = tx.objectStore('blitz_items');
     const index = store.index('product_id');
@@ -2113,16 +2205,45 @@ export async function getLastBlitzItemForProductAndDate(productId, expirationDat
       const req = index.getAll(productId);
       req.onsuccess = () => {
         const items = req.result || [];
-        const matching = items.filter(it => it.requested_expiration_date === expirationDate);
+        const matching = items.filter(it => {
+          const itExp = String(it.requested_expiration_date || '').trim().split('T')[0];
+          const itExpBR = formatDateBR(itExp);
+          return itExp === cleanExp || itExpBR === cleanExpBR;
+        });
         if (matching.length === 0) {
           resolve(null);
           return;
         }
-        matching.sort((a, b) => new Date(b.checked_at || 0) - new Date(a.checked_at || 0));
+        matching.sort((a, b) => new Date(b.checked_at || b.created_at || 0) - new Date(a.checked_at || a.created_at || 0));
         resolve(matching[0]);
       };
       req.onerror = () => resolve(null);
     });
+  } catch (e) {
+    return null;
+  }
+}
+
+/**
+ * Consulta a última conferência da Blitz por CÓDIGO DE BARRAS + DATA DE VALIDADE
+ */
+export async function getLastBlitzItemForBarcodeAndDate(barcode, expirationDate) {
+  if (!barcode || !expirationDate) return null;
+  try {
+    const cleanBarcode = String(barcode).trim();
+    const cleanExp = String(expirationDate).trim().split('T')[0];
+    const cleanExpBR = formatDateBR(cleanExp);
+
+    const allItems = await getAllBlitzItems();
+    const matching = allItems.filter(it => {
+      const itBarcode = String(it.barcode || '').trim();
+      const itExp = String(it.requested_expiration_date || '').trim().split('T')[0];
+      const itExpBR = formatDateBR(itExp);
+      return itBarcode === cleanBarcode && (itExp === cleanExp || itExpBR === cleanExpBR);
+    });
+    if (matching.length === 0) return null;
+    matching.sort((a, b) => new Date(b.checked_at || b.created_at || 0) - new Date(a.checked_at || a.created_at || 0));
+    return matching[0];
   } catch (e) {
     return null;
   }
@@ -2135,6 +2256,8 @@ export async function getLastBlitzItemForProductAndDate(productId, expirationDat
 export async function getAllBlitzItemsForProductAndDate(productId, expirationDate) {
   if (!productId || !expirationDate) return [];
   try {
+    const cleanExp = String(expirationDate).trim().split('T')[0];
+    const cleanExpBR = formatDateBR(cleanExp);
     const { tx } = await getSafeTransaction('blitz_items', 'readonly');
     const store = tx.objectStore('blitz_items');
     const index = store.index('product_id');
@@ -2142,12 +2265,29 @@ export async function getAllBlitzItemsForProductAndDate(productId, expirationDat
       const req = index.getAll(productId);
       req.onsuccess = () => {
         const items = req.result || [];
-        const matching = items.filter(it => it.requested_expiration_date === expirationDate);
-        matching.sort((a, b) => new Date(b.checked_at || 0) - new Date(a.checked_at || 0));
+        const matching = items.filter(it => {
+          const itExp = String(it.requested_expiration_date || '').trim().split('T')[0];
+          const itExpBR = formatDateBR(itExp);
+          return itExp === cleanExp || itExpBR === cleanExpBR;
+        });
+        matching.sort((a, b) => new Date(b.checked_at || b.created_at || 0) - new Date(a.checked_at || a.created_at || 0));
         resolve(matching);
       };
       req.onerror = () => resolve([]);
     });
+  } catch (e) {
+    return [];
+  }
+}
+
+export async function getAllBlitzItemsForBarcode(barcode) {
+  if (!barcode) return [];
+  try {
+    const cleanBarcode = String(barcode).trim();
+    const allItems = await getAllBlitzItems();
+    return allItems
+      .filter(it => String(it.barcode || '').trim() === cleanBarcode)
+      .sort((a, b) => new Date(b.checked_at || b.created_at || 0) - new Date(a.checked_at || a.created_at || 0));
   } catch (e) {
     return [];
   }
@@ -2221,11 +2361,32 @@ export async function saveBlitzConferenceRecord({
 }) {
   const diff = Number(newQuantity) - Number(previousQuantity);
 
+  // Garante que o produto SEMPRE seja guardado e exista na tabela de produtos do banco de dados
+  let effectiveProductId = productId;
+  if (!effectiveProductId && barcode) {
+    try {
+      let existingProd = await getProductByBarcode(barcode);
+      if (!existingProd) {
+        existingProd = await saveProduct({
+          barcode: String(barcode).trim(),
+          name: `PRODUTO ${String(barcode).trim()}`,
+          sector: sector || 'GERAL',
+          corridor: '01'
+        });
+      }
+      if (existingProd && existingProd.id) {
+        effectiveProductId = existingProd.id;
+      }
+    } catch (e) {
+      console.warn('[Blitz] Aviso ao garantir existência do produto no banco:', e);
+    }
+  }
+
   // 1. Salva o registro no histórico da Blitz (cria ou atualiza se id fornecido)
   const blitzItem = await saveBlitzItem({
     id: id || null,
     blitz_session_id: sessionId,
-    product_id: productId || null,
+    product_id: effectiveProductId || null,
     barcode: barcode,
     sector: sector,
     requested_expiration_date: requestedDate,
@@ -2238,13 +2399,13 @@ export async function saveBlitzConferenceRecord({
     is_new_expiration: isNewExpiration
   });
 
-  // 2. Se for um produto cadastrado e houver data, atualiza o estoque físico atual
-  if (productId && requestedDate && result !== 'NAO_IDENTIFICADO') {
+  // 2. Se houver produto (ou auto-criado) e houver data, atualiza o estoque físico atual e salva no histórico semanal
+  if (effectiveProductId && requestedDate && result !== 'NAO_IDENTIFICADO') {
     try {
       // Garante que a data de validade existe no cadastro
-      let expRecord = await getExpirationByProductAndDate(productId, requestedDate);
+      let expRecord = await getExpirationByProductAndDate(effectiveProductId, requestedDate);
       if (!expRecord) {
-        const res = await saveProductExpiration(productId, requestedDate);
+        const res = await saveProductExpiration(effectiveProductId, requestedDate);
         expRecord = res.expiration;
       }
 
@@ -2264,7 +2425,7 @@ export async function saveBlitzConferenceRecord({
         }
 
         // Salva as contagens atuais no inventário (mantendo histórico e atualizando o produto)
-        await saveInventoryCounts(productId, expRecord.id, locMap, sessionId);
+        await saveInventoryCounts(effectiveProductId, expRecord.id, locMap, sessionId);
 
         // REGRA: Se a quantidade for 0 e estiver 1 dia ou mais depois do vencimento (days <= -1):
         // Remove definitivamente do banco de dados para não sobrecarregar

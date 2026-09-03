@@ -64,12 +64,15 @@ CREATE TABLE IF NOT EXISTS public.inventory_counts (
   updated_at TIMESTAMPTZ DEFAULT NOW()
 );
 
--- 4. Tabela de Sessões de Blitz Semanal
+-- 4. Tabela de Sessões de Blitz Semanal / por Período
 CREATE TABLE IF NOT EXISTS public.blitz_sessions (
   id TEXT PRIMARY KEY,
   blitz_type TEXT NOT NULL,
-  sector TEXT DEFAULT 'MERCEARIA',
+  sector TEXT DEFAULT 'GERAL',
   user_name TEXT DEFAULT 'Ana Luiza',
+  start_date TEXT,
+  end_date TEXT,
+  period_label TEXT,
   started_at TIMESTAMPTZ DEFAULT NOW(),
   finished_at TIMESTAMPTZ,
   status TEXT DEFAULT 'em_andamento',
@@ -78,8 +81,11 @@ CREATE TABLE IF NOT EXISTS public.blitz_sessions (
 );
 
 -- Adiciona colunas na blitz_sessions caso a tabela já exista
-ALTER TABLE public.blitz_sessions ADD COLUMN IF NOT EXISTS sector TEXT DEFAULT 'MERCEARIA';
+ALTER TABLE public.blitz_sessions ADD COLUMN IF NOT EXISTS sector TEXT DEFAULT 'GERAL';
 ALTER TABLE public.blitz_sessions ADD COLUMN IF NOT EXISTS user_name TEXT DEFAULT 'Ana Luiza';
+ALTER TABLE public.blitz_sessions ADD COLUMN IF NOT EXISTS start_date TEXT;
+ALTER TABLE public.blitz_sessions ADD COLUMN IF NOT EXISTS end_date TEXT;
+ALTER TABLE public.blitz_sessions ADD COLUMN IF NOT EXISTS period_label TEXT;
 
 -- 5. Tabela de Itens e Conferências da Blitz Semanal
 CREATE TABLE IF NOT EXISTS public.blitz_items (
@@ -328,7 +334,12 @@ function cleanPayloadForSupabase(tableName, payload) {
   if (tableName === 'blitz_sessions') {
     return {
       id: String(payload.id),
-      blitz_type: String(payload.blitz_type || 'mercearia'),
+      blitz_type: String(payload.blitz_type || 'periodo'),
+      sector: String(payload.sector || 'GERAL'),
+      user_name: String(payload.user_name || 'Ana Luiza'),
+      start_date: payload.start_date ? String(payload.start_date) : null,
+      end_date: payload.end_date ? String(payload.end_date) : null,
+      period_label: payload.period_label ? String(payload.period_label) : null,
       started_at: payload.started_at || new Date().toISOString(),
       finished_at: payload.finished_at || null,
       status: String(payload.status || 'em_andamento'),
@@ -341,12 +352,20 @@ function cleanPayloadForSupabase(tableName, payload) {
     return {
       id: String(payload.id),
       blitz_session_id: String(payload.blitz_session_id),
-      product_id: String(payload.product_id),
+      product_id: payload.product_id ? String(payload.product_id) : null,
       barcode: String(payload.barcode || ''),
+      sector: String(payload.sector || 'GERAL'),
       requested_expiration_date: String(payload.requested_expiration_date || ''),
-      result: String(payload.result || 'TEM'),
-      conference_id: payload.conference_id || null,
+      previous_quantity: Number(payload.previous_quantity) || 0,
       total_quantity: Number(payload.total_quantity) || 0,
+      difference: Number(payload.difference) || 0,
+      result: String(payload.result || 'TEM'),
+      locations: Array.isArray(payload.locations) ? payload.locations : [],
+      conference_id: payload.conference_id || null,
+      user_id: payload.user_id ? String(payload.user_id) : null,
+      user_name: String(payload.user_name || 'Ana Luiza'),
+      is_new_expiration: Boolean(payload.is_new_expiration),
+      notes: payload.notes ? String(payload.notes) : null,
       checked_at: payload.checked_at || new Date().toISOString(),
       created_at: payload.created_at || new Date().toISOString(),
       updated_at: new Date().toISOString()
@@ -445,6 +464,26 @@ async function pushToSupabase(tableName, operation, rawPayload, skipParentCheck 
         const fallbackPayload = { ...payload };
         delete fallbackPayload.is_triaged;
         delete fallbackPayload.triaged_at;
+        const retryRes = await fetch(postUrl, {
+          method: 'POST',
+          headers: getSupabasePostHeaders('resolution=merge-duplicates,return=minimal'),
+          body: JSON.stringify(fallbackPayload)
+        });
+        if (retryRes.ok || retryRes.status === 201 || retryRes.status === 200 || retryRes.status === 204) {
+          lastSyncError = null;
+          lastSyncErrorCode = null;
+          return true;
+        }
+      } catch (_) {}
+    }
+
+    // Se o erro for de coluna 'start_date', 'end_date', 'period_label' na blitz_sessions ainda não criada no Supabase, envia sem elas para não travar
+    if (tableName === 'blitz_sessions' && (errText.includes('start_date') || errText.includes('end_date') || errText.includes('period_label') || errText.includes('column'))) {
+      try {
+        const fallbackPayload = { ...payload };
+        delete fallbackPayload.start_date;
+        delete fallbackPayload.end_date;
+        delete fallbackPayload.period_label;
         const retryRes = await fetch(postUrl, {
           method: 'POST',
           headers: getSupabasePostHeaders('resolution=merge-duplicates,return=minimal'),
@@ -618,7 +657,16 @@ export async function pullFromSupabase() {
         if (local && (local.status === 'finalizada' || local.status === 'cancelada') && s.status === 'em_andamento') {
           return;
         }
-        blitzStore.put(s);
+        // Preserva datas e período locais caso o Supabase não os tenha
+        const merged = {
+          ...s,
+          start_date: s.start_date || local?.start_date || null,
+          end_date: s.end_date || local?.end_date || null,
+          period_label: s.period_label || local?.period_label || (local?.start_date && local?.end_date ? `${formatDateBR(local.start_date)} → ${formatDateBR(local.end_date)}` : null),
+          sector: s.sector || local?.sector || 'GERAL',
+          user_name: s.user_name || local?.user_name || 'Ana Luiza'
+        };
+        blitzStore.put(merged);
       });
     }
 
