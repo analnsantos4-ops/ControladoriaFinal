@@ -1,7 +1,12 @@
 // ====================================================
-// MÓDULO BLITZ SEMANAL COM HISTÓRICO E ATUALIZAÇÃO AUTOMÁTICA
+// MÓDULO BLITZ DE CONFERÊNCIA RÁPIDA POR PERÍODO
 // Controladoria - Ana Luiza
+//
+// Conceito: A conferência é guiada pela listagem/papel físico.
+// Fluxo: INICIAR BLITZ → INFORMAR PERÍODO → OLHAR PAPEL → BIPAR PRODUTO
+//        → INFORMAR DATA SOLICITADA → TEM/NÃO TEM → PRÓXIMO
 // ====================================================
+
 import {
   initDB,
   createBlitzSession,
@@ -12,12 +17,10 @@ import {
   getAllBlitzSessions,
   saveBlitzItem,
   getBlitzItemsBySessionId,
-  getBlitzItemBySessionAndProduct,
   getBlitzItemBySessionProductAndDate,
+  getBlitzItemBySessionBarcodeAndDate,
   getLastBlitzItemForProductAndDate,
   getAllBlitzItemsForProductAndDate,
-  getLastBlitzItemForProduct,
-  getAllBlitzItemsForProduct,
   getAllBlitzItems,
   saveBlitzConferenceRecord,
   getProductByBarcode,
@@ -28,20 +31,19 @@ import {
   getLatestCountsForExpiration,
   getExpirationByProductAndDate
 } from './db.js';
+
 import {
-  BLITZ_SECTORS,
   BLITZ_LOCATIONS,
-  BLITZ_TYPES,
+  SETORS,
   CORRIDORS,
-  getSuggestedBlitzType,
   formatDateBR,
   formatNumber,
   parseDateBRtoISO,
   getTodayISO,
-  formatTimeAgoDynamic,
   formatDateWithWeekday,
   compressImage
 } from './utils.js';
+
 import { showView, showToast, promptConfirmDialog } from './ui.js';
 import { startCameraScanner, stopCameraScanner } from './scanner.js';
 import { openWhatsAppExportModal } from './whatsapp.js';
@@ -63,7 +65,7 @@ export function setActiveBlitz(session) {
   updateBlitzTopBarIndicator();
 }
 
-// Inicializa e restaura sessão ativa se houver
+// Inicializa o módulo e recupera sessão ativa se houver
 export async function initBlitzModule() {
   try {
     const active = await getActiveBlitzSession();
@@ -81,7 +83,7 @@ export async function initBlitzModule() {
   updateBlitzTopBarIndicator();
 }
 
-// Atualiza o indicador visual da Blitz no topo do app e no scanner
+// Atualiza o banner no Dashboard e a barra indicadora no Scanner
 export function updateBlitzTopBarIndicator() {
   const dashBanner = document.getElementById('dashboard-active-blitz-banner');
   const scannerBar = document.getElementById('scanner-blitz-indicator-bar');
@@ -98,15 +100,15 @@ export function updateBlitzTopBarIndicator() {
     return;
   }
 
-  const sectorObj = BLITZ_SECTORS.find(s => s.id === currentActiveBlitzSession.blitz_type || s.label.toUpperCase() === currentActiveBlitzSession.sector) || {
-    label: currentActiveBlitzSession.sector || 'MERCEARIA',
-    icon: '📋'
-  };
+  const periodLabel = currentActiveBlitzSession.period_label || 'Geral';
+  const startedAtTime = currentActiveBlitzSession.started_at
+    ? new Date(currentActiveBlitzSession.started_at).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })
+    : '--:--';
 
   const bannerHtml = `
     <div style="
-      background: linear-gradient(135deg, rgba(245, 158, 11, 0.16) 0%, rgba(217, 119, 6, 0.22) 100%);
-      border: 1px solid rgba(245, 158, 11, 0.45);
+      background: linear-gradient(135deg, rgba(245, 158, 11, 0.16) 0%, rgba(217, 119, 6, 0.24) 100%);
+      border: 1px solid rgba(245, 158, 11, 0.5);
       border-radius: 10px;
       padding: 10px 12px;
       display: flex;
@@ -115,27 +117,27 @@ export function updateBlitzTopBarIndicator() {
       gap: 10px;
     ">
       <div style="display: flex; align-items: center; gap: 8px; min-width: 0;">
-        <span style="font-size: 1.4rem; flex-shrink: 0;">${sectorObj.icon}</span>
+        <span style="font-size: 1.4rem; flex-shrink: 0;">📋</span>
         <div style="min-width: 0;">
-          <div style="display: flex; align-items: center; gap: 6px;">
+          <div style="display: flex; align-items: center; gap: 6px; flex-wrap: wrap;">
             <span style="background: #f59e0b; color: #000; font-size: 0.65rem; font-weight: 900; padding: 2px 6px; border-radius: 4px; text-transform: uppercase;">
               BLITZ ATIVA
             </span>
-            <span style="font-size: 0.76rem; color: #fbbf24; font-weight: 800;">
-              SETOR: ${sectorObj.label.toUpperCase()}
+            <span style="font-size: 0.78rem; color: #fbbf24; font-weight: 800;">
+              Período: ${periodLabel}
             </span>
           </div>
-          <div style="font-size: 0.72rem; color: #a1a1aa; margin-top: 2px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">
-            Por ${currentActiveBlitzSession.user_name || 'Ana Luiza'} • Iniciada às ${new Date(currentActiveBlitzSession.started_at).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}
+          <div style="font-size: 0.72rem; color: #a1a1aa; margin-top: 2px;">
+            Por ${currentActiveBlitzSession.user_name || 'Ana Luiza'} • Iniciada às ${startedAtTime}
           </div>
         </div>
       </div>
       <div style="display: flex; gap: 6px; flex-shrink: 0; align-items: center;">
-        <button type="button" id="btn-dash-resume-blitz" class="btn-primary" style="padding: 6px 12px; font-size: 0.76rem; font-weight: 900; background: #f59e0b; color: #000; border-radius: 6px; white-space: nowrap;">
+        <button type="button" id="btn-dash-resume-blitz" class="btn-primary" style="padding: 6px 12px; font-size: 0.78rem; font-weight: 900; background: #f59e0b; color: #000; border-radius: 6px; white-space: nowrap;">
           🔎 Continuar
         </button>
-        <button type="button" id="btn-dash-cancel-blitz" style="background: rgba(239, 68, 68, 0.15); border: 1px solid rgba(239, 68, 68, 0.4); color: #f87171; padding: 5px 8px; border-radius: 6px; font-size: 0.74rem; font-weight: 800; cursor: pointer; white-space: nowrap;" title="Cancelar esta Blitz">
-          ✕ Cancelar
+        <button type="button" id="btn-dash-finish-blitz-top" style="background: rgba(16, 185, 129, 0.15); border: 1px solid rgba(16, 185, 129, 0.4); color: #34d399; padding: 5px 8px; border-radius: 6px; font-size: 0.74rem; font-weight: 800; cursor: pointer; white-space: nowrap;" title="Finalizar Blitz">
+          ✓ Finalizar
         </button>
       </div>
     </div>
@@ -147,45 +149,46 @@ export function updateBlitzTopBarIndicator() {
     document.getElementById('btn-dash-resume-blitz')?.addEventListener('click', () => {
       openBlitzDashboardView();
     });
-    document.getElementById('btn-dash-cancel-blitz')?.addEventListener('click', async () => {
-      await cancelActiveBlitzSession(currentActiveBlitzSession?.id);
+    document.getElementById('btn-dash-finish-blitz-top')?.addEventListener('click', async () => {
+      await finishActiveBlitzSession(currentActiveBlitzSession?.id);
     });
   }
 
   if (scannerBar) {
     scannerBar.innerHTML = `
-      <div style="display: flex; align-items: center; gap: 6px;">
-        <span style="font-size: 1.1rem;">${sectorObj.icon}</span>
-        <span style="font-size: 0.74rem; font-weight: 900; color: #fbbf24; text-transform: uppercase;">
-          MODO BLITZ: SETOR ${sectorObj.label.toUpperCase()}
+      <div style="display: flex; align-items: center; gap: 6px; min-width: 0;">
+        <span style="font-size: 1rem;">🔍</span>
+        <span style="font-size: 0.74rem; font-weight: 900; color: #fbbf24; text-transform: uppercase; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">
+          BLITZ ATIVA: ${periodLabel}
         </span>
       </div>
-      <div style="display: flex; gap: 6px; align-items: center;">
+      <div style="display: flex; gap: 6px; align-items: center; flex-shrink: 0;">
         <button type="button" id="btn-scanner-blitz-dash" style="background: rgba(245, 158, 11, 0.2); border: 1px solid rgba(245, 158, 11, 0.4); color: #fef08a; padding: 3px 8px; border-radius: 4px; font-size: 0.7rem; font-weight: 800; cursor: pointer;">
-          📊 Resumo
+          📋 Painel
         </button>
-        <button type="button" id="btn-scanner-blitz-cancel" style="background: rgba(239, 68, 68, 0.2); border: 1px solid rgba(239, 68, 68, 0.4); color: #fca5a5; padding: 3px 8px; border-radius: 4px; font-size: 0.7rem; font-weight: 800; cursor: pointer;" title="Cancelar Blitz">
-          ✕ Cancelar
+        <button type="button" id="btn-scanner-blitz-finish" style="background: rgba(16, 185, 129, 0.2); border: 1px solid rgba(16, 185, 129, 0.4); color: #86efac; padding: 3px 8px; border-radius: 4px; font-size: 0.7rem; font-weight: 800; cursor: pointer;">
+          ✓ Finalizar
         </button>
       </div>
     `;
     scannerBar.classList.remove('hidden');
     document.getElementById('btn-scanner-blitz-dash')?.addEventListener('click', () => {
+      stopCameraScanner();
       openBlitzDashboardView();
     });
-    document.getElementById('btn-scanner-blitz-cancel')?.addEventListener('click', async () => {
-      await cancelActiveBlitzSession(currentActiveBlitzSession?.id);
+    document.getElementById('btn-scanner-blitz-finish')?.addEventListener('click', async () => {
+      stopCameraScanner();
+      await finishActiveBlitzSession(currentActiveBlitzSession?.id);
     });
   }
 }
 
 // ----------------------------------------------------
-// 1. INÍCIO DA BLITZ: SELEÇÃO DE SETOR
+// 1. INICIAR BLITZ: SOLICITA APENAS O PERÍODO
 // ----------------------------------------------------
 
 export async function promptStartBlitz() {
   if (currentActiveBlitzSession) {
-    // Já existe uma Blitz em andamento
     showActiveBlitzDialog();
     return;
   }
@@ -201,75 +204,63 @@ function showActiveBlitzDialog() {
     document.body.appendChild(modal);
   }
 
-  const sectorObj = BLITZ_SECTORS.find(s => s.id === currentActiveBlitzSession.blitz_type || s.label.toUpperCase() === currentActiveBlitzSession.sector) || {
-    label: currentActiveBlitzSession.sector || 'MERCEARIA',
-    icon: '📋'
-  };
+  const periodLabel = currentActiveBlitzSession.period_label || 'Geral';
+  const startedAt = new Date(currentActiveBlitzSession.started_at).toLocaleString('pt-BR');
 
   modal.innerHTML = `
     <div class="modal-backdrop" id="modal-active-blitz-backdrop"></div>
-    <div class="modal-card" style="padding: 20px; max-width: 400px; width: 100%; box-sizing: border-box;">
-      <div style="display: flex; align-items: center; gap: 10px; margin-bottom: 12px;">
-        <span style="font-size: 1.8rem;">${sectorObj.icon}</span>
-        <div>
-          <h3 style="font-size: 1.1rem; font-weight: 900; color: #f4f4f5; margin: 0;">BLITZ EM ANDAMENTO</h3>
-          <span style="font-size: 0.76rem; color: #fbbf24; font-weight: 800;">Setor: ${sectorObj.label.toUpperCase()}</span>
+    <div class="modal-card" style="padding: 20px; max-width: 420px; width: 100%; box-sizing: border-box;">
+      <div style="font-size: 2rem; margin-bottom: 4px; text-align: center;">🔍</div>
+      <h3 style="font-size: 1.15rem; font-weight: 900; color: #f4f4f5; text-align: center; margin: 0 0 6px 0;">
+        BLITZ ATIVA EM ANDAMENTO
+      </h3>
+      <div style="background: #18181c; border: 1px solid #2a2a30; border-radius: 8px; padding: 12px; margin-bottom: 14px; text-align: center;">
+        <div style="font-size: 0.72rem; color: #a1a1aa; text-transform: uppercase; font-weight: 800;">Período da Blitz:</div>
+        <div style="font-size: 1.15rem; font-weight: 900; color: #fbbf24; margin-top: 2px;">
+          ${periodLabel}
+        </div>
+        <div style="font-size: 0.72rem; color: #71717a; margin-top: 4px;">
+          Iniciada em ${startedAt} por ${currentActiveBlitzSession.user_name || 'Ana Luiza'}
         </div>
       </div>
 
-      <p style="font-size: 0.85rem; color: #a1a1aa; margin-bottom: 16px; line-height: 1.4;">
-        Você já possui uma Blitz semanal em andamento para este setor. O que deseja fazer?
-      </p>
-
       <div style="display: flex; flex-direction: column; gap: 8px;">
-        <button type="button" id="btn-dialog-resume-blitz" class="btn-primary" style="height: 46px; font-weight: 900; background: #10b981; color: #022c22; justify-content: center; font-size: 0.95rem;">
-          🔎 CONTINUAR BIPANDO PRODUTOS
+        <button type="button" id="btn-dialog-resume-blitz" class="btn-primary" style="height: 48px; font-weight: 900; font-size: 0.95rem; justify-content: center; background: #f59e0b; color: #000;">
+          ▶ CONTINUAR ESTA BLITZ
         </button>
-        <button type="button" id="btn-dialog-view-blitz-dash" class="btn-secondary" style="height: 42px; font-weight: 800; justify-content: center; color: #fbbf24; border-color: rgba(245, 158, 11, 0.4);">
-          📊 Ver Resumo da Sessão
+        <button type="button" id="btn-dialog-finish-blitz" class="btn-secondary" style="height: 44px; font-weight: 800; font-size: 0.88rem; justify-content: center; color: #10b981; border-color: rgba(16, 185, 129, 0.4);">
+          ✅ FINALIZAR BLITZ
         </button>
-        <button type="button" id="btn-dialog-new-blitz" class="btn-secondary" style="height: 42px; font-weight: 800; justify-content: center; color: #38bdf8;">
-          ➕ Iniciar Nova Blitz em Outro Setor
-        </button>
-        <button type="button" id="btn-dialog-abort-blitz" class="btn-secondary" style="height: 42px; font-weight: 800; justify-content: center; color: #ef4444; border-color: rgba(239, 68, 68, 0.4);">
-          🛑 CANCELAR ESTA BLITZ
-        </button>
-        <button type="button" id="btn-dialog-cancel-blitz" class="btn-secondary" style="height: 38px; font-weight: 700; justify-content: center; color: #71717a; margin-top: 4px;">
-          Fechar
+        <button type="button" id="btn-dialog-new-blitz" class="btn-secondary" style="height: 40px; font-weight: 700; font-size: 0.82rem; justify-content: center; color: #a1a1aa;">
+          ➕ Iniciar Outra Blitz (Novo Período)
         </button>
       </div>
     </div>
   `;
 
   modal.classList.add('open');
-
   const closeModal = () => modal.classList.remove('open');
+
   document.getElementById('modal-active-blitz-backdrop')?.addEventListener('click', closeModal);
-  document.getElementById('btn-dialog-cancel-blitz')?.addEventListener('click', closeModal);
 
   document.getElementById('btn-dialog-resume-blitz')?.addEventListener('click', () => {
-    closeModal();
-    startBlitzScanning();
-  });
-
-  document.getElementById('btn-dialog-view-blitz-dash')?.addEventListener('click', () => {
     closeModal();
     openBlitzDashboardView();
   });
 
-  document.getElementById('btn-dialog-new-blitz')?.addEventListener('click', () => {
+  document.getElementById('btn-dialog-finish-blitz')?.addEventListener('click', async () => {
+    closeModal();
+    await finishActiveBlitzSession(currentActiveBlitzSession?.id);
+  });
+
+  document.getElementById('btn-dialog-new-blitz')?.addEventListener('click', async () => {
     closeModal();
     showStartBlitzModal();
   });
-
-  document.getElementById('btn-dialog-abort-blitz')?.addEventListener('click', async () => {
-    closeModal();
-    await cancelActiveBlitzSession(currentActiveBlitzSession?.id);
-  });
 }
 
-// Modal de Pergunta: 🏷️ QUAL SETOR?
-export function showStartBlitzModal() {
+// Modal para informar apenas o Período da Blitz
+function showStartBlitzModal() {
   let modal = document.getElementById('modal-start-blitz');
   if (!modal) {
     modal = document.createElement('div');
@@ -278,117 +269,475 @@ export function showStartBlitzModal() {
     document.body.appendChild(modal);
   }
 
-  const suggested = getSuggestedBlitzType();
+  // Datas padrão sugeridas: Hoje até +30 dias
+  const today = new Date();
+  const next30 = new Date();
+  next30.setDate(next30.getDate() + 30);
+
+  const defaultStart = formatDateBR(today.toISOString().split('T')[0]);
+  const defaultEnd = formatDateBR(next30.toISOString().split('T')[0]);
 
   modal.innerHTML = `
     <div class="modal-backdrop" id="modal-start-blitz-backdrop"></div>
     <div class="modal-card" style="padding: 20px; max-width: 440px; width: 100%; box-sizing: border-box;">
-      
-      <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 12px;">
+      <div style="display: flex; align-items: center; justify-content: space-between; border-bottom: 1px solid #27272a; padding-bottom: 10px; margin-bottom: 14px;">
         <div style="display: flex; align-items: center; gap: 8px;">
-          <span style="font-size: 1.6rem;">🔎</span>
-          <div>
-            <h3 style="font-size: 1.15rem; font-weight: 900; color: #f4f4f5; margin: 0;">INICIAR BLITZ SEMANAL</h3>
-            <span style="font-size: 0.74rem; color: #a1a1aa;">Conferência física periódica • Ana Luiza</span>
-          </div>
+          <span style="font-size: 1.4rem;">🔍</span>
+          <h3 style="font-size: 1.1rem; font-weight: 900; color: #f4f4f5; margin: 0;">
+            INICIAR BLITZ
+          </h3>
         </div>
-        <button type="button" id="btn-close-start-blitz" class="btn-icon-control" style="font-size: 1rem; width: 32px; height: 32px;">✕</button>
+        <button type="button" id="btn-close-start-blitz" class="btn-icon-control" style="font-size: 1rem; width: 30px; height: 30px;">✕</button>
       </div>
 
-      <!-- Caixa explicativa com o cronograma oficial de Ana Luiza -->
-      <div style="background: rgba(245, 158, 11, 0.1); border: 1px solid rgba(245, 158, 11, 0.35); border-radius: 8px; padding: 10px 12px; margin-bottom: 14px; font-size: 0.78rem; line-height: 1.45; color: #fef08a;">
-        <div style="font-weight: 900; color: #fbbf24; margin-bottom: 4px; display: flex; align-items: center; gap: 6px;">
-          <span>📅</span> <span>CRONOGRAMA DE BLITZ (ANA LUIZA):</span>
-        </div>
-        <div style="color: #e4e4e7; margin-left: 2px;">• <strong>Segunda a Quarta:</strong> Mercearia</div>
-        <div style="color: #e4e4e7; margin-left: 2px;">• <strong>Quinta-feira:</strong> Bazar</div>
-        <div style="color: #e4e4e7; margin-left: 2px;">• <strong>Sexta e Sábado:</strong> Bebidas</div>
-        <div style="font-size: 0.72rem; color: #a1a1aa; margin-top: 6px; font-style: italic;">
-          * O setor de hoje já está destacado abaixo. Você pode alterar para outro setor a qualquer momento se desejar.
+      <div style="background: rgba(245, 158, 11, 0.1); border: 1px solid rgba(245, 158, 11, 0.35); border-radius: 8px; padding: 10px; margin-bottom: 14px;">
+        <div style="font-size: 0.78rem; color: #fef08a; line-height: 1.4;">
+          <strong>Conferência com Listagem Física:</strong><br>
+          Informe o período da blitz que consta no papel que você recebeu. O sistema registrará os seus bips para esse período.
         </div>
       </div>
 
-      <!-- Lista dos 6 Setores Exigidos com destaque do dia -->
-      <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-bottom: 16px;">
-        ${BLITZ_SECTORS.map((s) => {
-          const isSug = s.id === suggested;
-          return `
-            <button type="button" class="btn-sector-select" data-sector-id="${s.id}" data-sector-name="${s.label}" style="
-              background: #18181c;
-              border: 1.5px solid ${isSug ? '#f59e0b' : '#27272a'};
-              border-radius: 8px;
-              padding: 10px 8px;
-              display: flex;
-              flex-direction: column;
-              align-items: center;
-              justify-content: center;
-              gap: 2px;
-              cursor: pointer;
-              transition: all 0.15s ease;
-              position: relative;
-              min-height: 72px;
-            ">
-              ${isSug ? `<span style="position: absolute; top: 4px; right: 4px; background: #f59e0b; color: #000; font-size: 0.58rem; font-weight: 900; padding: 1px 5px; border-radius: 3px;">HOJE</span>` : ''}
-              <span style="font-size: 1.5rem;">${s.icon}</span>
-              <span style="font-size: 0.88rem; font-weight: 900; color: #f4f4f5;">${s.label}</span>
-              <span style="font-size: 0.65rem; color: ${isSug ? '#fbbf24' : '#71717a'}; font-weight: 700;">${s.schedule || ''}</span>
-            </button>
-          `;
-        }).join('')}
-      </div>
+      <form id="form-start-blitz-period" style="display: flex; flex-direction: column; gap: 12px;">
+        <div class="form-group" style="margin-bottom: 0;">
+          <label for="input-blitz-start-date" style="font-size: 0.76rem; font-weight: 800; color: #a1a1aa; text-transform: uppercase;">
+            📅 Data Inicial (DD/MM/AAAA):
+          </label>
+          <input
+            type="text"
+            id="input-blitz-start-date"
+            class="form-input form-input-lg"
+            placeholder="01/09/2026"
+            value="${defaultStart}"
+            maxlength="10"
+            inputmode="numeric"
+            required
+            style="font-size: 1.1rem; font-weight: 800; text-align: center; border-color: #f59e0b; height: 46px;"
+          />
+        </div>
 
-      <div style="display: flex; justify-content: flex-end;">
-        <button type="button" id="btn-cancel-start-blitz" class="btn-secondary" style="height: 38px; width: 100%; justify-content: center;">
-          Cancelar
-        </button>
-      </div>
+        <div class="form-group" style="margin-bottom: 0;">
+          <label for="input-blitz-end-date" style="font-size: 0.76rem; font-weight: 800; color: #a1a1aa; text-transform: uppercase;">
+            📅 Data Final (DD/MM/AAAA):
+          </label>
+          <input
+            type="text"
+            id="input-blitz-end-date"
+            class="form-input form-input-lg"
+            placeholder="01/10/2026"
+            value="${defaultEnd}"
+            maxlength="10"
+            inputmode="numeric"
+            required
+            style="font-size: 1.1rem; font-weight: 800; text-align: center; border-color: #f59e0b; height: 46px;"
+          />
+        </div>
 
+        <!-- Atalhos Rápidos -->
+        <div style="display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; margin-top: 2px;">
+          <button type="button" class="btn-quick-period btn-secondary" data-preset="month" style="padding: 6px; font-size: 0.72rem; font-weight: 800; justify-content: center;">Este Mês</button>
+          <button type="button" class="btn-quick-period btn-secondary" data-preset="30d" style="padding: 6px; font-size: 0.72rem; font-weight: 800; justify-content: center;">+30 Dias</button>
+          <button type="button" class="btn-quick-period btn-secondary" data-preset="next_month" style="padding: 6px; font-size: 0.72rem; font-weight: 800; justify-content: center;">Próximo Mês</button>
+        </div>
+
+        <div style="display: flex; gap: 8px; margin-top: 8px;">
+          <button type="button" id="btn-cancel-start-blitz" class="btn-secondary" style="flex: 1; height: 46px; justify-content: center;">
+            Cancelar
+          </button>
+          <button type="submit" id="btn-confirm-start-blitz" class="btn-primary" style="flex: 1; height: 46px; justify-content: center; background: #f59e0b; color: #000; font-weight: 900; font-size: 0.95rem;">
+            🚀 INICIAR BLITZ
+          </button>
+        </div>
+      </form>
     </div>
   `;
 
   modal.classList.add('open');
+
+  const startInput = document.getElementById('input-blitz-start-date');
+  const endInput = document.getElementById('input-blitz-end-date');
+
+  // Máscara de data DD/MM/AAAA
+  const applyDateMask = (input) => {
+    input?.addEventListener('input', (e) => {
+      let val = e.target.value.replace(/\D/g, '');
+      if (val.length > 8) val = val.substring(0, 8);
+      if (val.length >= 5) {
+        val = val.substring(0, 2) + '/' + val.substring(2, 4) + '/' + val.substring(4);
+      } else if (val.length >= 3) {
+        val = val.substring(0, 2) + '/' + val.substring(2);
+      }
+      e.target.value = val;
+    });
+  };
+
+  applyDateMask(startInput);
+  applyDateMask(endInput);
+
+  // Presets de período
+  modal.querySelectorAll('.btn-quick-period').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const preset = btn.getAttribute('data-preset');
+      const now = new Date();
+      if (preset === 'month') {
+        const firstDay = new Date(now.getFullYear(), now.getMonth(), 1);
+        const lastDay = new Date(now.getFullYear(), now.getMonth() + 1, 0);
+        if (startInput) startInput.value = formatDateBR(firstDay.toISOString().split('T')[0]);
+        if (endInput) endInput.value = formatDateBR(lastDay.toISOString().split('T')[0]);
+      } else if (preset === '30d') {
+        const end = new Date(now);
+        end.setDate(end.getDate() + 30);
+        if (startInput) startInput.value = formatDateBR(now.toISOString().split('T')[0]);
+        if (endInput) endInput.value = formatDateBR(end.toISOString().split('T')[0]);
+      } else if (preset === 'next_month') {
+        const firstDay = new Date(now.getFullYear(), now.getMonth() + 1, 1);
+        const lastDay = new Date(now.getFullYear(), now.getMonth() + 2, 0);
+        if (startInput) startInput.value = formatDateBR(firstDay.toISOString().split('T')[0]);
+        if (endInput) endInput.value = formatDateBR(lastDay.toISOString().split('T')[0]);
+      }
+    });
+  });
 
   const closeModal = () => modal.classList.remove('open');
   document.getElementById('modal-start-blitz-backdrop')?.addEventListener('click', closeModal);
   document.getElementById('btn-close-start-blitz')?.addEventListener('click', closeModal);
   document.getElementById('btn-cancel-start-blitz')?.addEventListener('click', closeModal);
 
-  // Clique nos setores
-  modal.querySelectorAll('.btn-sector-select').forEach((btn) => {
-    btn.addEventListener('click', async () => {
-      const sectorId = btn.getAttribute('data-sector-id');
-      const sectorName = btn.getAttribute('data-sector-name');
-      closeModal();
-      await startNewBlitzSession(sectorId, sectorName);
-    });
+  document.getElementById('form-start-blitz-period')?.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const sDateRaw = startInput?.value?.trim();
+    const eDateRaw = endInput?.value?.trim();
+
+    if (!sDateRaw || sDateRaw.length < 8) {
+      showToast('Informe a data inicial válida (DD/MM/AAAA)', 'warning');
+      startInput?.focus();
+      return;
+    }
+    if (!eDateRaw || eDateRaw.length < 8) {
+      showToast('Informe a data final válida (DD/MM/AAAA)', 'warning');
+      endInput?.focus();
+      return;
+    }
+
+    closeModal();
+    await startNewBlitzSession(sDateRaw, eDateRaw);
   });
 }
 
-// Cria a nova sessão da Blitz e leva direto para o Scanner
-export async function startNewBlitzSession(sectorId, sectorName = null) {
+// Inicia a sessão com as datas informadas e abre a tela da Blitz
+export async function startNewBlitzSession(startDateBR, endDateBR) {
   try {
-    const sName = sectorName || BLITZ_SECTORS.find(s => s.id === sectorId)?.label || 'MERCEARIA';
-    showToast(`Iniciando Blitz: ${sName}...`, 'sync', 1000);
+    const sDateISO = parseDateBRtoISO(startDateBR);
+    const eDateISO = parseDateBRtoISO(endDateBR);
+    const periodLabel = `${formatDateBR(sDateISO)} → ${formatDateBR(eDateISO)}`;
+
+    showToast(`Iniciando Blitz: ${periodLabel}...`, 'sync', 1000);
 
     const session = await createBlitzSession({
-      blitz_type: sectorId,
-      sector: sName.toUpperCase(),
+      blitz_type: 'periodo',
+      sector: 'GERAL',
+      start_date: sDateISO,
+      end_date: eDateISO,
+      period_label: periodLabel,
       user_name: 'Ana Luiza'
     });
 
     setActiveBlitz(session);
-    showToast(`🔎 Blitz iniciada: Setor ${sName}`, 'success', 2000);
-    triggerSyncNow().catch(e => console.warn('Sync blitz session error:', e));
+    showToast(`✓ Blitz iniciada: ${periodLabel}`, 'success', 2000);
+    triggerSyncNow().catch(e => console.warn('Sync error:', e));
 
-    // Abre diretamente o scanner no modo Blitz
-    startBlitzScanning();
+    // Abre diretamente a tela principal da Blitz
+    openBlitzDashboardView();
   } catch (err) {
     console.error('Erro ao iniciar Blitz:', err);
     showToast('Erro ao criar sessão da Blitz', 'warning');
   }
 }
 
-// Abre a câmera e prepara o scanner no Modo Blitz
+// ----------------------------------------------------
+// 2. TELA DA BLITZ (SIMPLES, RÁPIDA E SEM POLUIÇÃO)
+// ----------------------------------------------------
+
+export async function openBlitzDashboardView() {
+  if (!currentActiveBlitzSession) {
+    promptStartBlitz();
+    return;
+  }
+
+  const session = await getBlitzSessionById(currentActiveBlitzSession.id) || currentActiveBlitzSession;
+  currentActiveBlitzSession = session;
+
+  const items = await getBlitzItemsBySessionId(session.id);
+
+  // Estatísticas: Somente o necessário (Conferidos, TEM, NÃO TEM)
+  let countTem = 0;
+  let countNaoTem = 0;
+  let totalUnits = 0;
+
+  items.forEach(it => {
+    if (it.result === 'TEM') {
+      countTem++;
+      totalUnits += Number(it.total_quantity) || 0;
+    } else {
+      countNaoTem++;
+    }
+  });
+
+  const periodLabel = session.period_label || `${formatDateBR(session.start_date)} → ${formatDateBR(session.end_date)}`;
+
+  const container = document.getElementById('view-blitz-dashboard');
+  if (!container) return;
+
+  container.innerHTML = `
+    <header class="app-top-bar">
+      <button type="button" id="btn-blitz-dash-back" class="btn-back">← Início</button>
+      <span class="top-bar-title">BLITZ ATIVA</span>
+      <button type="button" id="btn-blitz-dash-history" class="btn-icon-link" style="color: #38bdf8;">Histórico</button>
+    </header>
+
+    <main style="padding: 12px; max-width: 600px; margin: 0 auto; display: flex; flex-direction: column; gap: 12px;">
+      
+      <!-- Card da Blitz Ativa -->
+      <div style="background: #121214; border: 1px solid rgba(245, 158, 11, 0.45); border-radius: 12px; padding: 14px; display: flex; flex-direction: column; gap: 8px;">
+        <div style="display: flex; align-items: center; justify-content: space-between;">
+          <div style="display: flex; align-items: center; gap: 8px;">
+            <span style="font-size: 1.6rem;">🔍</span>
+            <div>
+              <h2 style="font-size: 1.05rem; font-weight: 900; color: #f4f4f5; margin: 0;">
+                BLITZ ATIVA
+              </h2>
+              <div style="font-size: 0.88rem; font-weight: 800; color: #fbbf24; margin-top: 2px;">
+                📅 Período: ${periodLabel}
+              </div>
+            </div>
+          </div>
+          <span style="background: rgba(245, 158, 11, 0.18); color: #fbbf24; border: 1px solid rgba(245, 158, 11, 0.4); font-size: 0.7rem; font-weight: 900; padding: 3px 8px; border-radius: 9999px;">
+            EM ANDAMENTO
+          </span>
+        </div>
+
+        <div style="font-size: 0.72rem; color: #a1a1aa; border-top: 1px dashed #27272a; padding-top: 6px; margin-top: 4px;">
+          Responsável: <strong>${session.user_name || 'Ana Luiza'}</strong> • Iniciada às ${new Date(session.started_at).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}
+        </div>
+      </div>
+
+      <!-- BOTÃO GIGANTE: 📷 BIPAR PRODUTO -->
+      <button type="button" id="btn-blitz-big-scan" class="btn-primary" style="
+        height: 60px;
+        font-size: 1.15rem;
+        font-weight: 900;
+        justify-content: center;
+        background: #10b981;
+        color: #022c22;
+        border-radius: 12px;
+        box-shadow: 0 4px 16px rgba(16, 185, 129, 0.3);
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        cursor: pointer;
+      ">
+        <span style="font-size: 1.5rem;">📷</span>
+        <span>BIPAR PRODUTO</span>
+      </button>
+
+      <!-- Entrada Manual Rápida de Código de Barras -->
+      <form id="form-blitz-manual-bip" style="display: flex; gap: 6px;">
+        <input
+          type="text"
+          id="input-blitz-manual-code"
+          class="form-input"
+          placeholder="Ou digite o código de barras..."
+          style="height: 42px; font-size: 0.88rem; flex: 1;"
+        />
+        <button type="submit" class="btn-secondary" style="height: 42px; font-weight: 800; font-size: 0.82rem; padding: 0 14px; white-space: nowrap;">
+          ➔ Bipar
+        </button>
+      </form>
+
+      <!-- CONTADORES DA BLITZ: Rápido e Focado -->
+      <div style="display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 8px;">
+        <div style="background: #18181c; border: 1px solid #27272a; border-radius: 10px; padding: 10px; text-align: center;">
+          <div style="font-size: 0.7rem; color: #a1a1aa; font-weight: 800; text-transform: uppercase;">Conferidos</div>
+          <div style="font-size: 1.45rem; font-weight: 900; color: #f4f4f5; margin-top: 2px;">
+            ${items.length}
+          </div>
+        </div>
+
+        <div style="background: rgba(16, 185, 129, 0.1); border: 1px solid rgba(16, 185, 129, 0.35); border-radius: 10px; padding: 10px; text-align: center;">
+          <div style="font-size: 0.7rem; color: #10b981; font-weight: 800; text-transform: uppercase;">🟢 TEM</div>
+          <div style="font-size: 1.45rem; font-weight: 900; color: #10b981; margin-top: 2px;">
+            ${countTem}
+          </div>
+          <div style="font-size: 0.65rem; color: #a7f3d0; font-weight: 700;">
+            ${formatNumber(totalUnits)} un
+          </div>
+        </div>
+
+        <div style="background: rgba(239, 68, 68, 0.1); border: 1px solid rgba(239, 68, 68, 0.35); border-radius: 10px; padding: 10px; text-align: center;">
+          <div style="font-size: 0.7rem; color: #ef4444; font-weight: 800; text-transform: uppercase;">🔴 NÃO TEM</div>
+          <div style="font-size: 1.45rem; font-weight: 900; color: #ef4444; margin-top: 2px;">
+            ${countNaoTem}
+          </div>
+          <div style="font-size: 0.65rem; color: #fca5a5; font-weight: 700;">
+            0 un
+          </div>
+        </div>
+      </div>
+
+      <!-- BOTÃO PARA FINALIZAR BLITZ -->
+      <div style="display: flex; gap: 8px;">
+        <button type="button" id="btn-blitz-export-wa-active" class="btn-secondary" style="flex: 1; height: 44px; font-size: 0.85rem; font-weight: 800; justify-content: center; color: #25d366; border-color: rgba(37, 211, 102, 0.4);">
+          💬 WhatsApp
+        </button>
+        <button type="button" id="btn-blitz-finish-session" class="btn-primary" style="flex: 1.2; height: 44px; font-size: 0.88rem; font-weight: 900; justify-content: center; background: #f59e0b; color: #000;">
+          ✅ FINALIZAR BLITZ
+        </button>
+      </div>
+
+      <!-- LISTA DE ITENS CONFERIDOS -->
+      <div style="background: #121214; border: 1px solid #27272a; border-radius: 10px; padding: 12px;">
+        <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 10px;">
+          <span style="font-size: 0.8rem; font-weight: 900; color: #f4f4f5; text-transform: uppercase;">
+            ÚLTIMOS CONFERIDOS (${items.length})
+          </span>
+          <span style="font-size: 0.7rem; color: #71717a;">Ordem decrescente</span>
+        </div>
+
+        <div id="blitz-session-items-list" style="display: flex; flex-direction: column; gap: 6px; max-height: 400px; overflow-y: auto;">
+          <!-- Itens renderizados -->
+        </div>
+      </div>
+
+      <!-- Opção secundária: Cancelar -->
+      <div style="text-align: center; margin-top: 4px; margin-bottom: 20px;">
+        <button type="button" id="btn-blitz-cancel-secondary" style="background: none; border: none; color: #ef4444; font-size: 0.78rem; font-weight: 700; cursor: pointer; text-decoration: underline; padding: 6px;">
+          Cancelar esta Blitz
+        </button>
+      </div>
+
+    </main>
+  `;
+
+  showView('view-blitz-dashboard');
+
+  // Event Listeners
+  document.getElementById('btn-blitz-dash-back')?.addEventListener('click', () => {
+    showView('view-dashboard');
+  });
+
+  document.getElementById('btn-blitz-dash-history')?.addEventListener('click', () => {
+    openBlitzHistoryView();
+  });
+
+  document.getElementById('btn-blitz-big-scan')?.addEventListener('click', () => {
+    startBlitzScanning();
+  });
+
+  // Bipar manual
+  document.getElementById('form-blitz-manual-bip')?.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const codeInput = document.getElementById('input-blitz-manual-code');
+    const code = codeInput?.value?.trim();
+    if (code) {
+      codeInput.value = '';
+      await handleBlitzBarcodeScanned(code);
+    }
+  });
+
+  document.getElementById('btn-blitz-export-wa-active')?.addEventListener('click', async () => {
+    const formatted = await formatBlitzSessionWhatsApp(session, items);
+    openWhatsAppExportModal(formatted, `Blitz ${periodLabel}`);
+  });
+
+  document.getElementById('btn-blitz-finish-session')?.addEventListener('click', async () => {
+    await finishActiveBlitzSession(session.id);
+  });
+
+  document.getElementById('btn-blitz-cancel-secondary')?.addEventListener('click', async () => {
+    await cancelActiveBlitzSession(session.id);
+  });
+
+  await renderBlitzSessionItemsList(items);
+}
+
+// Renderiza a lista simplificada de itens da Blitz
+async function renderBlitzSessionItemsList(items) {
+  const container = document.getElementById('blitz-session-items-list');
+  if (!container) return;
+
+  if (items.length === 0) {
+    container.innerHTML = `
+      <div style="text-align: center; padding: 24px; color: #71717a; font-size: 0.84rem;">
+        Nenhum produto conferido ainda.<br>
+        Clique em <strong>📷 BIPAR PRODUTO</strong> para iniciar.
+      </div>
+    `;
+    return;
+  }
+
+  // Ordena os itens mais recentes primeiro
+  const sorted = [...items].sort((a, b) => new Date(b.checked_at || 0) - new Date(a.checked_at || 0));
+
+  const htmlPromises = sorted.map(async (item) => {
+    const isTem = item.result === 'TEM';
+    const prod = item.product_id ? await getProductById(item.product_id) : null;
+    const name = prod?.name || (item.product_id ? `Produto Cadastrado` : `PRODUTO NÃO CADASTRADO`);
+    const dateFormatted = item.requested_expiration_date ? formatDateBR(item.requested_expiration_date) : '--/--/----';
+    const timeFormatted = item.checked_at
+      ? new Date(item.checked_at).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })
+      : '';
+
+    return `
+      <div style="
+        background: #18181c;
+        border: 1px solid ${isTem ? 'rgba(16, 185, 129, 0.3)' : 'rgba(239, 68, 68, 0.3)'};
+        border-radius: 8px;
+        padding: 8px 10px;
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 8px;
+      ">
+        <div style="flex: 1; min-width: 0;">
+          <div style="display: flex; align-items: center; gap: 6px; margin-bottom: 2px;">
+            <span style="
+              font-size: 0.65rem;
+              font-weight: 900;
+              padding: 2px 6px;
+              border-radius: 4px;
+              background: ${isTem ? 'rgba(16, 185, 129, 0.15)' : 'rgba(239, 68, 68, 0.15)'};
+              color: ${isTem ? '#10b981' : '#ef4444'};
+            ">
+              ${isTem ? '✓ TEM' : '✕ NÃO TEM'}
+            </span>
+            <span style="font-size: 0.72rem; color: #fbbf24; font-weight: 800;">
+              Validade: ${dateFormatted}
+            </span>
+          </div>
+          <div style="font-size: 0.84rem; font-weight: 800; color: #f4f4f5; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">
+            ${name}
+          </div>
+          <div style="font-size: 0.7rem; color: #71717a; margin-top: 1px;">
+            Cód: ${item.barcode} • às ${timeFormatted}
+          </div>
+        </div>
+
+        <div style="text-align: right; flex-shrink: 0;">
+          <span style="font-size: 1.05rem; font-weight: 900; color: ${isTem ? '#10b981' : '#ef4444'};">
+            ${isTem ? `${formatNumber(item.total_quantity)} un` : '0 un'}
+          </span>
+        </div>
+      </div>
+    `;
+  });
+
+  const cards = await Promise.all(htmlPromises);
+  container.innerHTML = cards.join('');
+}
+
+// ----------------------------------------------------
+// 3. SCANNER NO MODO BLITZ
+// ----------------------------------------------------
+
 export function startBlitzScanning() {
   if (!currentActiveBlitzSession) {
     promptStartBlitz();
@@ -399,29 +748,997 @@ export function startBlitzScanning() {
   window.dispatchEvent(new CustomEvent('start-scanner-trigger', { detail: { mode: 'BLITZ' } }));
 }
 
-// Finaliza a sessão ativa da Blitz
+// ----------------------------------------------------
+// 4. APÓS O BIP: IDENTIFICAÇÃO E DATA SOLICITADA
+// ----------------------------------------------------
+
+export async function handleBlitzBarcodeScanned(cleanBarcode) {
+  if (!currentActiveBlitzSession) {
+    return false;
+  }
+
+  // Para o scanner temporariamente enquanto a pergunta está na tela
+  stopCameraScanner();
+  showToast(`Código: ${cleanBarcode}`, 'info', 800);
+
+  // 1. Pesquisa se o produto está cadastrado no banco
+  const product = await getProductByBarcode(cleanBarcode);
+
+  if (!product) {
+    // 10. PRODUTO NÃO CADASTRADO: Não trava a blitz!
+    promptUnregisteredProductBlitz(cleanBarcode);
+    return true;
+  }
+
+  // 5. PRODUTO CADASTRADO: Pergunta a DATA SOLICITADA que está no papel
+  promptRequestedExpirationDate(product);
+  return true;
+}
+
+// ----------------------------------------------------
+// 10. TRATAMENTO DE PRODUTO NÃO CADASTRADO (NÃO TRAVA)
+// ----------------------------------------------------
+
+function promptUnregisteredProductBlitz(barcode) {
+  let modal = document.getElementById('modal-blitz-unregistered');
+  if (!modal) {
+    modal = document.createElement('div');
+    modal.id = 'modal-blitz-unregistered';
+    modal.className = 'custom-modal';
+    document.body.appendChild(modal);
+  }
+
+  modal.innerHTML = `
+    <div class="modal-backdrop" id="modal-blitz-unreg-backdrop"></div>
+    <div class="modal-card" style="padding: 20px; max-width: 400px; width: 100%; box-sizing: border-box;">
+      <div style="font-size: 2.2rem; margin-bottom: 4px; text-align: center;">⚠️</div>
+      <h3 style="font-size: 1.15rem; font-weight: 900; color: #f4f4f5; text-align: center; margin: 0 0 6px 0;">
+        PRODUTO NÃO CADASTRADO
+      </h3>
+
+      <div style="background: #18181c; border: 1px solid #2a2a30; border-radius: 8px; padding: 10px; margin-bottom: 14px; text-align: center;">
+        <div style="font-size: 0.72rem; color: #a1a1aa; text-transform: uppercase; font-weight: 800;">Código de Barras:</div>
+        <div style="font-size: 1.2rem; font-weight: 900; color: #fbbf24; margin-top: 2px;">${barcode}</div>
+      </div>
+
+      <p style="font-size: 0.82rem; color: #a1a1aa; text-align: center; margin-bottom: 16px; line-height: 1.4;">
+        Este código não está no cadastro, mas isso não precisa parar sua conferência. Como deseja prosseguir?
+      </p>
+
+      <div style="display: flex; flex-direction: column; gap: 8px;">
+        <button type="button" id="btn-blitz-quick-register" class="btn-primary" style="height: 48px; font-weight: 900; justify-content: center; background: #10b981; color: #022c22; font-size: 0.95rem;">
+          ➕ CADASTRAR PRODUTO
+        </button>
+
+        <button type="button" id="btn-blitz-continue-unregistered" class="btn-secondary" style="height: 44px; font-weight: 800; justify-content: center; color: #fbbf24; border-color: rgba(245, 158, 11, 0.4); font-size: 0.88rem;">
+          ➡️ CONTINUAR SEM CADASTRAR
+        </button>
+
+        <button type="button" id="btn-blitz-unreg-cancel" style="background: none; border: none; color: #71717a; font-size: 0.78rem; font-weight: 700; cursor: pointer; text-decoration: underline; padding: 6px;">
+          Cancelar e Bipar Próximo
+        </button>
+      </div>
+    </div>
+  `;
+
+  modal.classList.add('open');
+  const closeModal = () => modal.classList.remove('open');
+
+  document.getElementById('modal-blitz-unreg-backdrop')?.addEventListener('click', closeModal);
+  document.getElementById('btn-blitz-unreg-cancel')?.addEventListener('click', () => {
+    closeModal();
+    startBlitzScanning();
+  });
+
+  // Opção: CADASTRAR PRODUTO
+  document.getElementById('btn-blitz-quick-register')?.addEventListener('click', () => {
+    closeModal();
+    openBlitzQuickRegisterModal(barcode);
+  });
+
+  // Opção: CONTINUAR SEM CADASTRAR (Guarda código, data solicitada, hora, etc.)
+  document.getElementById('btn-blitz-continue-unregistered')?.addEventListener('click', () => {
+    closeModal();
+    const provisionalProduct = {
+      id: null,
+      barcode: barcode,
+      name: `PRODUTO NÃO CADASTRADO (${barcode})`,
+      sector: 'GERAL',
+      corridor: '01'
+    };
+    promptRequestedExpirationDate(provisionalProduct);
+  });
+}
+
+// Modal de Cadastro Rápido de Produto
+function openBlitzQuickRegisterModal(barcode) {
+  let modal = document.getElementById('modal-blitz-quick-form');
+  if (!modal) {
+    modal = document.createElement('div');
+    modal.id = 'modal-blitz-quick-form';
+    modal.className = 'custom-modal';
+    document.body.appendChild(modal);
+  }
+
+  let quickProdImage = '';
+
+  modal.innerHTML = `
+    <div class="modal-backdrop" id="modal-blitz-quick-backdrop"></div>
+    <div class="modal-card" style="padding: 20px; max-width: 420px; width: 100%; box-sizing: border-box;">
+      <div style="display: flex; align-items: center; justify-content: space-between; border-bottom: 1px solid #27272a; padding-bottom: 8px; margin-bottom: 12px;">
+        <h3 style="font-size: 1.05rem; font-weight: 900; color: #f4f4f5; margin: 0;">
+          ⚡ CADASTRO RÁPIDO DO PRODUTO
+        </h3>
+        <button type="button" id="btn-close-quick-reg" class="btn-icon-control" style="font-size: 1rem; width: 30px; height: 30px;">✕</button>
+      </div>
+
+      <form id="form-blitz-quick-reg" style="display: flex; flex-direction: column; gap: 10px;">
+        <div class="form-group">
+          <label style="font-size: 0.74rem; font-weight: 800; color: #a1a1aa;">CÓDIGO DE BARRAS:</label>
+          <input type="text" id="quick-prod-barcode" class="form-input" value="${barcode}" readonly style="background: #18181c; color: #fbbf24; font-weight: 800;" />
+        </div>
+
+        <div class="form-group">
+          <label for="quick-prod-name" style="font-size: 0.74rem; font-weight: 800; color: #a1a1aa;">NOME DO PRODUTO:</label>
+          <input type="text" id="quick-prod-name" class="form-input" placeholder="Ex: BISCOITO RANCHEIRO 90G" required autofocus style="text-transform: uppercase;" />
+        </div>
+
+        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 8px;">
+          <div class="form-group">
+            <label for="quick-prod-sector" style="font-size: 0.74rem; font-weight: 800; color: #a1a1aa;">SETOR:</label>
+            <select id="quick-prod-sector" class="form-input">
+              ${SETORS.map(s => `<option value="${s}">${s}</option>`).join('')}
+            </select>
+          </div>
+
+          <div class="form-group">
+            <label for="quick-prod-corridor" style="font-size: 0.74rem; font-weight: 800; color: #a1a1aa;">CORREDOR:</label>
+            <select id="quick-prod-corridor" class="form-input">
+              ${CORRIDORS.map(c => `<option value="${c}">${c}</option>`).join('')}
+            </select>
+          </div>
+        </div>
+
+        <div style="display: flex; gap: 8px; margin-top: 8px;">
+          <button type="button" id="btn-cancel-quick-reg" class="btn-secondary" style="flex: 1; height: 44px; justify-content: center;">
+            Cancelar
+          </button>
+          <button type="submit" class="btn-primary" style="flex: 1; height: 44px; justify-content: center; background: #10b981; color: #022c22; font-weight: 900;">
+            ✓ SALVAR E CONFERIR
+          </button>
+        </div>
+      </form>
+    </div>
+  `;
+
+  modal.classList.add('open');
+  const closeModal = () => modal.classList.remove('open');
+
+  document.getElementById('modal-blitz-quick-backdrop')?.addEventListener('click', closeModal);
+  document.getElementById('btn-close-quick-reg')?.addEventListener('click', closeModal);
+  document.getElementById('btn-cancel-quick-reg')?.addEventListener('click', () => {
+    closeModal();
+    startBlitzScanning();
+  });
+
+  document.getElementById('form-blitz-quick-reg')?.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const name = document.getElementById('quick-prod-name')?.value.trim().toUpperCase();
+    const sector = document.getElementById('quick-prod-sector')?.value || 'MERCEARIA';
+    const corridor = document.getElementById('quick-prod-corridor')?.value || 'Corredor 1';
+
+    if (!name) {
+      showToast('Informe o nome do produto', 'warning');
+      return;
+    }
+
+    try {
+      showToast('Cadastrando produto...', 'sync', 1000);
+      const savedProd = await saveProduct({
+        barcode: barcode,
+        name: name,
+        sector: sector,
+        corridor: corridor
+      });
+
+      closeModal();
+      showToast(`✓ Produto cadastrado: ${name}`, 'success', 1500);
+      triggerSyncNow().catch(e => console.warn('Sync error:', e));
+
+      // Continua direto para a data solicitada
+      promptRequestedExpirationDate(savedProd);
+    } catch (err) {
+      console.error('Erro ao salvar produto rápido:', err);
+      showToast('Erro ao cadastrar produto', 'warning');
+    }
+  });
+}
+
+// ----------------------------------------------------
+// 5. QUAL A DATA SOLICITADA? (MANUAL DO PAPEL)
+// ----------------------------------------------------
+
+export function promptRequestedExpirationDate(product) {
+  let modal = document.getElementById('modal-blitz-date-prompt');
+  if (!modal) {
+    modal = document.createElement('div');
+    modal.id = 'modal-blitz-date-prompt';
+    modal.className = 'custom-modal';
+    document.body.appendChild(modal);
+  }
+
+  modal.innerHTML = `
+    <div class="modal-backdrop" id="modal-blitz-date-backdrop"></div>
+    <div class="modal-card" style="padding: 20px; max-width: 420px; width: 100%; box-sizing: border-box;">
+      
+      <!-- Cabeçalho do Produto -->
+      <div style="background: #18181c; border: 1px solid #27272a; border-radius: 10px; padding: 12px; margin-bottom: 14px;">
+        <div style="font-size: 0.72rem; color: #10b981; font-weight: 800; text-transform: uppercase;">
+          📦 PRODUTO BIPADO:
+        </div>
+        <h3 style="font-size: 1.05rem; font-weight: 900; color: #f4f4f5; margin: 2px 0 0 0; line-height: 1.3;">
+          ${product.name}
+        </h3>
+        <div style="font-size: 0.76rem; color: #fbbf24; font-weight: 800; margin-top: 4px;">
+          Código: ${product.barcode}
+        </div>
+      </div>
+
+      <!-- Pergunta Principal: QUAL A DATA SOLICITADA? -->
+      <form id="form-blitz-requested-date" style="display: flex; flex-direction: column; gap: 10px;">
+        <div style="text-align: center; margin-bottom: 4px;">
+          <div style="font-size: 1.3rem; margin-bottom: 2px;">📅</div>
+          <label for="input-requested-date" style="font-size: 0.95rem; font-weight: 900; color: #fef08a; display: block;">
+            QUAL A DATA SOLICITADA?
+          </label>
+          <div style="font-size: 0.74rem; color: #a1a1aa; margin-top: 2px;">
+            Olhe no papel físico e digite a validade solicitada:
+          </div>
+        </div>
+
+        <div class="form-group" style="margin-bottom: 4px;">
+          <input
+            type="text"
+            id="input-requested-date"
+            class="form-input form-input-lg"
+            placeholder="04/09/2026"
+            maxlength="10"
+            inputmode="numeric"
+            required
+            autofocus
+            style="font-size: 1.35rem; font-weight: 900; text-align: center; border-color: #f59e0b; height: 52px; letter-spacing: 1px; color: #fef08a;"
+          />
+        </div>
+
+        <div style="display: flex; gap: 8px; margin-top: 6px;">
+          <button type="button" id="btn-cancel-req-date" class="btn-secondary" style="flex: 1; height: 46px; justify-content: center;">
+            Cancelar
+          </button>
+          <button type="submit" id="btn-confirm-req-date" class="btn-primary" style="flex: 1.3; height: 46px; justify-content: center; background: #f59e0b; color: #000; font-weight: 900; font-size: 0.95rem;">
+            CONTINUAR ➔
+          </button>
+        </div>
+      </form>
+
+    </div>
+  `;
+
+  modal.classList.add('open');
+  const dateInput = document.getElementById('input-requested-date');
+  setTimeout(() => dateInput?.focus(), 100);
+
+  // Máscara DD/MM/AAAA
+  dateInput?.addEventListener('input', (e) => {
+    let val = e.target.value.replace(/\D/g, '');
+    if (val.length > 8) val = val.substring(0, 8);
+    if (val.length >= 5) {
+      val = val.substring(0, 2) + '/' + val.substring(2, 4) + '/' + val.substring(4);
+    } else if (val.length >= 3) {
+      val = val.substring(0, 2) + '/' + val.substring(2);
+    }
+    e.target.value = val;
+  });
+
+  const closeModal = () => modal.classList.remove('open');
+  document.getElementById('modal-blitz-date-backdrop')?.addEventListener('click', closeModal);
+  document.getElementById('btn-cancel-req-date')?.addEventListener('click', () => {
+    closeModal();
+    startBlitzScanning();
+  });
+
+  document.getElementById('form-blitz-requested-date')?.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const rawDate = dateInput?.value?.trim();
+    if (!rawDate || rawDate.length < 8) {
+      showToast('Digite a data solicitada válida (DD/MM/AAAA)', 'warning');
+      dateInput?.focus();
+      return;
+    }
+
+    const isoDate = parseDateBRtoISO(rawDate);
+    closeModal();
+
+    // 13. EVITAR DUPLICIDADE ACIDENTAL
+    await checkDuplicityAndPromptDecision(product, isoDate);
+  });
+}
+
+// ----------------------------------------------------
+// 13. VERIFICA DUPLICIDADE ACIDENTAL (MESMO CÓDIGO + MESMA DATA)
+// ----------------------------------------------------
+
+async function checkDuplicityAndPromptDecision(product, requestedDateISO) {
+  if (!currentActiveBlitzSession) return;
+
+  // Verifica se já foi conferido exatamente esse código e essa data nesta mesma blitz
+  const existingItem = await getBlitzItemBySessionBarcodeAndDate(
+    currentActiveBlitzSession.id,
+    product.barcode,
+    requestedDateISO
+  );
+
+  if (existingItem) {
+    showDuplicityWarningModal({
+      product,
+      requestedDate: requestedDateISO,
+      existingItem
+    });
+    return;
+  }
+
+  // Se não é duplicidade, segue direto para a pergunta TEM / NÃO TEM
+  showHasOrNotDecisionModal({
+    product,
+    requestedDate: requestedDateISO,
+    existingItem: null
+  });
+}
+
+// Modal de Aviso de Duplicidade
+function showDuplicityWarningModal({ product, requestedDate, existingItem }) {
+  let modal = document.getElementById('modal-blitz-duplicity');
+  if (!modal) {
+    modal = document.createElement('div');
+    modal.id = 'modal-blitz-duplicity';
+    modal.className = 'custom-modal';
+    document.body.appendChild(modal);
+  }
+
+  const isTem = existingItem.result === 'TEM';
+  const qtyStr = isTem ? `${formatNumber(existingItem.total_quantity)} unidades` : '0 unidades (NÃO TEM)';
+
+  modal.innerHTML = `
+    <div class="modal-backdrop" id="modal-blitz-duplicity-backdrop"></div>
+    <div class="modal-card" style="padding: 20px; max-width: 420px; width: 100%; box-sizing: border-box;">
+      <div style="font-size: 2.2rem; margin-bottom: 4px; text-align: center;">⚠️</div>
+      <h3 style="font-size: 1.15rem; font-weight: 900; color: #fbbf24; text-align: center; margin: 0 0 6px 0;">
+        ESTE PRODUTO JÁ FOI CONFERIDO
+      </h3>
+
+      <div style="background: #18181c; border: 1px solid rgba(245, 158, 11, 0.4); border-radius: 8px; padding: 12px; margin-bottom: 14px;">
+        <div style="font-size: 0.88rem; font-weight: 900; color: #f4f4f5;">${product.name}</div>
+        <div style="font-size: 0.74rem; color: #a1a1aa; margin-top: 2px;">Cód: ${product.barcode}</div>
+        <div style="font-size: 0.82rem; color: #fbbf24; font-weight: 800; margin-top: 6px;">
+          Validade solicitada: ${formatDateBR(requestedDate)}
+        </div>
+        <div style="font-size: 0.88rem; font-weight: 900; color: ${isTem ? '#10b981' : '#ef4444'}; margin-top: 4px;">
+          Resultado anterior: ${isTem ? '🟢 TEM' : '🔴 NÃO TEM'} (${qtyStr})
+        </div>
+      </div>
+
+      <p style="font-size: 0.82rem; color: #a1a1aa; text-align: center; margin-bottom: 16px;">
+        Você já registrou esta mesma validade nesta blitz. O que deseja fazer?
+      </p>
+
+      <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px;">
+        <button type="button" id="btn-duplicity-redo" class="btn-secondary" style="height: 48px; font-weight: 900; justify-content: center; color: #fbbf24; border-color: #f59e0b;">
+          🔄 REFAZER
+        </button>
+        <button type="button" id="btn-duplicity-next" class="btn-primary" style="height: 48px; font-weight: 900; justify-content: center; background: #10b981; color: #022c22;">
+          ➡️ PRÓXIMO
+        </button>
+      </div>
+    </div>
+  `;
+
+  modal.classList.add('open');
+  const closeModal = () => modal.classList.remove('open');
+
+  document.getElementById('modal-blitz-duplicity-backdrop')?.addEventListener('click', closeModal);
+
+  document.getElementById('btn-duplicity-next')?.addEventListener('click', () => {
+    closeModal();
+    startBlitzScanning();
+  });
+
+  document.getElementById('btn-duplicity-redo')?.addEventListener('click', () => {
+    closeModal();
+    showHasOrNotDecisionModal({
+      product,
+      requestedDate,
+      existingItem // Passa para substituir/atualizar
+    });
+  });
+}
+
+// ----------------------------------------------------
+// 6. PERGUNTAR SE TEM (TEM OU NÃO TEM)
+// ----------------------------------------------------
+
+function showHasOrNotDecisionModal({ product, requestedDate, existingItem = null }) {
+  let modal = document.getElementById('modal-blitz-has-or-not');
+  if (!modal) {
+    modal = document.createElement('div');
+    modal.id = 'modal-blitz-has-or-not';
+    modal.className = 'custom-modal';
+    document.body.appendChild(modal);
+  }
+
+  modal.innerHTML = `
+    <div class="modal-backdrop" id="modal-blitz-hon-backdrop"></div>
+    <div class="modal-card" style="padding: 20px; max-width: 420px; width: 100%; box-sizing: border-box;">
+      
+      <!-- Detalhes do Produto e Validade Solicitada -->
+      <div style="background: #18181c; border: 1px solid #27272a; border-radius: 10px; padding: 12px; margin-bottom: 14px;">
+        <h3 style="font-size: 1rem; font-weight: 900; color: #f4f4f5; margin: 0 0 2px 0; line-height: 1.3;">
+          ${product.name}
+        </h3>
+        <div style="font-size: 0.74rem; color: #a1a1aa;">
+          Código: <strong>${product.barcode}</strong>
+        </div>
+      </div>
+
+      <!-- Validade Solicitada Destaque -->
+      <div style="background: rgba(245, 158, 11, 0.12); border: 2px solid rgba(245, 158, 11, 0.5); border-radius: 10px; padding: 10px; text-align: center; margin-bottom: 14px;">
+        <div style="font-size: 0.72rem; color: #fbbf24; font-weight: 800; text-transform: uppercase;">
+          VALIDADE SOLICITADA NO PAPEL:
+        </div>
+        <div style="font-size: 1.4rem; font-weight: 900; color: #fef08a; margin-top: 2px;">
+          ${formatDateBR(requestedDate)}
+        </div>
+      </div>
+
+      <!-- Pergunta Crucial -->
+      <div style="font-size: 1.05rem; font-weight: 900; color: #f4f4f5; text-align: center; margin-bottom: 16px;">
+        O PRODUTO POSSUI ESSA VALIDADE?
+      </div>
+
+      <!-- Dois Botões Grandes: TEM ou NÃO TEM -->
+      <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-bottom: 8px;">
+        <button type="button" id="btn-blitz-nao-tem" class="btn-secondary" style="
+          height: 64px;
+          border: 2px solid rgba(239, 68, 68, 0.6);
+          background: rgba(239, 68, 68, 0.15);
+          color: #ef4444;
+          font-size: 1.15rem;
+          font-weight: 900;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          gap: 6px;
+          border-radius: 10px;
+          cursor: pointer;
+        ">
+          <span>❌</span>
+          <span>NÃO TEM</span>
+        </button>
+
+        <button type="button" id="btn-blitz-tem" class="btn-primary" style="
+          height: 64px;
+          background: #10b981;
+          color: #022c22;
+          font-size: 1.15rem;
+          font-weight: 900;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          gap: 6px;
+          border-radius: 10px;
+          cursor: pointer;
+        ">
+          <span>✅</span>
+          <span>TEM</span>
+        </button>
+      </div>
+
+      <div style="text-align: center; margin-top: 8px;">
+        <button type="button" id="btn-blitz-hon-cancel" style="background: none; border: none; color: #71717a; font-size: 0.78rem; font-weight: 700; cursor: pointer; text-decoration: underline; padding: 4px;">
+          Voltar ao Scanner
+        </button>
+      </div>
+
+    </div>
+  `;
+
+  modal.classList.add('open');
+  const closeModal = () => modal.classList.remove('open');
+
+  document.getElementById('modal-blitz-hon-backdrop')?.addEventListener('click', closeModal);
+  document.getElementById('btn-blitz-hon-cancel')?.addEventListener('click', () => {
+    closeModal();
+    startBlitzScanning();
+  });
+
+  // 7. SE NÃO TEM: Salva automaticamente sem perguntas adicionais
+  document.getElementById('btn-blitz-nao-tem')?.addEventListener('click', async () => {
+    closeModal();
+    await saveBlitzNaoTemConference(product, requestedDate, existingItem);
+  });
+
+  // 8. SE TEM: Pergunta localização e quantidades
+  document.getElementById('btn-blitz-tem')?.addEventListener('click', () => {
+    closeModal();
+    showBlitzLocationsAndQuantitiesModal(product, requestedDate, existingItem);
+  });
+}
+
+// ----------------------------------------------------
+// 7. SE NÃO TEM: SALVAMENTO AUTOMÁTICO IMEDIATO
+// ----------------------------------------------------
+
+async function saveBlitzNaoTemConference(product, requestedDate, existingItem = null) {
+  if (!currentActiveBlitzSession) return;
+
+  try {
+    showToast('Salvando NÃO TEM...', 'sync', 800);
+
+    const now = new Date();
+    const confDate = formatDateBR(now.toISOString().split('T')[0]);
+    const confTime = now.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
+
+    await saveBlitzConferenceRecord({
+      id: existingItem?.id || null,
+      sessionId: currentActiveBlitzSession.id,
+      productId: product.id || null,
+      barcode: product.barcode,
+      sector: product.sector || 'GERAL',
+      requestedDate: requestedDate,
+      previousQuantity: existingItem ? Number(existingItem.total_quantity) || 0 : 0,
+      newQuantity: 0,
+      result: 'NAO_TEM',
+      locations: [],
+      userName: currentActiveBlitzSession.user_name || 'Ana Luiza'
+    });
+
+    triggerSyncNow().catch(e => console.warn('Sync error:', e));
+
+    // Exibe tela de sucesso e disponibiliza imediatamente: 📷 PRÓXIMO PRODUTO
+    showConferenceSuccessModal({
+      product,
+      requestedDate,
+      result: 'NAO_TEM',
+      totalQuantity: 0,
+      confDate,
+      confTime
+    });
+  } catch (err) {
+    console.error('Erro ao salvar NÃO TEM:', err);
+    showToast('Erro ao registrar conferência', 'warning');
+  }
+}
+
+// ----------------------------------------------------
+// 8. SE TEM: REGISTRO DA QUANTIDADE E ONDE ENCONTROU
+// ----------------------------------------------------
+
+function showBlitzLocationsAndQuantitiesModal(product, requestedDate, existingItem = null) {
+  let modal = document.getElementById('modal-blitz-locations');
+  if (!modal) {
+    modal = document.createElement('div');
+    modal.id = 'modal-blitz-locations';
+    modal.className = 'custom-modal';
+    document.body.appendChild(modal);
+  }
+
+  // Preenche valores anteriores se existirem (para caso de refazer)
+  const locMap = {};
+  if (existingItem && Array.isArray(existingItem.locations)) {
+    existingItem.locations.forEach(l => {
+      locMap[l.location] = Number(l.quantity) || 0;
+    });
+  }
+
+  modal.innerHTML = `
+    <div class="modal-backdrop" id="modal-blitz-locs-backdrop"></div>
+    <div class="modal-card" style="padding: 18px; max-width: 440px; width: 100%; box-sizing: border-box; max-height: 90vh; display: flex; flex-direction: column;">
+      
+      <!-- Cabeçalho -->
+      <div style="border-bottom: 1px solid #27272a; padding-bottom: 8px; margin-bottom: 10px;">
+        <div style="font-size: 0.72rem; color: #10b981; font-weight: 800; text-transform: uppercase;">
+          ✅ PRODUTO ENCONTRADO (TEM)
+        </div>
+        <h3 style="font-size: 0.98rem; font-weight: 900; color: #f4f4f5; margin: 2px 0 0 0; line-height: 1.3;">
+          ${product.name}
+        </h3>
+        <div style="font-size: 0.78rem; color: #fbbf24; font-weight: 800; margin-top: 2px;">
+          Validade: ${formatDateBR(requestedDate)}
+        </div>
+      </div>
+
+      <div style="font-size: 0.9rem; font-weight: 900; color: #fef08a; display: flex; align-items: center; gap: 6px; margin-bottom: 8px;">
+        <span>📦</span>
+        <span>ONDE ENCONTROU?</span>
+      </div>
+
+      <!-- Formulário de Locais -->
+      <form id="form-blitz-locations-count" style="flex: 1; overflow-y: auto; display: flex; flex-direction: column; gap: 8px; padding-right: 2px;">
+        
+        <!-- Área de Venda (Em destaque) -->
+        <div class="loc-input-row" style="background: #18181c; border: 1px solid #3f3f46; border-radius: 8px; padding: 8px 10px; display: flex; align-items: center; justify-content: space-between;">
+          <label for="loc-qty-venda" style="font-size: 0.88rem; font-weight: 800; color: #f4f4f5;">
+            🛒 Área de Venda:
+          </label>
+          <input
+            type="number"
+            id="loc-qty-venda"
+            class="form-input loc-qty-input"
+            data-loc="Área de venda"
+            min="0"
+            value="${locMap['Área de venda'] || ''}"
+            placeholder="0"
+            autofocus
+            style="width: 100px; height: 38px; text-align: center; font-size: 1.1rem; font-weight: 900; color: #10b981;"
+          />
+        </div>
+
+        <!-- Depósito (Em destaque) -->
+        <div class="loc-input-row" style="background: #18181c; border: 1px solid #3f3f46; border-radius: 8px; padding: 8px 10px; display: flex; align-items: center; justify-content: space-between;">
+          <label for="loc-qty-deposito" style="font-size: 0.88rem; font-weight: 800; color: #f4f4f5;">
+            🏢 Depósito:
+          </label>
+          <input
+            type="number"
+            id="loc-qty-deposito"
+            class="form-input loc-qty-input"
+            data-loc="Depósito"
+            min="0"
+            value="${locMap['Depósito'] || ''}"
+            placeholder="0"
+            style="width: 100px; height: 38px; text-align: center; font-size: 1.1rem; font-weight: 900; color: #10b981;"
+          />
+        </div>
+
+        <!-- Outras Localizações Rápidas -->
+        ${BLITZ_LOCATIONS.filter(l => l !== 'Área de venda' && l !== 'Depósito').map((loc, idx) => `
+          <div class="loc-input-row" style="background: #141416; border: 1px solid #27272a; border-radius: 8px; padding: 6px 10px; display: flex; align-items: center; justify-content: space-between;">
+            <label for="loc-qty-${idx}" style="font-size: 0.8rem; font-weight: 700; color: #a1a1aa;">
+              ${loc}:
+            </label>
+            <input
+              type="number"
+              id="loc-qty-${idx}"
+              class="form-input loc-qty-input"
+              data-loc="${loc}"
+              min="0"
+              value="${locMap[loc] || ''}"
+              placeholder="0"
+              style="width: 90px; height: 34px; text-align: center; font-size: 0.95rem; font-weight: 800;"
+            />
+          </div>
+        `).join('')}
+
+      </form>
+
+      <!-- Banner de Total Calculado em Tempo Real -->
+      <div style="background: rgba(16, 185, 129, 0.15); border: 1px solid rgba(16, 185, 129, 0.4); border-radius: 8px; padding: 10px; text-align: center; margin: 10px 0 8px 0;">
+        <div style="font-size: 0.72rem; color: #86efac; font-weight: 800; text-transform: uppercase;">
+          QUANTIDADE TOTAL ENCONTRADA:
+        </div>
+        <div id="blitz-loc-total-display" style="font-size: 1.45rem; font-weight: 900; color: #10b981; margin-top: 2px;">
+          TOTAL: 0 UNIDADES
+        </div>
+      </div>
+
+      <!-- Botões de Ação -->
+      <div style="display: flex; gap: 8px;">
+        <button type="button" id="btn-cancel-blitz-locs" class="btn-secondary" style="flex: 1; height: 46px; justify-content: center;">
+          Cancelar
+        </button>
+        <button type="button" id="btn-confirm-blitz-locs" class="btn-primary" style="flex: 1.3; height: 46px; justify-content: center; background: #10b981; color: #022c22; font-weight: 900; font-size: 0.95rem;">
+          ✓ SALVAR CONFERÊNCIA
+        </button>
+      </div>
+
+    </div>
+  `;
+
+  modal.classList.add('open');
+
+  const totalDisplay = document.getElementById('blitz-loc-total-display');
+  const qtyInputs = modal.querySelectorAll('.loc-qty-input');
+
+  const updateTotal = () => {
+    let sum = 0;
+    qtyInputs.forEach(inp => {
+      const v = Number(inp.value) || 0;
+      if (v > 0) sum += v;
+    });
+    if (totalDisplay) {
+      totalDisplay.textContent = `TOTAL: ${formatNumber(sum)} UNIDADES`;
+    }
+    return sum;
+  };
+
+  qtyInputs.forEach(inp => {
+    inp.addEventListener('input', updateTotal);
+  });
+
+  updateTotal();
+
+  const closeModal = () => modal.classList.remove('open');
+  document.getElementById('modal-blitz-locs-backdrop')?.addEventListener('click', closeModal);
+  document.getElementById('btn-cancel-blitz-locs')?.addEventListener('click', () => {
+    closeModal();
+    startBlitzScanning();
+  });
+
+  document.getElementById('btn-confirm-blitz-locs')?.addEventListener('click', async () => {
+    const total = updateTotal();
+    if (total <= 0) {
+      showToast('Informe ao menos 1 unidade em alguma localização', 'warning');
+      return;
+    }
+
+    const locationsArray = [];
+    qtyInputs.forEach(inp => {
+      const q = Number(inp.value) || 0;
+      const l = inp.getAttribute('data-loc');
+      if (q > 0 && l) {
+        locationsArray.push({ location: l, quantity: q });
+      }
+    });
+
+    closeModal();
+    await saveBlitzTemConference(product, requestedDate, total, locationsArray, existingItem);
+  });
+}
+
+// Salva conferência com TEM e suas localizações
+async function saveBlitzTemConference(product, requestedDate, totalQuantity, locationsArray, existingItem = null) {
+  if (!currentActiveBlitzSession) return;
+
+  try {
+    showToast('Salvando conferência...', 'sync', 800);
+
+    const now = new Date();
+    const confDate = formatDateBR(now.toISOString().split('T')[0]);
+    const confTime = now.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
+
+    await saveBlitzConferenceRecord({
+      id: existingItem?.id || null,
+      sessionId: currentActiveBlitzSession.id,
+      productId: product.id || null,
+      barcode: product.barcode,
+      sector: product.sector || 'GERAL',
+      requestedDate: requestedDate,
+      previousQuantity: existingItem ? Number(existingItem.total_quantity) || 0 : 0,
+      newQuantity: totalQuantity,
+      result: 'TEM',
+      locations: locationsArray,
+      userName: currentActiveBlitzSession.user_name || 'Ana Luiza'
+    });
+
+    triggerSyncNow().catch(e => console.warn('Sync error:', e));
+
+    // Exibe tela de sucesso e disponibiliza imediatamente: 📷 PRÓXIMO PRODUTO
+    showConferenceSuccessModal({
+      product,
+      requestedDate,
+      result: 'TEM',
+      totalQuantity,
+      confDate,
+      confTime
+    });
+  } catch (err) {
+    console.error('Erro ao salvar conferência TEM:', err);
+    showToast('Erro ao registrar conferência', 'warning');
+  }
+}
+
+// ----------------------------------------------------
+// TELA DE SUCESSO: ✅ CONFERÊNCIA REGISTRADA + 📷 PRÓXIMO
+// ----------------------------------------------------
+
+function showConferenceSuccessModal({ product, requestedDate, result, totalQuantity, confDate, confTime }) {
+  let modal = document.getElementById('modal-blitz-success');
+  if (!modal) {
+    modal = document.createElement('div');
+    modal.id = 'modal-blitz-success';
+    modal.className = 'custom-modal';
+    document.body.appendChild(modal);
+  }
+
+  const isTem = result === 'TEM';
+  const resultTag = isTem
+    ? `<span style="color: #10b981; font-weight: 900;">🟢 TEM (${formatNumber(totalQuantity)} unidades)</span>`
+    : `<span style="color: #ef4444; font-weight: 900;">🔴 NÃO TEM (0 unidades)</span>`;
+
+  modal.innerHTML = `
+    <div class="modal-backdrop" id="modal-blitz-success-backdrop"></div>
+    <div class="modal-card" style="padding: 22px; max-width: 420px; width: 100%; box-sizing: border-box; text-align: center;">
+      
+      <div style="width: 56px; height: 56px; border-radius: 50%; background: ${isTem ? 'rgba(16, 185, 129, 0.2)' : 'rgba(239, 68, 68, 0.2)'}; border: 2px solid ${isTem ? '#10b981' : '#ef4444'}; display: flex; align-items: center; justify-content: center; margin: 0 auto 10px auto; font-size: 1.8rem;">
+        ${isTem ? '✓' : '✕'}
+      </div>
+
+      <h3 style="font-size: 1.25rem; font-weight: 900; color: #f4f4f5; margin: 0 0 4px 0;">
+        CONFERÊNCIA REGISTRADA
+      </h3>
+
+      <div style="background: #18181c; border: 1px solid #27272a; border-radius: 10px; padding: 12px; margin: 12px 0 16px 0; text-align: left;">
+        <div style="font-size: 0.88rem; font-weight: 800; color: #f4f4f5;">${product.name}</div>
+        <div style="font-size: 0.74rem; color: #a1a1aa; margin-top: 2px;">Cód: ${product.barcode}</div>
+        <div style="font-size: 0.82rem; color: #fbbf24; font-weight: 800; margin-top: 6px;">
+          Validade solicitada: ${formatDateBR(requestedDate)}
+        </div>
+        <div style="font-size: 0.88rem; margin-top: 4px;">
+          Resultado: ${resultTag}
+        </div>
+        <div style="font-size: 0.72rem; color: #71717a; margin-top: 6px; border-top: 1px dashed #27272a; padding-top: 4px;">
+          Conferido em ${confDate} às ${confTime}
+        </div>
+      </div>
+
+      <!-- BOTÃO PRINCIPAL: 📷 PRÓXIMO PRODUTO -->
+      <button type="button" id="btn-blitz-next-product" class="btn-primary" style="
+        height: 56px;
+        font-size: 1.1rem;
+        font-weight: 900;
+        justify-content: center;
+        background: #10b981;
+        color: #022c22;
+        border-radius: 10px;
+        width: 100%;
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        box-shadow: 0 4px 14px rgba(16, 185, 129, 0.3);
+        cursor: pointer;
+      ">
+        <span style="font-size: 1.4rem;">📷</span>
+        <span>PRÓXIMO PRODUTO</span>
+      </button>
+
+      <div style="margin-top: 10px;">
+        <button type="button" id="btn-blitz-go-dashboard" style="background: none; border: none; color: #38bdf8; font-size: 0.82rem; font-weight: 700; cursor: pointer; text-decoration: underline; padding: 4px;">
+          📋 Ver Resumo da Blitz
+        </button>
+      </div>
+
+    </div>
+  `;
+
+  modal.classList.add('open');
+  const closeModal = () => modal.classList.remove('open');
+
+  document.getElementById('modal-blitz-success-backdrop')?.addEventListener('click', closeModal);
+
+  // Ao clicar em PRÓXIMO PRODUTO, já abre a câmera imediatamente para o próximo item do papel
+  document.getElementById('btn-blitz-next-product')?.addEventListener('click', () => {
+    closeModal();
+    startBlitzScanning();
+  });
+
+  document.getElementById('btn-blitz-go-dashboard')?.addEventListener('click', () => {
+    closeModal();
+    openBlitzDashboardView();
+  });
+}
+
+// ----------------------------------------------------
+// 15. FINALIZAR BLITZ & RESUMO
+// ----------------------------------------------------
+
 export async function finishActiveBlitzSession(sessionId = null) {
   const id = sessionId || currentActiveBlitzSession?.id;
   if (!id) return;
 
+  const session = await getBlitzSessionById(id) || currentActiveBlitzSession;
+  const periodLabel = session.period_label || `${formatDateBR(session.start_date)} → ${formatDateBR(session.end_date)}`;
+
   const confirmed = await promptConfirmDialog(
-    '🏁 FINALIZAR BLITZ SEMANAL?',
-    'Deseja concluir esta conferência? O histórico de contagens será preservado e você poderá gerar o relatório para o WhatsApp.'
+    '🏁 FINALIZAR BLITZ?',
+    `Deseja concluir a Blitz do período ${periodLabel}? Todos os registros serão salvos no histórico.`
   );
 
   if (!confirmed) return;
 
   try {
     showToast('Finalizando Blitz...', 'sync', 1000);
-    await finishBlitzSession(id);
+    const updated = await finishBlitzSession(id);
+    const items = await getBlitzItemsBySessionId(id);
+
     setActiveBlitz(null);
-    showToast('✓ Blitz semanal finalizada com sucesso!', 'success', 2500);
     triggerSyncNow().catch(e => console.warn('Sync error:', e));
-    await openBlitzHistoryView();
+
+    // Exibe o Resumo da Blitz Finalizada
+    showBlitzFinishedSummaryModal(updated || session, items);
   } catch (err) {
     console.error('Erro ao finalizar blitz:', err);
     showToast('Erro ao finalizar sessão da Blitz', 'warning');
   }
+}
+
+// Modal com Resumo da Blitz Finalizada
+function showBlitzFinishedSummaryModal(session, items) {
+  let modal = document.getElementById('modal-blitz-finished-summary');
+  if (!modal) {
+    modal = document.createElement('div');
+    modal.id = 'modal-blitz-finished-summary';
+    modal.className = 'custom-modal';
+    document.body.appendChild(modal);
+  }
+
+  let countTem = 0;
+  let countNaoTem = 0;
+  let totalUnits = 0;
+
+  items.forEach(it => {
+    if (it.result === 'TEM') {
+      countTem++;
+      totalUnits += Number(it.total_quantity) || 0;
+    } else {
+      countNaoTem++;
+    }
+  });
+
+  const periodLabel = session.period_label || `${formatDateBR(session.start_date)} → ${formatDateBR(session.end_date)}`;
+
+  modal.innerHTML = `
+    <div class="modal-backdrop" id="modal-blitz-summary-backdrop"></div>
+    <div class="modal-card" style="padding: 22px; max-width: 440px; width: 100%; box-sizing: border-box; text-align: center;">
+      
+      <div style="font-size: 2.2rem; margin-bottom: 4px;">🏁</div>
+      <h3 style="font-size: 1.25rem; font-weight: 900; color: #f4f4f5; margin: 0 0 2px 0;">
+        BLITZ FINALIZADA
+      </h3>
+      <div style="font-size: 0.88rem; font-weight: 800; color: #fbbf24; margin-bottom: 14px;">
+        Período: ${periodLabel}
+      </div>
+
+      <!-- Resumo Numérico -->
+      <div style="display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 6px; margin-bottom: 16px;">
+        <div style="background: #18181c; border: 1px solid #27272a; border-radius: 8px; padding: 10px 6px;">
+          <div style="font-size: 0.65rem; color: #a1a1aa; font-weight: 800;">TOTAL</div>
+          <div style="font-size: 1.35rem; font-weight: 900; color: #f4f4f5; margin-top: 2px;">${items.length}</div>
+        </div>
+        <div style="background: rgba(16, 185, 129, 0.1); border: 1px solid rgba(16, 185, 129, 0.3); border-radius: 8px; padding: 10px 6px;">
+          <div style="font-size: 0.65rem; color: #10b981; font-weight: 800;">🟢 TEM</div>
+          <div style="font-size: 1.35rem; font-weight: 900; color: #10b981; margin-top: 2px;">${countTem}</div>
+          <div style="font-size: 0.62rem; color: #a7f3d0; font-weight: 700;">${formatNumber(totalUnits)} un</div>
+        </div>
+        <div style="background: rgba(239, 68, 68, 0.1); border: 1px solid rgba(239, 68, 68, 0.3); border-radius: 8px; padding: 10px 6px;">
+          <div style="font-size: 0.65rem; color: #ef4444; font-weight: 800;">🔴 NÃO TEM</div>
+          <div style="font-size: 1.35rem; font-weight: 900; color: #ef4444; margin-top: 2px;">${countNaoTem}</div>
+        </div>
+      </div>
+
+      <div style="display: flex; flex-direction: column; gap: 8px;">
+        <button type="button" id="btn-summary-export-wa" class="btn-primary" style="height: 48px; font-weight: 900; justify-content: center; background: #25d366; color: #000; font-size: 0.95rem;">
+          💬 EXPORTAR NO WHATSAPP
+        </button>
+        <button type="button" id="btn-summary-close-all" class="btn-secondary" style="height: 44px; font-weight: 800; justify-content: center; font-size: 0.88rem;">
+          ✓ Concluir e Voltar ao Início
+        </button>
+      </div>
+
+    </div>
+  `;
+
+  modal.classList.add('open');
+  const closeModal = () => modal.classList.remove('open');
+
+  document.getElementById('modal-blitz-summary-backdrop')?.addEventListener('click', closeModal);
+
+  document.getElementById('btn-summary-export-wa')?.addEventListener('click', async () => {
+    const formatted = await formatBlitzSessionWhatsApp(session, items);
+    openWhatsAppExportModal(formatted, `Blitz ${periodLabel}`);
+  });
+
+  document.getElementById('btn-summary-close-all')?.addEventListener('click', () => {
+    closeModal();
+    showView('view-dashboard');
+  });
 }
 
 // Cancela a sessão da Blitz
@@ -448,1406 +1765,7 @@ export async function cancelActiveBlitzSession(sessionId = null) {
 }
 
 // ----------------------------------------------------
-// 2. LEITURA DE CÓDIGO DE BARRAS NA BLITZ
-// ----------------------------------------------------
-
-export async function handleBlitzBarcodeScanned(cleanBarcode) {
-  if (!currentActiveBlitzSession) {
-    return false;
-  }
-
-  showToast(`Código: ${cleanBarcode}`, 'info', 800);
-
-  // 1. Verifica se o produto existe no banco
-  const product = await getProductByBarcode(cleanBarcode);
-
-  if (!product) {
-    // PRODUTO NÃO CADASTRADO NO SISTEMA
-    promptRegisterNewProductForBlitz(cleanBarcode);
-    return true;
-  }
-
-  // 2. PRODUTO JÁ CADASTRADO: Pergunta qual data você está procurando
-  promptRequestedExpirationDate(product);
-  return true;
-}
-
-// ----------------------------------------------------
-// 3. PRODUTO CADASTRADO: QUAL DATA VOCÊ ESTÁ PROCURANDO?
-// ----------------------------------------------------
-
-async function promptRequestedExpirationDate(product) {
-  let modal = document.getElementById('modal-blitz-date-prompt');
-  if (!modal) {
-    modal = document.createElement('div');
-    modal.id = 'modal-blitz-date-prompt';
-    modal.className = 'custom-modal';
-    document.body.appendChild(modal);
-  }
-
-  const today = getTodayISO();
-  const expirations = await getProductExpirations(product.id);
-
-  // Ordena validades da mais próxima para a mais distante
-  expirations.sort((a, b) => new Date(a.expiration_date) - new Date(b.expiration_date));
-
-  let existingDatesHtml = '';
-  if (expirations.length > 0) {
-    existingDatesHtml = `
-      <div style="margin-bottom: 14px;">
-        <label style="font-size: 0.74rem; font-weight: 800; color: #a1a1aa; text-transform: uppercase; margin-bottom: 6px; display: block;">
-          Validades Cadastradas (toque para escolher):
-        </label>
-        <div style="display: flex; flex-wrap: wrap; gap: 6px; max-height: 120px; overflow-y: auto;">
-          ${expirations.map((exp) => `
-            <button type="button" class="btn-pick-existing-date" data-date="${exp.expiration_date}" style="
-              background: #18181c;
-              border: 1px solid rgba(245, 158, 11, 0.4);
-              border-radius: 6px;
-              padding: 6px 10px;
-              color: #fef08a;
-              font-size: 0.8rem;
-              font-weight: 800;
-              cursor: pointer;
-              display: flex;
-              align-items: center;
-              gap: 4px;
-            ">
-              <span>📅 ${formatDateBR(exp.expiration_date)}</span>
-              <small style="color: #a1a1aa; font-size: 0.7rem;">(${exp.current_total_quantity || 0} un)</small>
-            </button>
-          `).join('')}
-        </div>
-      </div>
-    `;
-  }
-
-  modal.innerHTML = `
-    <div class="modal-backdrop" id="modal-blitz-date-backdrop"></div>
-    <div class="modal-card" style="padding: 20px; max-width: 420px; width: 100%; box-sizing: border-box;">
-      
-      <!-- Cabeçalho do Produto -->
-      <div style="display: flex; align-items: center; gap: 10px; margin-bottom: 12px; border-bottom: 1px solid #27272a; padding-bottom: 10px;">
-        <div style="width: 44px; height: 44px; border-radius: 8px; background: #09090b; border: 1px solid #27272a; display: flex; align-items: center; justify-content: center; overflow: hidden; flex-shrink: 0;">
-          ${product.image ? `<img src="${product.image}" style="width: 100%; height: 100%; object-fit: cover;" />` : `<span style="font-size: 1.3rem;">📦</span>`}
-        </div>
-        <div style="flex: 1; min-width: 0;">
-          <div style="font-size: 0.72rem; color: #10b981; font-weight: 800; text-transform: uppercase;">
-            📦 PRODUTO ENCONTRADO
-          </div>
-          <h3 style="font-size: 0.95rem; font-weight: 900; color: #f4f4f5; margin: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">
-            ${product.name}
-          </h3>
-          <div style="font-size: 0.72rem; color: #a1a1aa; margin-top: 1px;">
-            Cód: <strong>${product.barcode}</strong> • Setor: ${product.sector || currentActiveBlitzSession?.sector}
-          </div>
-        </div>
-        <button type="button" id="btn-close-blitz-date" class="btn-icon-control" style="font-size: 1rem; width: 30px; height: 30px;">✕</button>
-      </div>
-
-      <div style="font-size: 0.88rem; font-weight: 800; color: #fef08a; margin-bottom: 12px; display: flex; align-items: center; gap: 6px;">
-        <span>📅</span>
-        <span>QUAL DATA VOCÊ ESTÁ PROCURANDO?</span>
-      </div>
-
-      ${existingDatesHtml}
-
-      <div class="form-group" style="margin-bottom: 12px;">
-        <label for="input-blitz-req-date" style="font-size: 0.76rem; font-weight: 800; color: #a1a1aa;">
-          DIGITAR OUTRA DATA:
-        </label>
-        <input
-          type="date"
-          id="input-blitz-req-date"
-          class="form-input form-input-lg"
-          value="${expirations[0]?.expiration_date || today}"
-          style="font-size: 1.1rem; font-weight: 800; text-align: center; border-color: #f59e0b; height: 46px;"
-          required
-        />
-      </div>
-
-      <!-- Atalhos Rápidos -->
-      <div style="display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; margin-bottom: 16px;">
-        <button type="button" class="btn-quick-date btn-secondary" data-days="0" style="padding: 6px; font-size: 0.74rem; font-weight: 800; justify-content: center;">Hoje</button>
-        <button type="button" class="btn-quick-date btn-secondary" data-days="15" style="padding: 6px; font-size: 0.74rem; font-weight: 800; justify-content: center;">+15 Dias</button>
-        <button type="button" class="btn-quick-date btn-secondary" data-days="30" style="padding: 6px; font-size: 0.74rem; font-weight: 800; justify-content: center;">+30 Dias</button>
-      </div>
-
-      <div style="display: flex; gap: 8px;">
-        <button type="button" id="btn-cancel-blitz-date" class="btn-secondary" style="flex: 1; height: 44px; justify-content: center;">
-          Cancelar
-        </button>
-        <button type="button" id="btn-confirm-blitz-date" class="btn-primary" style="flex: 1; height: 44px; justify-content: center; background: #f59e0b; color: #000; font-weight: 900;">
-          CONTINUAR ➔
-        </button>
-      </div>
-    </div>
-  `;
-
-  modal.classList.add('open');
-
-  const dateInput = document.getElementById('input-blitz-req-date');
-
-  const closeModal = () => modal.classList.remove('open');
-  document.getElementById('modal-blitz-date-backdrop')?.addEventListener('click', closeModal);
-  document.getElementById('btn-close-blitz-date')?.addEventListener('click', closeModal);
-  document.getElementById('btn-cancel-blitz-date')?.addEventListener('click', () => {
-    closeModal();
-    startBlitzScanning();
-  });
-
-  // Atalhos de datas cadastradas
-  modal.querySelectorAll('.btn-pick-existing-date').forEach((btn) => {
-    btn.addEventListener('click', async () => {
-      const pickedDate = btn.getAttribute('data-date');
-      closeModal();
-      await processBlitzProduct(product.barcode, pickedDate);
-    });
-  });
-
-  // Atalhos +15 / +30
-  modal.querySelectorAll('.btn-quick-date').forEach((btn) => {
-    btn.addEventListener('click', () => {
-      const days = Number(btn.getAttribute('data-days')) || 0;
-      const d = new Date();
-      d.setDate(d.getDate() + days);
-      const iso = d.toISOString().split('T')[0];
-      if (dateInput) dateInput.value = iso;
-    });
-  });
-
-  document.getElementById('btn-confirm-blitz-date')?.addEventListener('click', async () => {
-    const selectedDate = dateInput?.value || today;
-    closeModal();
-    await processBlitzProduct(product.barcode, selectedDate);
-  });
-}
-
-// ----------------------------------------------------
-// 4. CONSULTA HISTÓRICO & TELA DE DECISÃO (TEM OU NÃO TEM)
-// ----------------------------------------------------
-
-export async function processBlitzProduct(barcode, requestedDate) {
-  if (!currentActiveBlitzSession) return;
-
-  const product = await getProductByBarcode(barcode);
-  if (!product) {
-    promptRegisterNewProductForBlitz(barcode);
-    return;
-  }
-
-  // 1. Busca última conferência da Blitz para essa combinação específica (PRODUTO + DATA)
-  const lastBlitzItemForDate = await getLastBlitzItemForProductAndDate(product.id, requestedDate);
-
-  // 2. Busca se essa validade já existia no estoque cadastrado
-  const expRecord = await getExpirationByProductAndDate(product.id, requestedDate);
-
-  // 3. Determina quantidade anterior registrada
-  let previousQuantity = 0;
-  if (lastBlitzItemForDate) {
-    previousQuantity = Number(lastBlitzItemForDate.total_quantity) || 0;
-  } else if (expRecord) {
-    previousQuantity = Number(expRecord.current_total_quantity) || 0;
-  }
-
-  // 4. Busca histórico completo de contagens anteriores dessa combinação
-  const historyItems = await getAllBlitzItemsForProductAndDate(product.id, requestedDate);
-
-  showBlitzProductDecisionModal({
-    product,
-    requestedDate,
-    lastBlitzItem: lastBlitzItemForDate,
-    expRecord,
-    previousQuantity,
-    historyItems
-  });
-}
-
-// Modal de Decisão da Blitz: TEM ou NÃO TEM
-function showBlitzProductDecisionModal({
-  product,
-  requestedDate,
-  lastBlitzItem,
-  expRecord,
-  previousQuantity,
-  historyItems
-}) {
-  let modal = document.getElementById('modal-blitz-decision');
-  if (!modal) {
-    modal = document.createElement('div');
-    modal.id = 'modal-blitz-decision';
-    modal.className = 'custom-modal';
-    document.body.appendChild(modal);
-  }
-
-  // Monta card de ÚLTIMA CONFERÊNCIA
-  let lastConferenceCardHtml = '';
-  if (lastBlitzItem) {
-    const isTem = lastBlitzItem.result === 'TEM';
-    const dateWithWeekday = formatDateWithWeekday(lastBlitzItem.checked_at);
-    const timeAgoStr = formatTimeAgoDynamic(lastBlitzItem.checked_at);
-
-    lastConferenceCardHtml = `
-      <div style="background: #18181c; border: 1px solid ${isTem ? 'rgba(16, 185, 129, 0.4)' : 'rgba(239, 68, 68, 0.4)'}; border-radius: 8px; padding: 10px; margin-bottom: 12px;">
-        <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 4px;">
-          <span style="font-size: 0.72rem; color: #a1a1aa; font-weight: 800; text-transform: uppercase;">
-            🔄 ÚLTIMA CONFERÊNCIA:
-          </span>
-          <span style="font-size: 0.72rem; color: #fbbf24; font-weight: 800;">
-            ${timeAgoStr}
-          </span>
-        </div>
-        <div style="font-size: 0.78rem; color: #f4f4f5; font-weight: 700; margin-bottom: 4px;">
-          ${dateWithWeekday}
-        </div>
-        <div style="display: flex; align-items: center; justify-content: space-between; padding-top: 4px; border-top: 1px dashed #27272a;">
-          <span style="font-size: 0.74rem; color: #71717a;">Resultado:</span>
-          <span style="font-size: 0.88rem; font-weight: 900; color: ${isTem ? '#10b981' : '#ef4444'};">
-            ${isTem ? `🟢 TEM (${formatNumber(lastBlitzItem.total_quantity)} un)` : `🔴 NÃO TEM (0 un)`}
-          </span>
-        </div>
-        ${!isTem ? `
-          <div style="font-size: 0.72rem; color: #f87171; font-style: italic; margin-top: 4px;">
-            "Na última conferência esta validade NÃO foi encontrada."
-          </div>
-        ` : ''}
-      </div>
-    `;
-  } else if (expRecord) {
-    lastConferenceCardHtml = `
-      <div style="background: #18181c; border: 1px solid #2a2a30; border-radius: 8px; padding: 10px; margin-bottom: 12px;">
-        <div style="font-size: 0.72rem; color: #38bdf8; font-weight: 800; text-transform: uppercase; margin-bottom: 2px;">
-          ℹ️ VALIDADE JÁ CADASTRADA NO ESTOQUE
-        </div>
-        <div style="font-size: 0.8rem; color: #a1a1aa;">
-          Primeira vez conferida na Blitz. Estoque atual no sistema: <strong style="color: #f4f4f5;">${formatNumber(previousQuantity)} un</strong>
-        </div>
-      </div>
-    `;
-  } else {
-    lastConferenceCardHtml = `
-      <div style="background: rgba(245, 158, 11, 0.12); border: 1px solid rgba(245, 158, 11, 0.35); border-radius: 8px; padding: 10px; margin-bottom: 12px;">
-        <div style="font-size: 0.75rem; color: #fbbf24; font-weight: 800; text-transform: uppercase; margin-bottom: 2px;">
-          ⚠️ ESSA DATA AINDA NÃO ESTÁ CADASTRADA
-        </div>
-        <div style="font-size: 0.78rem; color: #fef08a;">
-          Esta validade ainda não constava no cadastro do produto. Você encontrou fisicamente essa data na loja?
-        </div>
-      </div>
-    `;
-  }
-
-  modal.innerHTML = `
-    <div class="modal-backdrop" id="modal-blitz-decision-backdrop"></div>
-    <div class="modal-card" style="padding: 20px; max-width: 440px; width: 100%; box-sizing: border-box;">
-      
-      <!-- Cabeçalho do Produto -->
-      <div style="display: flex; gap: 10px; align-items: center; margin-bottom: 12px; border-bottom: 1px solid #27272a; padding-bottom: 10px;">
-        <div style="width: 48px; height: 48px; border-radius: 8px; background: #09090b; border: 1px solid #27272a; display: flex; align-items: center; justify-content: center; overflow: hidden; flex-shrink: 0;">
-          ${product.image ? `<img src="${product.image}" style="width: 100%; height: 100%; object-fit: cover;" />` : `<span style="font-size: 1.4rem;">📦</span>`}
-        </div>
-        <div style="flex: 1; min-width: 0;">
-          <h3 style="font-size: 0.96rem; font-weight: 900; color: #f4f4f5; margin: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">
-            ${product.name}
-          </h3>
-          <div style="font-size: 0.74rem; color: #a1a1aa; margin-top: 2px;">
-            Cód: <strong>${product.barcode}</strong> • Corredor: ${product.corridor || '01'}
-          </div>
-        </div>
-      </div>
-
-      <!-- Validade Solicitada -->
-      <div style="background: rgba(245, 158, 11, 0.1); border: 2px solid rgba(245, 158, 11, 0.45); border-radius: 8px; padding: 8px 12px; text-align: center; margin-bottom: 12px;">
-        <div style="font-size: 0.7rem; color: #fbbf24; font-weight: 800; text-transform: uppercase; letter-spacing: 0.5px;">
-          VALIDADE SENDO CONFERIDA:
-        </div>
-        <div style="font-size: 1.35rem; font-weight: 900; color: #fef08a; margin-top: 2px;">
-          ${formatDateBR(requestedDate)}
-        </div>
-      </div>
-
-      ${lastConferenceCardHtml}
-
-      <div style="font-size: 0.88rem; font-weight: 900; color: #f4f4f5; text-align: center; margin-bottom: 14px;">
-        ESSA DATA TEM PRODUTO FISICAMENTE AGORA?
-      </div>
-
-      <!-- Botões de Decisão -->
-      <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-bottom: 10px;">
-        <button type="button" id="btn-blitz-decision-nao-tem" class="btn-secondary" style="
-          height: 56px;
-          border-color: rgba(239, 68, 68, 0.5);
-          background: rgba(239, 68, 68, 0.12);
-          color: #ef4444;
-          font-size: 1rem;
-          font-weight: 900;
-          display: flex;
-          flex-direction: column;
-          align-items: center;
-          justify-content: center;
-          gap: 2px;
-          cursor: pointer;
-        ">
-          <span>🔴 NÃO TEM</span>
-          <span style="font-size: 0.68rem; font-weight: 700; opacity: 0.9;">(Zerar Estoque Físico)</span>
-        </button>
-
-        <button type="button" id="btn-blitz-decision-tem" class="btn-primary" style="
-          height: 56px;
-          background: #10b981;
-          color: #022c22;
-          font-size: 1rem;
-          font-weight: 900;
-          display: flex;
-          flex-direction: column;
-          align-items: center;
-          justify-content: center;
-          gap: 2px;
-          cursor: pointer;
-        ">
-          <span>🟢 TEM</span>
-          <span style="font-size: 0.68rem; font-weight: 800; opacity: 0.9;">(Contar Locais)</span>
-        </button>
-      </div>
-
-      <!-- Botão Ver Histórico -->
-      <div style="display: flex; flex-direction: column; gap: 8px; margin-top: 6px;">
-        <button type="button" id="btn-blitz-view-history" class="btn-secondary" style="height: 38px; font-size: 0.78rem; font-weight: 800; justify-content: center; color: #38bdf8;">
-          📜 VER HISTÓRICO COMPLETO (${historyItems.length} conferências)
-        </button>
-        <button type="button" id="btn-blitz-decision-cancel" style="background: none; border: none; color: #71717a; font-size: 0.78rem; font-weight: 700; cursor: pointer; text-decoration: underline; padding: 4px;">
-          Voltar ao Scanner
-        </button>
-      </div>
-
-    </div>
-  `;
-
-  modal.classList.add('open');
-
-  const closeModal = () => modal.classList.remove('open');
-  document.getElementById('modal-blitz-decision-backdrop')?.addEventListener('click', closeModal);
-  document.getElementById('btn-blitz-decision-cancel')?.addEventListener('click', () => {
-    closeModal();
-    startBlitzScanning();
-  });
-
-  // Botão 🔴 NÃO TEM: Grava automaticamente quantidade 0 e volta ao scanner
-  document.getElementById('btn-blitz-decision-nao-tem')?.addEventListener('click', async () => {
-    closeModal();
-    await handleBlitzNaoTemSelection({
-      product,
-      requestedDate,
-      previousQuantity,
-      isNewExpiration: !expRecord
-    });
-  });
-
-  // Botão 🟢 TEM: Pergunta localização e quantidade
-  document.getElementById('btn-blitz-decision-tem')?.addEventListener('click', () => {
-    closeModal();
-    showBlitzLocationCountModal({
-      product,
-      requestedDate,
-      previousQuantity,
-      isNewExpiration: !expRecord
-    });
-  });
-
-  // Botão 📜 VER HISTÓRICO COMPLETO
-  document.getElementById('btn-blitz-view-history')?.addEventListener('click', () => {
-    showBlitzProductHistoryModal({
-      product,
-      requestedDate,
-      historyItems
-    });
-  });
-}
-
-// ----------------------------------------------------
-// 5. FLUXO: 🔴 NÃO TEM (ZERAR ESTOQUE FÍSICO COM HISTÓRICO)
-// ----------------------------------------------------
-
-async function handleBlitzNaoTemSelection({ product, requestedDate, previousQuantity, isNewExpiration }) {
-  if (!currentActiveBlitzSession) return;
-
-  try {
-    showToast('Registrando NÃO TEM...', 'sync', 1000);
-
-    await saveBlitzConferenceRecord({
-      sessionId: currentActiveBlitzSession.id,
-      productId: product.id,
-      barcode: product.barcode,
-      sector: currentActiveBlitzSession.sector,
-      requestedDate: requestedDate,
-      previousQuantity: previousQuantity,
-      newQuantity: 0,
-      result: 'NAO_TEM',
-      locations: [],
-      userName: currentActiveBlitzSession.user_name || 'Ana Luiza',
-      isNewExpiration: isNewExpiration
-    });
-
-    const diff = 0 - previousQuantity;
-    const diffStr = diff !== 0 ? ` (Diferença: ${diff} un)` : '';
-
-    showToast(`✅ CONFERÊNCIA REGISTRADA: NÃO TEM (0 un)${diffStr}`, 'success', 2500);
-    triggerSyncNow().catch(e => console.warn('Sync blitz item error:', e));
-
-    // Retorna imediatamente ao scanner para o próximo produto sem cliques extras
-    startBlitzScanning();
-  } catch (err) {
-    console.error('Erro ao registrar NÃO TEM na Blitz:', err);
-    showToast('Erro ao registrar conferência', 'warning');
-  }
-}
-
-// ----------------------------------------------------
-// 6. FLUXO: 🟢 TEM (SELEÇÃO DE LOCAIS E SOMA AUTOMÁTICA)
-// ----------------------------------------------------
-
-function showBlitzLocationCountModal({
-  product,
-  requestedDate,
-  previousQuantity,
-  isNewExpiration
-}) {
-  let modal = document.getElementById('modal-blitz-location-count');
-  if (!modal) {
-    modal = document.createElement('div');
-    modal.id = 'modal-blitz-location-count';
-    modal.className = 'custom-modal';
-    document.body.appendChild(modal);
-  }
-
-  // Estado local das contagens por local
-  const locationCounts = {};
-  BLITZ_LOCATIONS.forEach(loc => {
-    locationCounts[loc] = 0;
-  });
-
-  // Locais mais comuns abertos por padrão
-  const defaultOpenLocations = ['Área de venda', 'Depósito'];
-
-  modal.innerHTML = `
-    <div class="modal-backdrop" id="modal-blitz-loc-backdrop"></div>
-    <div class="modal-card" style="padding: 16px; max-width: 480px; width: 100%; box-sizing: border-box; max-height: 92vh; display: flex; flex-direction: column;">
-      
-      <!-- Cabeçalho -->
-      <div style="display: flex; align-items: center; justify-content: space-between; border-bottom: 1px solid #27272a; padding-bottom: 8px; margin-bottom: 10px;">
-        <div style="min-width: 0; flex: 1;">
-          <div style="display: flex; align-items: center; gap: 6px;">
-            <span style="font-size: 0.68rem; font-weight: 900; background: #10b981; color: #022c22; padding: 2px 6px; border-radius: 4px;">
-              🟢 TEM
-            </span>
-            <span style="font-size: 0.78rem; font-weight: 800; color: #fbbf24;">
-              Val: ${formatDateBR(requestedDate)}
-            </span>
-          </div>
-          <h3 style="font-size: 0.92rem; font-weight: 900; color: #f4f4f5; margin: 4px 0 0 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">
-            ${product.name}
-          </h3>
-        </div>
-        <button type="button" id="btn-close-blitz-loc" class="btn-icon-control" style="font-size: 1rem; width: 32px; height: 32px;">✕</button>
-      </div>
-
-      <div style="font-size: 0.82rem; font-weight: 800; color: #a1a1aa; margin-bottom: 8px;">
-        📍 ONDE O PRODUTO ESTÁ? (Informe a quantidade de cada local)
-      </div>
-
-      <!-- Lista de Locais com Inputs Numéricos Confortáveis para Mobile -->
-      <div style="flex: 1; overflow-y: auto; display: flex; flex-direction: column; gap: 6px; padding-right: 4px; margin-bottom: 12px;">
-        ${BLITZ_LOCATIONS.map((locName) => {
-          const isCommon = defaultOpenLocations.includes(locName);
-          return `
-            <div class="blitz-loc-row" data-location="${locName}" style="
-              background: #18181c;
-              border: 1px solid #27272a;
-              border-radius: 8px;
-              padding: 8px 10px;
-              display: flex;
-              align-items: center;
-              justify-content: space-between;
-              gap: 8px;
-            ">
-              <span style="font-size: 0.85rem; font-weight: 800; color: ${isCommon ? '#f4f4f5' : '#a1a1aa'};">
-                ${locName}
-              </span>
-              <div style="display: flex; align-items: center; gap: 6px;">
-                <input
-                  type="number"
-                  inputmode="numeric"
-                  pattern="[0-9]*"
-                  class="blitz-loc-input"
-                  data-location="${locName}"
-                  min="0"
-                  placeholder="0"
-                  value=""
-                  style="
-                    width: 90px;
-                    height: 40px;
-                    background: #09090b;
-                    border: 1px solid #3f3f46;
-                    border-radius: 6px;
-                    color: #10b981;
-                    font-size: 1.1rem;
-                    font-weight: 900;
-                    text-align: center;
-                    padding: 0;
-                  "
-                />
-                <span style="font-size: 0.72rem; color: #71717a; font-weight: 700;">un</span>
-              </div>
-            </div>
-          `;
-        }).join('')}
-      </div>
-
-      <!-- Resumo da Contagem e Comparativo com a Conferência Anterior -->
-      <div style="background: #121214; border: 1px solid #27272a; border-radius: 8px; padding: 10px; margin-bottom: 12px;">
-        <div style="display: flex; align-items: baseline; justify-content: space-between; margin-bottom: 6px;">
-          <span style="font-size: 0.78rem; font-weight: 800; color: #a1a1aa;">TOTAL ENCONTRADO:</span>
-          <span id="blitz-loc-total-display" style="font-size: 1.4rem; font-weight: 900; color: #10b981;">
-            0 <small style="font-size: 0.8rem; color: #a1a1aa;">unidades</small>
-          </span>
-        </div>
-
-        <div style="display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 4px; padding-top: 6px; border-top: 1px solid #27272a; text-align: center; font-size: 0.74rem;">
-          <div>
-            <span style="color: #71717a; display: block;">Anterior:</span>
-            <strong style="color: #f4f4f5; font-size: 0.88rem;">${formatNumber(previousQuantity)} un</strong>
-          </div>
-          <div>
-            <span style="color: #71717a; display: block;">Nova Contagem:</span>
-            <strong id="blitz-loc-new-count" style="color: #10b981; font-size: 0.88rem;">0 un</strong>
-          </div>
-          <div>
-            <span style="color: #71717a; display: block;">Diferença:</span>
-            <strong id="blitz-loc-difference" style="color: #a1a1aa; font-size: 0.88rem;">${previousQuantity > 0 ? `-${previousQuantity}` : '0'} un</strong>
-          </div>
-        </div>
-      </div>
-
-      <!-- Botão de Confirmação -->
-      <div style="display: flex; gap: 8px;">
-        <button type="button" id="btn-cancel-blitz-loc" class="btn-secondary" style="height: 48px; flex: 1; justify-content: center;">
-          Cancelar
-        </button>
-        <button type="button" id="btn-save-blitz-loc" class="btn-primary" style="height: 48px; flex: 2; justify-content: center; background: #10b981; color: #022c22; font-size: 0.95rem; font-weight: 900;">
-          ✓ CONFIRMAR E SALVAR
-        </button>
-      </div>
-
-    </div>
-  `;
-
-  modal.classList.add('open');
-
-  const updateTotalCalc = () => {
-    let sum = 0;
-    modal.querySelectorAll('.blitz-loc-input').forEach(inp => {
-      const val = parseInt(inp.value, 10);
-      if (!isNaN(val) && val > 0) {
-        sum += val;
-      }
-    });
-
-    const diff = sum - previousQuantity;
-    const totalDisplay = document.getElementById('blitz-loc-total-display');
-    const newCountDisplay = document.getElementById('blitz-loc-new-count');
-    const diffDisplay = document.getElementById('blitz-loc-difference');
-
-    if (totalDisplay) totalDisplay.innerHTML = `${formatNumber(sum)} <small style="font-size: 0.8rem; color: #a1a1aa;">unidades</small>`;
-    if (newCountDisplay) newCountDisplay.textContent = `${formatNumber(sum)} un`;
-
-    if (diffDisplay) {
-      if (diff > 0) {
-        diffDisplay.style.color = '#10b981';
-        diffDisplay.textContent = `+${formatNumber(diff)} un`;
-      } else if (diff < 0) {
-        diffDisplay.style.color = '#ef4444';
-        diffDisplay.textContent = `${formatNumber(diff)} un`;
-      } else {
-        diffDisplay.style.color = '#38bdf8';
-        diffDisplay.textContent = `0 un (igual)`;
-      }
-    }
-  };
-
-  modal.querySelectorAll('.blitz-loc-input').forEach(inp => {
-    inp.addEventListener('input', updateTotalCalc);
-  });
-
-  const closeModal = () => modal.classList.remove('open');
-  document.getElementById('modal-blitz-loc-backdrop')?.addEventListener('click', closeModal);
-  document.getElementById('btn-close-blitz-loc')?.addEventListener('click', closeModal);
-  document.getElementById('btn-cancel-blitz-loc')?.addEventListener('click', () => {
-    closeModal();
-    startBlitzScanning();
-  });
-
-  document.getElementById('btn-save-blitz-loc')?.addEventListener('click', async () => {
-    const locationsPayload = [];
-    let totalQty = 0;
-
-    modal.querySelectorAll('.blitz-loc-input').forEach(inp => {
-      const locName = inp.getAttribute('data-location');
-      const val = parseInt(inp.value, 10);
-      if (!isNaN(val) && val > 0) {
-        locationsPayload.push({
-          location: locName,
-          quantity: val
-        });
-        totalQty += val;
-      }
-    });
-
-    if (totalQty <= 0) {
-      const zeroConfirmed = await promptConfirmDialog(
-        '⚠️ QUANTIDADE ZERADA?',
-        'Você não digitou nenhuma quantidade nos locais. Se o produto não está presente, ele será registrado como NÃO TEM. Confirmar?'
-      );
-      if (!zeroConfirmed) return;
-
-      closeModal();
-      await handleBlitzNaoTemSelection({
-        product,
-        requestedDate,
-        previousQuantity,
-        isNewExpiration
-      });
-      return;
-    }
-
-    try {
-      closeModal();
-      showToast('Salvando conferência...', 'sync', 1000);
-
-      await saveBlitzConferenceRecord({
-        sessionId: currentActiveBlitzSession.id,
-        productId: product.id,
-        barcode: product.barcode,
-        sector: currentActiveBlitzSession.sector,
-        requestedDate: requestedDate,
-        previousQuantity: previousQuantity,
-        newQuantity: totalQty,
-        result: 'TEM',
-        locations: locationsPayload,
-        userName: currentActiveBlitzSession.user_name || 'Ana Luiza',
-        isNewExpiration: isNewExpiration
-      });
-
-      const diff = totalQty - previousQuantity;
-      const diffStr = diff > 0 ? ` (+${diff} un)` : diff < 0 ? ` (${diff} un)` : ' (=)';
-
-      showToast(`✅ CONFERÊNCIA REGISTRADA: ${product.name} • ${formatNumber(totalQty)} un${diffStr}`, 'success', 2500);
-      triggerSyncNow().catch(e => console.warn('Sync error:', e));
-
-      // Retorna imediatamente ao scanner para o próximo produto
-      startBlitzScanning();
-    } catch (err) {
-      console.error('Erro ao salvar conferência da Blitz:', err);
-      showToast('Erro ao salvar conferência', 'warning');
-    }
-  });
-}
-
-// ----------------------------------------------------
-// 7. MODAL: 📜 VER HISTÓRICO COMPLETO DESTA VALIDADE
-// ----------------------------------------------------
-
-function showBlitzProductHistoryModal({ product, requestedDate, historyItems }) {
-  let modal = document.getElementById('modal-blitz-history-detail');
-  if (!modal) {
-    modal = document.createElement('div');
-    modal.id = 'modal-blitz-history-detail';
-    modal.className = 'custom-modal';
-    document.body.appendChild(modal);
-  }
-
-  let listHtml = '';
-  if (historyItems.length === 0) {
-    listHtml = `
-      <div style="text-align: center; padding: 24px; color: #71717a; font-size: 0.85rem;">
-        Nenhuma conferência de Blitz anterior registrada para esta data.
-      </div>
-    `;
-  } else {
-    listHtml = historyItems.map((item) => {
-      const isTem = item.result === 'TEM';
-      const dateWeekday = formatDateWithWeekday(item.checked_at);
-      const timeAgo = formatTimeAgoDynamic(item.checked_at);
-      const diff = item.difference !== undefined ? Number(item.difference) : 0;
-      const diffLabel = diff > 0 ? `+${diff}` : `${diff}`;
-
-      const locsStr = item.locations && item.locations.length > 0
-        ? item.locations.map(l => `${l.location}: ${l.quantity} un`).join(' • ')
-        : '';
-
-      return `
-        <div style="
-          background: #18181c;
-          border: 1px solid ${isTem ? 'rgba(16, 185, 129, 0.3)' : 'rgba(239, 68, 68, 0.3)'};
-          border-radius: 8px;
-          padding: 10px;
-          display: flex;
-          flex-direction: column;
-          gap: 4px;
-        ">
-          <div style="display: flex; align-items: center; justify-content: space-between;">
-            <div style="display: flex; align-items: center; gap: 6px;">
-              <span style="font-size: 0.7rem; font-weight: 900; background: ${isTem ? 'rgba(16, 185, 129, 0.2)' : 'rgba(239, 68, 68, 0.2)'}; color: ${isTem ? '#10b981' : '#ef4444'}; padding: 2px 6px; border-radius: 4px;">
-                ${isTem ? '✓ TEM' : '✕ NÃO TEM'}
-              </span>
-              <span style="font-size: 0.74rem; color: #a1a1aa; font-weight: 700;">
-                ${dateWeekday}
-              </span>
-            </div>
-            <span style="font-size: 0.72rem; color: #fbbf24; font-weight: 800;">
-              ${timeAgo}
-            </span>
-          </div>
-
-          <div style="display: flex; align-items: baseline; justify-content: space-between; margin-top: 2px;">
-            <span style="font-size: 0.72rem; color: #71717a;">
-              Por ${item.user_name || 'Ana Luiza'} • Setor ${item.sector || 'MERCEARIA'}
-            </span>
-            <div style="text-align: right;">
-              <span style="font-size: 1.05rem; font-weight: 900; color: ${isTem ? '#10b981' : '#ef4444'};">
-                ${isTem ? `${formatNumber(item.total_quantity)} un` : '0 un'}
-              </span>
-              ${item.previous_quantity !== undefined ? `
-                <small style="font-size: 0.68rem; color: ${diff >= 0 ? '#34d399' : '#f87171'}; margin-left: 4px; font-weight: 800;">
-                  (${diffLabel} un)
-                </small>
-              ` : ''}
-            </div>
-          </div>
-
-          ${locsStr ? `
-            <div style="font-size: 0.7rem; color: #a1a1aa; background: #121214; padding: 4px 6px; border-radius: 4px; margin-top: 2px;">
-              📍 ${locsStr}
-            </div>
-          ` : ''}
-        </div>
-      `;
-    }).join('');
-  }
-
-  modal.innerHTML = `
-    <div class="modal-backdrop" id="modal-blitz-history-backdrop"></div>
-    <div class="modal-card" style="padding: 16px; max-width: 440px; width: 100%; box-sizing: border-box; max-height: 85vh; display: flex; flex-direction: column;">
-      
-      <div style="display: flex; align-items: center; justify-content: space-between; border-bottom: 1px solid #27272a; padding-bottom: 8px; margin-bottom: 10px;">
-        <div>
-          <h3 style="font-size: 0.95rem; font-weight: 900; color: #f4f4f5; margin: 0;">
-            📜 HISTÓRICO DESTA VALIDADE
-          </h3>
-          <span style="font-size: 0.74rem; color: #fbbf24; font-weight: 800;">
-            ${product.name} • ${formatDateBR(requestedDate)}
-          </span>
-        </div>
-        <button type="button" id="btn-close-blitz-history-detail" class="btn-icon-control" style="font-size: 1rem; width: 30px; height: 30px;">✕</button>
-      </div>
-
-      <div style="flex: 1; overflow-y: auto; display: flex; flex-direction: column; gap: 6px; padding-right: 2px; margin-bottom: 10px;">
-        ${listHtml}
-      </div>
-
-      <button type="button" id="btn-back-from-history" class="btn-secondary" style="height: 40px; justify-content: center; width: 100%;">
-        Voltar para Conferência
-      </button>
-
-    </div>
-  `;
-
-  modal.classList.add('open');
-
-  const closeModal = () => modal.classList.remove('open');
-  document.getElementById('modal-blitz-history-backdrop')?.addEventListener('click', closeModal);
-  document.getElementById('btn-close-blitz-history-detail')?.addEventListener('click', closeModal);
-  document.getElementById('btn-back-from-history')?.addEventListener('click', closeModal);
-}
-
-// ----------------------------------------------------
-// 8. PRODUTO NÃO CADASTRADO NO SISTEMA
-// ----------------------------------------------------
-
-function promptRegisterNewProductForBlitz(barcode) {
-  let modal = document.getElementById('modal-blitz-unregistered');
-  if (!modal) {
-    modal = document.createElement('div');
-    modal.id = 'modal-blitz-unregistered';
-    modal.className = 'custom-modal';
-    document.body.appendChild(modal);
-  }
-
-  const currentSector = currentActiveBlitzSession?.sector || 'MERCEARIA';
-
-  modal.innerHTML = `
-    <div class="modal-backdrop" id="modal-blitz-unreg-backdrop"></div>
-    <div class="modal-card" style="padding: 20px; max-width: 400px; width: 100%; box-sizing: border-box;">
-      
-      <div style="font-size: 2.2rem; margin-bottom: 4px; text-align: center;">⚠️</div>
-      <h3 style="font-size: 1.15rem; font-weight: 900; color: #f4f4f5; text-align: center; margin: 0 0 6px 0;">
-        PRODUTO NÃO CADASTRADO
-      </h3>
-      
-      <div style="background: #18181c; border: 1px solid #2a2a30; border-radius: 8px; padding: 10px; margin-bottom: 14px; text-align: center;">
-        <div style="font-size: 0.72rem; color: #a1a1aa; text-transform: uppercase; font-weight: 800;">Código de Barras Bipado:</div>
-        <div style="font-size: 1.15rem; font-weight: 900; color: #fbbf24; margin-top: 2px;">${barcode}</div>
-        <div style="font-size: 0.72rem; color: #71717a; margin-top: 2px;">Setor da Blitz: ${currentSector}</div>
-      </div>
-
-      <p style="font-size: 0.84rem; color: #a1a1aa; text-align: center; margin-bottom: 16px; line-height: 1.35;">
-        Este item não existe na base de dados. O que você deseja fazer?
-      </p>
-
-      <div style="display: flex; flex-direction: column; gap: 8px;">
-        <button type="button" id="btn-blitz-quick-register" class="btn-primary" style="height: 46px; font-weight: 900; justify-content: center; background: #10b981; color: #022c22; font-size: 0.95rem;">
-          🟢 CADASTRO RÁPIDO
-        </button>
-
-        <button type="button" id="btn-blitz-verify-later" class="btn-secondary" style="height: 42px; font-weight: 800; justify-content: center; color: #fbbf24; border-color: rgba(245, 158, 11, 0.4); font-size: 0.85rem;">
-          🟡 REGISTRAR PARA VERIFICAR DEPOIS
-        </button>
-
-        <button type="button" id="btn-blitz-unreg-cancel" style="background: none; border: none; color: #71717a; font-size: 0.78rem; font-weight: 700; cursor: pointer; text-decoration: underline; padding: 6px;">
-          Voltar ao Scanner
-        </button>
-      </div>
-
-    </div>
-  `;
-
-  modal.classList.add('open');
-
-  const closeModal = () => modal.classList.remove('open');
-  document.getElementById('modal-blitz-unreg-backdrop')?.addEventListener('click', closeModal);
-  document.getElementById('btn-blitz-unreg-cancel')?.addEventListener('click', () => {
-    closeModal();
-    startBlitzScanning();
-  });
-
-  // Opção 1: CADASTRO RÁPIDO
-  document.getElementById('btn-blitz-quick-register')?.addEventListener('click', () => {
-    closeModal();
-    openBlitzQuickRegisterModal(barcode);
-  });
-
-  // Opção 2: REGISTRAR PARA VERIFICAR DEPOIS
-  document.getElementById('btn-blitz-verify-later')?.addEventListener('click', async () => {
-    closeModal();
-    await recordBlitzItemUnidentified(barcode);
-  });
-}
-
-// Modal de Cadastro Rápido de Produto na Blitz
-function openBlitzQuickRegisterModal(barcode) {
-  let modal = document.getElementById('modal-blitz-quick-form');
-  if (!modal) {
-    modal = document.createElement('div');
-    modal.id = 'modal-blitz-quick-form';
-    modal.className = 'custom-modal';
-    document.body.appendChild(modal);
-  }
-
-  const currentSector = currentActiveBlitzSession?.sector || 'MERCEARIA';
-  let quickProdImage = '';
-
-  modal.innerHTML = `
-    <div class="modal-backdrop" id="modal-blitz-quick-backdrop"></div>
-    <div class="modal-card" style="padding: 20px; max-width: 420px; width: 100%; box-sizing: border-box;">
-      
-      <div style="display: flex; align-items: center; justify-content: space-between; border-bottom: 1px solid #27272a; padding-bottom: 8px; margin-bottom: 12px;">
-        <h3 style="font-size: 1.05rem; font-weight: 900; color: #f4f4f5; margin: 0;">
-          ⚡ CADASTRO RÁPIDO NA BLITZ
-        </h3>
-        <button type="button" id="btn-close-quick-reg" class="btn-icon-control" style="font-size: 1rem; width: 30px; height: 30px;">✕</button>
-      </div>
-
-      <form id="form-blitz-quick-reg" style="display: flex; flex-direction: column; gap: 10px;">
-        <!-- Fotografia do Produto -->
-        <div class="form-group" style="margin-bottom: 2px;">
-          <label style="font-size: 0.74rem; font-weight: 800; color: #a1a1aa; display: block; margin-bottom: 4px;">FOTOGRAFIA DO PRODUTO (OPCIONAL):</label>
-          <div style="display: flex; gap: 10px; align-items: center; background: #141416; padding: 8px; border-radius: 8px; border: 1px solid #27272a;">
-            <div id="quick-photo-preview-box" style="width: 64px; height: 64px; border-radius: 6px; overflow: hidden; background: #09090b; border: 1px solid #3f3f46; display: flex; align-items: center; justify-content: center; flex-shrink: 0;">
-              <div style="display: flex; flex-direction: column; align-items: center; justify-content: center; color: #71717a; font-size: 0.65rem; font-weight: 800; text-align: center;">
-                <span style="font-size: 1.1rem; margin-bottom: 2px;">📷</span>SEM FOTO
-              </div>
-            </div>
-            <div style="display: flex; flex-direction: column; gap: 6px; flex: 1;">
-              <div style="display: flex; gap: 6px;">
-                <button type="button" id="btn-quick-photo-camera" class="btn-secondary-mini" style="flex: 1; height: 32px; font-size: 0.76rem; font-weight: 800; justify-content: center;">
-                  📷 Câmera
-                </button>
-                <button type="button" id="btn-quick-photo-gallery" class="btn-secondary-mini" style="flex: 1; height: 32px; font-size: 0.76rem; font-weight: 800; justify-content: center;">
-                  🖼️ Galeria
-                </button>
-              </div>
-              <button type="button" id="btn-quick-photo-remove" class="btn-secondary-mini" style="height: 26px; font-size: 0.7rem; color: #ef4444; border-color: rgba(239, 68, 68, 0.3); display: none; justify-content: center;">
-                🗑️ Remover Foto
-              </button>
-              <input type="file" id="file-quick-camera" accept="image/*" capture="environment" class="hidden" />
-              <input type="file" id="file-quick-gallery" accept="image/*" class="hidden" />
-            </div>
-          </div>
-        </div>
-
-        <div class="form-group">
-          <label style="font-size: 0.74rem; font-weight: 800; color: #a1a1aa;">CÓDIGO DE BARRAS:</label>
-          <input type="text" id="quick-prod-barcode" class="form-input" value="${barcode}" readonly style="background: #18181c; color: #fbbf24; font-weight: 800;" />
-        </div>
-
-        <div class="form-group">
-          <label style="font-size: 0.74rem; font-weight: 800; color: #a1a1aa;">SETOR DA BLITZ:</label>
-          <input type="text" id="quick-prod-sector" class="form-input" value="${currentSector}" readonly style="background: #18181c; color: #10b981; font-weight: 800;" />
-        </div>
-
-        <div class="form-group">
-          <label for="quick-prod-name" style="font-size: 0.74rem; font-weight: 800; color: #f4f4f5;">NOME DO PRODUTO: *</label>
-          <input
-            type="text"
-            id="quick-prod-name"
-            class="form-input form-input-lg"
-            placeholder="Ex: CAFÉ PILÃO 500G"
-            style="text-transform: uppercase; font-weight: 800;"
-            required
-            autocomplete="off"
-          />
-        </div>
-
-        <div class="form-group">
-          <label for="quick-prod-corridor" style="font-size: 0.74rem; font-weight: 800; color: #a1a1aa;">CORREDOR / LOCAL:</label>
-          <select
-            id="quick-prod-corridor"
-            class="form-select"
-            style="font-weight: 800; background: #18181c; color: #f4f4f5; height: 44px; border-color: #27272a;"
-          >
-            ${CORRIDORS.map((c) => `<option value="${c}">${c}</option>`).join('')}
-          </select>
-        </div>
-
-        <div style="display: flex; gap: 8px; margin-top: 6px;">
-          <button type="button" id="btn-cancel-quick-reg" class="btn-secondary" style="height: 44px; flex: 1; justify-content: center;">
-            Cancelar
-          </button>
-          <button type="submit" class="btn-primary" style="height: 44px; flex: 1.5; justify-content: center; background: #10b981; color: #022c22; font-weight: 900;">
-            SALVAR E CONTINUAR ➔
-          </button>
-        </div>
-      </form>
-
-    </div>
-  `;
-
-  modal.classList.add('open');
-
-  const nameInput = document.getElementById('quick-prod-name');
-  setTimeout(() => nameInput?.focus(), 150);
-
-  const closeModal = () => modal.classList.remove('open');
-  document.getElementById('modal-blitz-quick-backdrop')?.addEventListener('click', closeModal);
-  document.getElementById('btn-close-quick-reg')?.addEventListener('click', closeModal);
-  document.getElementById('btn-cancel-quick-reg')?.addEventListener('click', () => {
-    closeModal();
-    startBlitzScanning();
-  });
-
-  // Gestão de Fotografia
-  const updatePhotoPreview = () => {
-    const box = document.getElementById('quick-photo-preview-box');
-    const removeBtn = document.getElementById('btn-quick-photo-remove');
-    if (!box) return;
-    if (quickProdImage) {
-      box.innerHTML = `<img src="${quickProdImage}" alt="Foto" style="width: 100%; height: 100%; object-fit: cover;" />`;
-      if (removeBtn) removeBtn.style.display = 'flex';
-    } else {
-      box.innerHTML = `<div style="display: flex; flex-direction: column; align-items: center; justify-content: center; color: #71717a; font-size: 0.65rem; font-weight: 800; text-align: center;"><span style="font-size: 1.1rem; margin-bottom: 2px;">📷</span>SEM FOTO</div>`;
-      if (removeBtn) removeBtn.style.display = 'none';
-    }
-  };
-
-  const handlePhotoFile = async (file) => {
-    if (!file) return;
-    try {
-      showToast('Comprimindo foto...', 'sync', 800);
-      const compressed = await compressImage(file, 600, 600, 0.72);
-      quickProdImage = compressed;
-      updatePhotoPreview();
-      showToast('✓ Foto adicionada!', 'success', 1200);
-    } catch (err) {
-      console.error('Erro ao processar imagem:', err);
-      showToast('Erro ao carregar foto', 'warning');
-    }
-  };
-
-  document.getElementById('btn-quick-photo-camera')?.addEventListener('click', () => {
-    document.getElementById('file-quick-camera')?.click();
-  });
-
-  document.getElementById('btn-quick-photo-gallery')?.addEventListener('click', () => {
-    document.getElementById('file-quick-gallery')?.click();
-  });
-
-  document.getElementById('file-quick-camera')?.addEventListener('change', (e) => {
-    const file = e.target.files?.[0];
-    if (file) handlePhotoFile(file);
-  });
-
-  document.getElementById('file-quick-gallery')?.addEventListener('change', (e) => {
-    const file = e.target.files?.[0];
-    if (file) handlePhotoFile(file);
-  });
-
-  document.getElementById('btn-quick-photo-remove')?.addEventListener('click', () => {
-    quickProdImage = '';
-    updatePhotoPreview();
-    const cInput = document.getElementById('file-quick-camera');
-    const gInput = document.getElementById('file-quick-gallery');
-    if (cInput) cInput.value = '';
-    if (gInput) gInput.value = '';
-  });
-
-  document.getElementById('form-blitz-quick-reg')?.addEventListener('submit', async (e) => {
-    e.preventDefault();
-    const name = nameInput?.value.trim().toUpperCase();
-    const corridor = document.getElementById('quick-prod-corridor')?.value || 'Corredor 1';
-
-    if (!name) {
-      showToast('Informe o nome do produto', 'warning');
-      return;
-    }
-
-    try {
-      showToast('Cadastrando produto...', 'sync', 1000);
-      const savedProd = await saveProduct({
-        barcode: barcode,
-        name: name,
-        sector: currentSector,
-        corridor: corridor,
-        image: quickProdImage
-      });
-
-      closeModal();
-      showToast(`✓ Produto cadastrado: ${name}`, 'success', 1500);
-      triggerSyncNow().catch(e => console.warn('Sync error:', e));
-
-      // Continua direto no fluxo da blitz sem voltar para o início!
-      promptRequestedExpirationDate(savedProd);
-    } catch (err) {
-      console.error('Erro ao salvar produto rápido na Blitz:', err);
-      showToast('Erro ao cadastrar produto', 'warning');
-    }
-  });
-}
-
-// Registra produto para verificar depois (NÃO IDENTIFICADO)
-async function recordBlitzItemUnidentified(barcode) {
-  if (!currentActiveBlitzSession) return;
-
-  try {
-    showToast('Registrando para verificação...', 'sync', 1000);
-
-    await saveBlitzItem({
-      blitz_session_id: currentActiveBlitzSession.id,
-      product_id: null,
-      barcode: barcode,
-      sector: currentActiveBlitzSession.sector,
-      requested_expiration_date: '',
-      previous_quantity: 0,
-      total_quantity: 0,
-      difference: 0,
-      result: 'NAO_IDENTIFICADO',
-      locations: [],
-      user_name: currentActiveBlitzSession.user_name || 'Ana Luiza'
-    });
-
-    showToast(`🟡 Registrado para verificar depois: ${barcode}`, 'info', 2000);
-    triggerSyncNow().catch(e => console.warn('Sync blitz item error:', e));
-
-    // Volta imediatamente ao scanner para o próximo produto
-    startBlitzScanning();
-  } catch (err) {
-    console.error('Erro ao registrar item não identificado:', err);
-    showToast('Erro ao salvar registro', 'warning');
-  }
-}
-
-// ----------------------------------------------------
-// 9. PAINEL DA BLITZ (DASHBOARD DA SESSÃO ATIVA)
-// ----------------------------------------------------
-
-export async function openBlitzDashboardView() {
-  if (!currentActiveBlitzSession) {
-    promptStartBlitz();
-    return;
-  }
-
-  const session = await getBlitzSessionById(currentActiveBlitzSession.id) || currentActiveBlitzSession;
-  currentActiveBlitzSession = session;
-
-  const sectorObj = BLITZ_SECTORS.find(s => s.id === session.blitz_type || s.label.toUpperCase() === session.sector) || {
-    label: session.sector || 'MERCEARIA',
-    icon: '📋'
-  };
-
-  const items = await getBlitzItemsBySessionId(session.id);
-
-  // Estatísticas
-  let countTem = 0;
-  let countNaoTem = 0;
-  let countUnidentified = 0;
-  let totalUnits = 0;
-
-  items.forEach(it => {
-    if (it.result === 'TEM') {
-      countTem++;
-      totalUnits += Number(it.total_quantity) || 0;
-    } else if (it.result === 'NAO_TEM') {
-      countNaoTem++;
-    } else {
-      countUnidentified++;
-    }
-  });
-
-  const container = document.getElementById('view-blitz-dashboard');
-  if (!container) return;
-
-  container.innerHTML = `
-    <header class="app-top-bar">
-      <button type="button" id="btn-blitz-dash-back" class="btn-back">← Início</button>
-      <span class="top-bar-title">BLITZ: ${sectorObj.label.toUpperCase()}</span>
-      <button type="button" id="btn-blitz-dash-history" class="btn-icon-link" style="color: #38bdf8;">Histórico</button>
-    </header>
-
-    <main style="padding: 12px; max-width: 680px; margin: 0 auto; display: flex; flex-direction: column; gap: 10px;">
-      
-      <!-- Card da Sessão Ativa -->
-      <div style="background: #121214; border: 1px solid rgba(245, 158, 11, 0.4); border-radius: 10px; padding: 12px; display: flex; flex-direction: column; gap: 8px;">
-        <div style="display: flex; align-items: center; justify-content: space-between;">
-          <div style="display: flex; align-items: center; gap: 8px;">
-            <span style="font-size: 1.6rem;">${sectorObj.icon}</span>
-            <div>
-              <h2 style="font-size: 1.05rem; font-weight: 900; color: #f4f4f5; margin: 0;">
-                SETOR: ${sectorObj.label.toUpperCase()}
-              </h2>
-              <span style="font-size: 0.72rem; color: #a1a1aa;">
-                Iniciada em ${new Date(session.started_at).toLocaleString('pt-BR')} • Por ${session.user_name || 'Ana Luiza'}
-              </span>
-            </div>
-          </div>
-          <span style="background: rgba(245, 158, 11, 0.15); color: #fbbf24; font-size: 0.7rem; font-weight: 800; padding: 2px 8px; border-radius: 9999px;">
-            EM ANDAMENTO
-          </span>
-        </div>
-
-        <!-- Grade de Métricas -->
-        <div style="display: grid; grid-template-columns: repeat(4, 1fr); gap: 4px; margin-top: 4px;">
-          <div style="background: #18181c; border: 1px solid #27272a; border-radius: 8px; padding: 8px 4px; text-align: center;">
-            <div style="font-size: 0.64rem; color: #a1a1aa; font-weight: 800;">TOTAL</div>
-            <div style="font-size: 1.25rem; font-weight: 900; color: #f4f4f5; margin-top: 2px;">${items.length}</div>
-          </div>
-          <div style="background: rgba(16, 185, 129, 0.1); border: 1px solid rgba(16, 185, 129, 0.3); border-radius: 8px; padding: 8px 4px; text-align: center;">
-            <div style="font-size: 0.64rem; color: #10b981; font-weight: 800;">✓ TEM</div>
-            <div style="font-size: 1.25rem; font-weight: 900; color: #10b981; margin-top: 2px;">${countTem}</div>
-            <div style="font-size: 0.62rem; color: #a7f3d0; font-weight: 700;">${formatNumber(totalUnits)} un</div>
-          </div>
-          <div style="background: rgba(239, 68, 68, 0.1); border: 1px solid rgba(239, 68, 68, 0.3); border-radius: 8px; padding: 8px 4px; text-align: center;">
-            <div style="font-size: 0.64rem; color: #ef4444; font-weight: 800;">✕ NÃO TEM</div>
-            <div style="font-size: 1.25rem; font-weight: 900; color: #ef4444; margin-top: 2px;">${countNaoTem}</div>
-          </div>
-          <div style="background: rgba(245, 158, 11, 0.1); border: 1px solid rgba(245, 158, 11, 0.3); border-radius: 8px; padding: 8px 4px; text-align: center;">
-            <div style="font-size: 0.64rem; color: #fbbf24; font-weight: 800;">⚠️ VERIFICAR</div>
-            <div style="font-size: 1.25rem; font-weight: 900; color: #fbbf24; margin-top: 2px;">${countUnidentified}</div>
-          </div>
-        </div>
-      </div>
-
-      <!-- Botão Gigante de Ação: Bipar Próximo -->
-      <button type="button" id="btn-blitz-continue-scan" class="btn-primary btn-hero-action" style="height: 52px; font-size: 1.05rem; justify-content: center; background: #10b981; color: #022c22; font-weight: 900;">
-        📷 BIPAR PRODUTO NA BLITZ
-      </button>
-
-      <!-- Ações da Sessão -->
-      <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 8px;">
-        <button type="button" id="btn-blitz-export-wa" class="btn-secondary" style="height: 42px; font-size: 0.82rem; justify-content: center; color: #25d366; border-color: rgba(37, 211, 102, 0.4); font-weight: 800;">
-          💬 Exportar no WhatsApp
-        </button>
-        <button type="button" id="btn-blitz-finish" class="btn-secondary" style="height: 42px; font-size: 0.82rem; justify-content: center; color: #fbbf24; border-color: rgba(245, 158, 11, 0.4); font-weight: 800;">
-          🏁 Finalizar Sessão
-        </button>
-      </div>
-
-      <!-- Lista de Itens Conferidos na Sessão -->
-      <div style="background: #121214; border: 1px solid #2a2a30; border-radius: 10px; padding: 12px; margin-top: 2px;">
-        <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 10px;">
-          <h3 style="font-size: 0.82rem; font-weight: 900; color: #f4f4f5; margin: 0; text-transform: uppercase;">
-            CONFERÊNCIAS (${items.length})
-          </h3>
-          
-          <!-- Filtro de Status -->
-          <div style="display: flex; gap: 4px; overflow-x: auto;">
-            <button type="button" class="btn-blitz-filter-tab active" data-filter="all" style="background: #27272a; border: 1px solid #3f3f46; color: #f4f4f5; padding: 3px 8px; border-radius: 4px; font-size: 0.7rem; font-weight: 800; cursor: pointer;">Todos</button>
-            <button type="button" class="btn-blitz-filter-tab" data-filter="TEM" style="background: #18181c; border: 1px solid #2a2a30; color: #10b981; padding: 3px 8px; border-radius: 4px; font-size: 0.7rem; font-weight: 800; cursor: pointer;">TEM</button>
-            <button type="button" class="btn-blitz-filter-tab" data-filter="NAO_TEM" style="background: #18181c; border: 1px solid #2a2a30; color: #ef4444; padding: 3px 8px; border-radius: 4px; font-size: 0.7rem; font-weight: 800; cursor: pointer;">NÃO TEM</button>
-            <button type="button" class="btn-blitz-filter-tab" data-filter="NAO_IDENTIFICADO" style="background: #18181c; border: 1px solid #2a2a30; color: #fbbf24; padding: 3px 8px; border-radius: 4px; font-size: 0.7rem; font-weight: 800; cursor: pointer;">Verificar</button>
-          </div>
-        </div>
-
-        <div id="blitz-session-items-list" style="display: flex; flex-direction: column; gap: 6px; max-height: 480px; overflow-y: auto;">
-          <!-- Renderizado via renderBlitzSessionItems -->
-        </div>
-      </div>
-
-      <!-- Cancelar Sessão -->
-      <div style="text-align: center; margin-top: 10px; margin-bottom: 20px;">
-        <button type="button" id="btn-blitz-cancel" class="btn-secondary" style="height: 42px; width: 100%; border-color: rgba(239, 68, 68, 0.4); color: #f87171; font-size: 0.82rem; font-weight: 800; justify-content: center; background: rgba(239, 68, 68, 0.08);">
-          🛑 Cancelar esta Blitz
-        </button>
-      </div>
-
-    </main>
-  `;
-
-  showView('view-blitz-dashboard');
-
-  // Listeners
-  document.getElementById('btn-blitz-dash-back')?.addEventListener('click', () => {
-    showView('view-dashboard');
-  });
-
-  document.getElementById('btn-blitz-dash-history')?.addEventListener('click', () => {
-    openBlitzHistoryView();
-  });
-
-  document.getElementById('btn-blitz-continue-scan')?.addEventListener('click', () => {
-    startBlitzScanning();
-  });
-
-  document.getElementById('btn-blitz-export-wa')?.addEventListener('click', async () => {
-    const formatted = await formatBlitzSessionWhatsApp(session, items);
-    openWhatsAppExportModal(formatted, `Blitz ${sectorObj.label}`);
-  });
-
-  document.getElementById('btn-blitz-finish')?.addEventListener('click', async () => {
-    await finishActiveBlitzSession(session.id);
-  });
-
-  document.getElementById('btn-blitz-cancel')?.addEventListener('click', async () => {
-    await cancelActiveBlitzSession(session.id);
-  });
-
-  // Abas de filtro
-  document.querySelectorAll('.btn-blitz-filter-tab').forEach(tab => {
-    tab.addEventListener('click', () => {
-      document.querySelectorAll('.btn-blitz-filter-tab').forEach(t => t.classList.remove('active'));
-      tab.classList.add('active');
-      const filter = tab.getAttribute('data-filter');
-      renderBlitzSessionItems(items, filter);
-    });
-  });
-
-  await renderBlitzSessionItems(items, 'all');
-}
-
-// Renderiza a lista de itens da sessão atual
-async function renderBlitzSessionItems(items, filter = 'all') {
-  const container = document.getElementById('blitz-session-items-list');
-  if (!container) return;
-
-  const filtered = items.filter(it => {
-    if (filter === 'all') return true;
-    return it.result === filter;
-  });
-
-  if (filtered.length === 0) {
-    container.innerHTML = `
-      <div style="text-align: center; padding: 24px; color: #71717a; font-size: 0.85rem;">
-        Nenhum item encontrado para este filtro.
-      </div>`;
-    return;
-  }
-
-  const htmlPromises = filtered.map(async (item) => {
-    const prod = item.product_id ? await getProductById(item.product_id) : null;
-    const isTem = item.result === 'TEM';
-    const isNaoTem = item.result === 'NAO_TEM';
-    const isUnreg = item.result === 'NAO_IDENTIFICADO';
-    const name = prod?.name || (isUnreg ? `PRODUTO NÃO CADASTRADO` : `PRODUTO ${item.barcode}`);
-    const timeFormatted = new Date(item.checked_at).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
-    const diff = item.difference !== undefined ? Number(item.difference) : 0;
-    const diffStr = diff > 0 ? `+${diff}` : `${diff}`;
-
-    return `
-      <div class="blitz-item-card" data-barcode="${item.barcode}" data-date="${item.requested_expiration_date}" style="
-        background: #18181c;
-        border: 1px solid ${isTem ? 'rgba(16, 185, 129, 0.3)' : isNaoTem ? 'rgba(239, 68, 68, 0.3)' : 'rgba(245, 158, 11, 0.4)'};
-        border-radius: 8px;
-        padding: 8px 10px;
-        display: flex;
-        align-items: center;
-        justify-content: space-between;
-        gap: 8px;
-      ">
-        <div style="flex: 1; min-width: 0;">
-          <div style="display: flex; align-items: center; gap: 6px; margin-bottom: 2px;">
-            <span style="
-              font-size: 0.65rem;
-              font-weight: 900;
-              padding: 2px 6px;
-              border-radius: 4px;
-              background: ${isTem ? 'rgba(16, 185, 129, 0.15)' : isNaoTem ? 'rgba(239, 68, 68, 0.15)' : 'rgba(245, 158, 11, 0.2)'};
-              color: ${isTem ? '#10b981' : isNaoTem ? '#ef4444' : '#fbbf24'};
-            ">
-              ${isTem ? '✓ TEM' : isNaoTem ? '✕ NÃO TEM' : '⚠️ NÃO IDENTIFICADO'}
-            </span>
-            ${item.requested_expiration_date ? `
-              <span style="font-size: 0.72rem; color: #fbbf24; font-weight: 800;">
-                Val: ${formatDateBR(item.requested_expiration_date)}
-              </span>
-            ` : ''}
-          </div>
-          <div style="font-size: 0.84rem; font-weight: 800; color: #f4f4f5; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">
-            ${name}
-          </div>
-          <div style="font-size: 0.7rem; color: #71717a; margin-top: 1px;">
-            ${item.barcode} • às ${timeFormatted}
-            ${item.previous_quantity !== undefined && !isUnreg ? ` • Ant: ${item.previous_quantity} un` : ''}
-          </div>
-        </div>
-
-        <div style="text-align: right; flex-shrink: 0;">
-          ${isTem ? `
-            <div style="font-size: 1.05rem; font-weight: 900; color: #10b981;">
-              ${formatNumber(item.total_quantity)} <small style="font-size: 0.7rem; font-weight: 700; color: #a1a1aa;">un</small>
-            </div>
-            <div style="font-size: 0.68rem; font-weight: 800; color: ${diff >= 0 ? '#34d399' : '#f87171'};">
-              ${diffStr} un
-            </div>
-          ` : isNaoTem ? `
-            <div style="font-size: 0.82rem; font-weight: 800; color: #ef4444;">
-              0 un
-            </div>
-            <div style="font-size: 0.68rem; font-weight: 800; color: #f87171;">
-              ${diffStr} un
-            </div>
-          ` : `
-            <div style="font-size: 0.74rem; font-weight: 800; color: #fbbf24;">
-              Verificar
-            </div>
-          `}
-        </div>
-      </div>
-    `;
-  });
-
-  const cards = await Promise.all(htmlPromises);
-  container.innerHTML = cards.join('');
-}
-
-// ----------------------------------------------------
-// 10. HISTÓRICO GERAL DE BLITZ E CONSULTAS POR PRODUTO
+// 11. HISTÓRICO GERAL DE BLITZ E POR PRODUTO
 // ----------------------------------------------------
 
 export async function openBlitzHistoryView() {
@@ -1855,7 +1773,6 @@ export async function openBlitzHistoryView() {
   if (!container) return;
 
   const sessions = await getAllBlitzSessions();
-  const allBlitzItems = await getAllBlitzItems();
 
   container.innerHTML = `
     <header class="app-top-bar">
@@ -1866,26 +1783,26 @@ export async function openBlitzHistoryView() {
       </button>
     </header>
 
-    <main style="padding: 12px; max-width: 680px; margin: 0 auto; display: flex; flex-direction: column; gap: 12px;">
+    <main style="padding: 12px; max-width: 640px; margin: 0 auto; display: flex; flex-direction: column; gap: 12px;">
       
-      <!-- Abas de Navegação do Histórico -->
+      <!-- Abas de Navegação -->
       <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 6px; background: #121214; padding: 4px; border-radius: 8px; border: 1px solid #27272a;">
         <button type="button" id="tab-history-sessions" class="history-tab-btn active" style="padding: 8px; font-size: 0.78rem; font-weight: 800; border: none; border-radius: 6px; background: #27272a; color: #f4f4f5; cursor: pointer;">
-          📁 SESSÕES REALIZADAS (${sessions.length})
+          📁 SESSÕES (${sessions.length})
         </button>
         <button type="button" id="tab-history-products" class="history-tab-btn" style="padding: 8px; font-size: 0.78rem; font-weight: 800; border: none; border-radius: 6px; background: transparent; color: #a1a1aa; cursor: pointer;">
-          📜 HISTÓRICO POR PRODUTO
+          📜 POR PRODUTO
         </button>
       </div>
 
-      <!-- PAINEL 1: SESSÕES REALIZADAS -->
+      <!-- PAINEL 1: SESSÕES -->
       <div id="panel-history-sessions" style="display: flex; flex-direction: column; gap: 8px;">
         <div id="blitz-history-sessions-list" style="display: flex; flex-direction: column; gap: 8px;">
-          <!-- Renderizado via renderBlitzHistoryList -->
+          <!-- Renderizado via renderBlitzHistorySessions -->
         </div>
       </div>
 
-      <!-- PAINEL 2: HISTÓRICO POR PRODUTO + VALIDADE (PESQUISA EM TEMPO REAL) -->
+      <!-- PAINEL 2: HISTÓRICO POR PRODUTO -->
       <div id="panel-history-products" class="hidden" style="display: flex; flex-direction: column; gap: 10px;">
         <div class="form-group" style="margin-bottom: 2px;">
           <input
@@ -1899,7 +1816,7 @@ export async function openBlitzHistoryView() {
 
         <div id="blitz-product-history-results" style="display: flex; flex-direction: column; gap: 6px;">
           <div style="text-align: center; padding: 30px; color: #71717a; font-size: 0.85rem;">
-            Digite acima para pesquisar o histórico de qualquer produto.
+            Digite acima para pesquisar o histórico de qualquer produto na blitz.
           </div>
         </div>
       </div>
@@ -1928,10 +1845,8 @@ export async function openBlitzHistoryView() {
   const panelProducts = document.getElementById('panel-history-products');
 
   tabSessions?.addEventListener('click', () => {
-    tabSessions.classList.add('active');
     tabSessions.style.background = '#27272a';
     tabSessions.style.color = '#f4f4f5';
-    tabProducts.classList.remove('active');
     tabProducts.style.background = 'transparent';
     tabProducts.style.color = '#a1a1aa';
     panelSessions?.classList.remove('hidden');
@@ -1939,72 +1854,62 @@ export async function openBlitzHistoryView() {
   });
 
   tabProducts?.addEventListener('click', () => {
-    tabProducts.classList.add('active');
     tabProducts.style.background = '#27272a';
     tabProducts.style.color = '#f4f4f5';
-    tabSessions.classList.remove('active');
     tabSessions.style.background = 'transparent';
     tabSessions.style.color = '#a1a1aa';
     panelProducts?.classList.remove('hidden');
     panelSessions?.classList.add('hidden');
   });
 
-  // Renderiza Sessões
-  renderBlitzHistoryList(sessions);
-
-  // Busca de histórico por produto
-  const searchInput = document.getElementById('input-search-product-blitz-history');
-  searchInput?.addEventListener('input', () => {
-    const term = searchInput.value.trim().toLowerCase();
-    renderProductHistorySearch(allBlitzItems, term);
+  // Busca por produto
+  const searchProdInput = document.getElementById('input-search-product-blitz-history');
+  searchProdInput?.addEventListener('input', async (e) => {
+    const q = e.target.value.trim().toLowerCase();
+    await renderProductHistorySearchResults(q);
   });
+
+  await renderBlitzHistorySessions(sessions);
 }
 
-// Renderiza lista de sessões no histórico
-async function renderBlitzHistoryList(sessions) {
+// Renderiza a lista de sessões no histórico
+async function renderBlitzHistorySessions(sessions) {
   const container = document.getElementById('blitz-history-sessions-list');
   if (!container) return;
 
   if (sessions.length === 0) {
     container.innerHTML = `
-      <div style="text-align: center; padding: 40px; color: #71717a; font-size: 0.9rem;">
-        Nenhuma sessão de Blitz realizada até o momento.
-      </div>`;
+      <div style="text-align: center; padding: 40px; color: #71717a; font-size: 0.85rem;">
+        Nenhuma sessão de Blitz realizada ainda.
+      </div>
+    `;
     return;
   }
 
-  const htmlPromises = sessions.map(async (session) => {
-    const items = await getBlitzItemsBySessionId(session.id);
-    const sectorObj = BLITZ_SECTORS.find(s => s.id === session.blitz_type || s.label.toUpperCase() === session.sector) || {
-      label: session.sector || 'MERCEARIA',
-      icon: '📋'
-    };
+  const htmlPromises = sessions.map(async (s) => {
+    const items = await getBlitzItemsBySessionId(s.id);
+    let temCount = 0;
+    let naoTemCount = 0;
+    let units = 0;
 
-    let countTem = 0;
-    let countNaoTem = 0;
-    let totalQty = 0;
     items.forEach(it => {
       if (it.result === 'TEM') {
-        countTem++;
-        totalQty += Number(it.total_quantity) || 0;
-      } else if (it.result === 'NAO_TEM') {
-        countNaoTem++;
+        temCount++;
+        units += Number(it.total_quantity) || 0;
+      } else {
+        naoTemCount++;
       }
     });
 
-    const isRunning = session.status === 'em_andamento';
-    const isFinished = session.status === 'finalizada';
-
-    const statusBadge = isRunning
-      ? `<span style="background: rgba(245, 158, 11, 0.15); color: #fbbf24; font-size: 0.68rem; font-weight: 800; padding: 2px 6px; border-radius: 4px;">EM ANDAMENTO</span>`
-      : isFinished
-      ? `<span style="background: rgba(16, 185, 129, 0.15); color: #10b981; font-size: 0.68rem; font-weight: 800; padding: 2px 6px; border-radius: 4px;">FINALIZADA</span>`
-      : `<span style="background: rgba(239, 68, 68, 0.15); color: #ef4444; font-size: 0.68rem; font-weight: 800; padding: 2px 6px; border-radius: 4px;">CANCELADA</span>`;
+    const isOngoing = s.status === 'em_andamento';
+    const isCanceled = s.status === 'cancelada';
+    const periodLabel = s.period_label || `${formatDateBR(s.start_date)} → ${formatDateBR(s.end_date)}`;
+    const startedAtFormatted = new Date(s.started_at).toLocaleString('pt-BR');
 
     return `
-      <div class="blitz-history-card" style="
+      <div style="
         background: #121214;
-        border: 1px solid #2a2a30;
+        border: 1px solid ${isOngoing ? '#f59e0b' : '#27272a'};
         border-radius: 10px;
         padding: 12px;
         display: flex;
@@ -2012,39 +1917,44 @@ async function renderBlitzHistoryList(sessions) {
         gap: 8px;
       ">
         <div style="display: flex; align-items: center; justify-content: space-between;">
-          <div style="display: flex; align-items: center; gap: 8px;">
-            <span style="font-size: 1.4rem;">${sectorObj.icon}</span>
-            <div>
-              <div style="font-size: 0.92rem; font-weight: 900; color: #f4f4f5;">
-                SETOR ${sectorObj.label.toUpperCase()}
-              </div>
-              <div style="font-size: 0.72rem; color: #a1a1aa;">
-                ${new Date(session.started_at).toLocaleString('pt-BR')} • Por ${session.user_name || 'Ana Luiza'}
-              </div>
-            </div>
+          <div style="font-size: 0.92rem; font-weight: 900; color: #f4f4f5;">
+            📅 ${periodLabel}
           </div>
-          ${statusBadge}
+          <span style="
+            font-size: 0.68rem;
+            font-weight: 800;
+            padding: 2px 8px;
+            border-radius: 9999px;
+            background: ${isOngoing ? 'rgba(245, 158, 11, 0.2)' : isCanceled ? 'rgba(239, 68, 68, 0.2)' : 'rgba(16, 185, 129, 0.2)'};
+            color: ${isOngoing ? '#fbbf24' : isCanceled ? '#f87171' : '#34d399'};
+          ">
+            ${isOngoing ? 'EM ANDAMENTO' : isCanceled ? 'CANCELADA' : 'FINALIZADA'}
+          </span>
         </div>
 
-        <div style="display: grid; grid-template-columns: repeat(3, 1fr); gap: 4px; background: #18181c; padding: 6px; border-radius: 6px; font-size: 0.72rem; text-align: center;">
-          <div><span style="color: #71717a;">Total:</span> <strong>${items.length} itens</strong></div>
-          <div><span style="color: #10b981;">TEM:</span> <strong>${countTem} (${formatNumber(totalQty)} un)</strong></div>
-          <div><span style="color: #ef4444;">NÃO TEM:</span> <strong>${countNaoTem}</strong></div>
+        <div style="font-size: 0.72rem; color: #a1a1aa;">
+          Iniciada em ${startedAtFormatted} por ${s.user_name || 'Ana Luiza'}
+        </div>
+
+        <div style="display: flex; gap: 8px; background: #18181c; padding: 6px 10px; border-radius: 6px; font-size: 0.76rem; font-weight: 800;">
+          <span style="color: #f4f4f5;">Total: <strong>${items.length}</strong></span>
+          <span style="color: #10b981;">• TEM: <strong>${temCount}</strong> (${formatNumber(units)} un)</span>
+          <span style="color: #ef4444;">• NÃO TEM: <strong>${naoTemCount}</strong></span>
         </div>
 
         <div style="display: flex; gap: 6px; margin-top: 2px;">
-          ${isRunning ? `
-            <button type="button" class="btn-resume-history-session btn-primary" data-id="${session.id}" style="flex: 1; height: 36px; font-size: 0.78rem; justify-content: center; background: #f59e0b; color: #000; font-weight: 800;">
-              Continuar Sessão
-            </button>
-            <button type="button" class="btn-cancel-history-session btn-secondary" data-id="${session.id}" style="height: 36px; font-size: 0.78rem; justify-content: center; color: #ef4444; border-color: rgba(239, 68, 68, 0.4); padding: 0 10px; font-weight: 800;">
-              ✕ Cancelar
+          ${isOngoing ? `
+            <button type="button" class="btn-resume-history-session btn-primary" data-id="${s.id}" style="flex: 1; height: 34px; font-size: 0.76rem; font-weight: 900; background: #f59e0b; color: #000; justify-content: center;">
+              ▶ Retomar Blitz
             </button>
           ` : `
-            <button type="button" class="btn-export-history-session btn-secondary" data-id="${session.id}" style="flex: 1; height: 36px; font-size: 0.78rem; justify-content: center; color: #25d366; font-weight: 800; border-color: rgba(37, 211, 102, 0.4);">
-              💬 Exportar WhatsApp
+            <button type="button" class="btn-view-history-detail btn-secondary" data-id="${s.id}" style="flex: 1; height: 34px; font-size: 0.76rem; font-weight: 800; justify-content: center;">
+              👁️ Ver Detalhes
             </button>
           `}
+          <button type="button" class="btn-export-wa-history btn-secondary" data-id="${s.id}" style="height: 34px; font-size: 0.76rem; font-weight: 800; color: #25d366; border-color: rgba(37, 211, 102, 0.4); justify-content: center; padding: 0 10px;">
+            💬 WhatsApp
+          </button>
         </div>
       </div>
     `;
@@ -2053,6 +1963,7 @@ async function renderBlitzHistoryList(sessions) {
   const cards = await Promise.all(htmlPromises);
   container.innerHTML = cards.join('');
 
+  // Listeners
   container.querySelectorAll('.btn-resume-history-session').forEach(btn => {
     btn.addEventListener('click', async () => {
       const id = btn.getAttribute('data-id');
@@ -2064,171 +1975,215 @@ async function renderBlitzHistoryList(sessions) {
     });
   });
 
-  container.querySelectorAll('.btn-cancel-history-session').forEach(btn => {
-    btn.addEventListener('click', async () => {
-      const id = btn.getAttribute('data-id');
-      const canceled = await cancelActiveBlitzSession(id);
-      if (canceled) {
-        await openBlitzHistoryView();
-      }
-    });
-  });
-
-  container.querySelectorAll('.btn-export-history-session').forEach(btn => {
+  container.querySelectorAll('.btn-export-wa-history').forEach(btn => {
     btn.addEventListener('click', async () => {
       const id = btn.getAttribute('data-id');
       const sess = await getBlitzSessionById(id);
       if (sess) {
-        const items = await getBlitzItemsBySessionId(sess.id);
+        const items = await getBlitzItemsBySessionId(id);
         const formatted = await formatBlitzSessionWhatsApp(sess, items);
-        openWhatsAppExportModal(formatted, `Histórico Blitz`);
+        openWhatsAppExportModal(formatted, `Blitz ${sess.period_label}`);
+      }
+    });
+  });
+
+  container.querySelectorAll('.btn-view-history-detail').forEach(btn => {
+    btn.addEventListener('click', async () => {
+      const id = btn.getAttribute('data-id');
+      const sess = await getBlitzSessionById(id);
+      if (sess) {
+        openBlitzSessionDetailModal(sess);
       }
     });
   });
 }
 
-// Renderiza busca de histórico por produto
-async function renderProductHistorySearch(allItems, term) {
+// Modal de detalhes de uma sessão histórica
+async function openBlitzSessionDetailModal(session) {
+  let modal = document.getElementById('modal-blitz-history-detail');
+  if (!modal) {
+    modal = document.createElement('div');
+    modal.id = 'modal-blitz-history-detail';
+    modal.className = 'custom-modal';
+    document.body.appendChild(modal);
+  }
+
+  const items = await getBlitzItemsBySessionId(session.id);
+  const periodLabel = session.period_label || `${formatDateBR(session.start_date)} → ${formatDateBR(session.end_date)}`;
+
+  modal.innerHTML = `
+    <div class="modal-backdrop" id="modal-blitz-detail-backdrop"></div>
+    <div class="modal-card" style="padding: 16px; max-width: 460px; width: 100%; box-sizing: border-box; max-height: 85vh; display: flex; flex-direction: column;">
+      
+      <div style="display: flex; align-items: center; justify-content: space-between; border-bottom: 1px solid #27272a; padding-bottom: 8px; margin-bottom: 10px;">
+        <div>
+          <h3 style="font-size: 0.98rem; font-weight: 900; color: #f4f4f5; margin: 0;">
+            DETALHES DA BLITZ
+          </h3>
+          <span style="font-size: 0.74rem; color: #fbbf24; font-weight: 800;">
+            ${periodLabel} (${items.length} itens)
+          </span>
+        </div>
+        <button type="button" id="btn-close-blitz-detail" class="btn-icon-control" style="font-size: 1rem; width: 30px; height: 30px;">✕</button>
+      </div>
+
+      <div id="modal-blitz-detail-items" style="flex: 1; overflow-y: auto; display: flex; flex-direction: column; gap: 6px; padding-right: 2px;">
+        <!-- Renderizado dinamicamente -->
+      </div>
+
+      <div style="display: flex; gap: 8px; margin-top: 10px;">
+        <button type="button" id="btn-detail-wa-export" class="btn-primary" style="flex: 1; height: 40px; font-weight: 800; background: #25d366; color: #000; justify-content: center; font-size: 0.85rem;">
+          💬 WhatsApp
+        </button>
+        <button type="button" id="btn-detail-close" class="btn-secondary" style="flex: 1; height: 40px; font-weight: 800; justify-content: center; font-size: 0.85rem;">
+          Fechar
+        </button>
+      </div>
+
+    </div>
+  `;
+
+  modal.classList.add('open');
+  const closeModal = () => modal.classList.remove('open');
+
+  document.getElementById('modal-blitz-detail-backdrop')?.addEventListener('click', closeModal);
+  document.getElementById('btn-close-blitz-detail')?.addEventListener('click', closeModal);
+  document.getElementById('btn-detail-close')?.addEventListener('click', closeModal);
+
+  document.getElementById('btn-detail-wa-export')?.addEventListener('click', async () => {
+    const formatted = await formatBlitzSessionWhatsApp(session, items);
+    openWhatsAppExportModal(formatted, `Blitz ${periodLabel}`);
+  });
+
+  const listEl = document.getElementById('modal-blitz-detail-items');
+  if (listEl) {
+    if (items.length === 0) {
+      listEl.innerHTML = '<div style="text-align: center; color: #71717a; padding: 20px;">Nenhum item nesta conferência.</div>';
+    } else {
+      const pCards = items.map(async (it) => {
+        const prod = it.product_id ? await getProductById(it.product_id) : null;
+        const name = prod?.name || `PRODUTO ${it.barcode}`;
+        const isTem = it.result === 'TEM';
+        const dateBR = it.requested_expiration_date ? formatDateBR(it.requested_expiration_date) : '--/--/----';
+        return `
+          <div style="background: #18181c; border: 1px solid #27272a; border-radius: 6px; padding: 8px; display: flex; justify-content: space-between; align-items: center;">
+            <div style="min-width: 0; flex: 1;">
+              <div style="font-size: 0.82rem; font-weight: 800; color: #f4f4f5; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">${name}</div>
+              <div style="font-size: 0.7rem; color: #a1a1aa;">Val: ${dateBR} • Cód: ${it.barcode}</div>
+            </div>
+            <div style="text-align: right; flex-shrink: 0; margin-left: 8px;">
+              <span style="font-size: 0.88rem; font-weight: 900; color: ${isTem ? '#10b981' : '#ef4444'};">
+                ${isTem ? `TEM (${it.total_quantity} un)` : 'NÃO TEM'}
+              </span>
+            </div>
+          </div>
+        `;
+      });
+      listEl.innerHTML = (await Promise.all(pCards)).join('');
+    }
+  }
+}
+
+// Busca e renderiza histórico por produto
+async function renderProductHistorySearchResults(query) {
   const container = document.getElementById('blitz-product-history-results');
   if (!container) return;
 
-  if (!term || term.length < 2) {
-    container.innerHTML = `
-      <div style="text-align: center; padding: 24px; color: #71717a; font-size: 0.85rem;">
-        Digite pelo menos 2 caracteres para pesquisar.
-      </div>`;
-    return;
-  }
-
-  // Agrupa conferências por chave: barcode + requested_expiration_date
-  const matchingItems = allItems.filter(it => {
-    return (it.barcode && it.barcode.toLowerCase().includes(term)) ||
-           (it.notes && it.notes.toLowerCase().includes(term));
-  });
-
-  // Também busca produtos cujo nome coincida
-  const { getAllProducts } = await import('./db.js');
-  const allProducts = await getAllProducts();
-  const matchedProdIds = new Set(
-    allProducts.filter(p => p.name && p.name.toLowerCase().includes(term)).map(p => p.id)
-  );
-
-  const combined = allItems.filter(it => {
-    return matchingItems.includes(it) || (it.product_id && matchedProdIds.has(it.product_id));
-  });
-
-  if (combined.length === 0) {
+  if (!query || query.length < 2) {
     container.innerHTML = `
       <div style="text-align: center; padding: 30px; color: #71717a; font-size: 0.85rem;">
-        Nenhum registro de conferência encontrado para "${term}".
-      </div>`;
+        Digite ao menos 2 caracteres para pesquisar.
+      </div>
+    `;
     return;
   }
 
-  combined.sort((a, b) => new Date(b.checked_at || 0) - new Date(a.checked_at || 0));
+  const allItems = await getAllBlitzItems();
+  const matching = [];
 
-  const prodMap = new Map();
-  allProducts.forEach(p => prodMap.set(p.id, p));
+  for (const item of allItems) {
+    const prod = item.product_id ? await getProductById(item.product_id) : null;
+    const name = (prod?.name || '').toLowerCase();
+    const barcode = String(item.barcode || '').toLowerCase();
 
-  const html = combined.slice(0, 50).map(item => {
-    const prod = item.product_id ? prodMap.get(item.product_id) : null;
-    const name = prod?.name || `CÓDIGO: ${item.barcode}`;
+    if (name.includes(query) || barcode.includes(query)) {
+      matching.push({ item, prodName: prod?.name || `Cód: ${item.barcode}` });
+    }
+  }
+
+  if (matching.length === 0) {
+    container.innerHTML = `
+      <div style="text-align: center; padding: 30px; color: #71717a; font-size: 0.85rem;">
+        Nenhum registro encontrado para "${query}".
+      </div>
+    `;
+    return;
+  }
+
+  // Ordena por conferência mais recente
+  matching.sort((a, b) => new Date(b.item.checked_at || 0) - new Date(a.item.checked_at || 0));
+
+  container.innerHTML = matching.map(({ item, prodName }) => {
     const isTem = item.result === 'TEM';
-    const isNaoTem = item.result === 'NAO_TEM';
     const dateFormatted = item.requested_expiration_date ? formatDateBR(item.requested_expiration_date) : '--/--/----';
-    const checkedAtFormatted = new Date(item.checked_at).toLocaleDateString('pt-BR');
-    const diff = item.difference !== undefined ? Number(item.difference) : 0;
-    const diffStr = diff > 0 ? `+${diff}` : `${diff}`;
+    const checkedAt = new Date(item.checked_at).toLocaleString('pt-BR');
 
     return `
-      <div style="
-        background: #18181c;
-        border: 1px solid ${isTem ? 'rgba(16, 185, 129, 0.3)' : isNaoTem ? 'rgba(239, 68, 68, 0.3)' : 'rgba(245, 158, 11, 0.3)'};
-        border-radius: 8px;
-        padding: 10px;
-        display: flex;
-        justify-content: space-between;
-        align-items: center;
-        gap: 8px;
-      ">
+      <div style="background: #18181c; border: 1px solid #27272a; border-radius: 8px; padding: 8px 10px; display: flex; justify-content: space-between; align-items: center; gap: 8px;">
         <div style="flex: 1; min-width: 0;">
-          <div style="display: flex; align-items: center; gap: 6px; margin-bottom: 2px;">
-            <span style="font-size: 0.65rem; font-weight: 900; background: ${isTem ? 'rgba(16, 185, 129, 0.15)' : isNaoTem ? 'rgba(239, 68, 68, 0.15)' : 'rgba(245, 158, 11, 0.15)'}; color: ${isTem ? '#10b981' : isNaoTem ? '#ef4444' : '#fbbf24'}; padding: 2px 6px; border-radius: 4px;">
-              ${isTem ? '✓ TEM' : isNaoTem ? '✕ NÃO TEM' : '⚠️ NÃO IDENTIFICADO'}
-            </span>
-            <span style="font-size: 0.72rem; color: #fbbf24; font-weight: 800;">
-              Val: ${dateFormatted}
-            </span>
+          <div style="font-size: 0.84rem; font-weight: 800; color: #f4f4f5; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">
+            ${prodName}
           </div>
-          <div style="font-size: 0.85rem; font-weight: 800; color: #f4f4f5; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">
-            ${name}
+          <div style="font-size: 0.72rem; color: #fbbf24; font-weight: 800; margin-top: 1px;">
+            Validade Solicitada: ${dateFormatted}
           </div>
-          <div style="font-size: 0.7rem; color: #71717a; margin-top: 1px;">
-            Cód: ${item.barcode} • Conferido em ${checkedAtFormatted} por ${item.user_name || 'Ana Luiza'}
+          <div style="font-size: 0.68rem; color: #71717a; margin-top: 2px;">
+            ${item.barcode} • em ${checkedAt}
           </div>
         </div>
-
         <div style="text-align: right; flex-shrink: 0;">
-          <div style="font-size: 1.05rem; font-weight: 900; color: ${isTem ? '#10b981' : isNaoTem ? '#ef4444' : '#fbbf24'};">
-            ${isTem ? `${formatNumber(item.total_quantity)} un` : isNaoTem ? '0 un' : '---'}
-          </div>
-          ${item.previous_quantity !== undefined && !isNaoTem ? `
-            <div style="font-size: 0.68rem; color: #a1a1aa;">
-              Ant: ${item.previous_quantity} (${diffStr})
-            </div>
-          ` : ''}
+          <span style="font-size: 0.95rem; font-weight: 900; color: ${isTem ? '#10b981' : '#ef4444'};">
+            ${isTem ? `TEM (${formatNumber(item.total_quantity)} un)` : 'NÃO TEM (0 un)'}
+          </span>
         </div>
       </div>
     `;
   }).join('');
-
-  container.innerHTML = html;
 }
 
 // ----------------------------------------------------
-// 11. FORMATAÇÃO DE RELATÓRIO PARA O WHATSAPP
+// 12. RELATÓRIO PROFISSIONAL PARA O WHATSAPP
 // ----------------------------------------------------
 
 export async function formatBlitzSessionWhatsApp(session, items) {
-  const sectorObj = BLITZ_SECTORS.find(s => s.id === session.blitz_type || s.label.toUpperCase() === session.sector) || {
-    label: session.sector || 'MERCEARIA',
-    icon: '📋'
-  };
-
+  const periodLabel = session.period_label || `${formatDateBR(session.start_date)} → ${formatDateBR(session.end_date)}`;
   const startDate = new Date(session.started_at).toLocaleString('pt-BR');
   const finishDate = session.finished_at ? new Date(session.finished_at).toLocaleString('pt-BR') : 'Em andamento';
 
   let countTem = 0;
   let countNaoTem = 0;
-  let countUnidentified = 0;
   let totalQty = 0;
 
   const temLines = [];
   const naoTemLines = [];
-  const unregLines = [];
 
   for (const item of items) {
     const prod = item.product_id ? await getProductById(item.product_id) : null;
-    const prodName = prod?.name || `CÓD: ${item.barcode}`;
+    const prodName = prod?.name || `PRODUTO (Cód: ${item.barcode})`;
     const dateFormatted = item.requested_expiration_date ? formatDateBR(item.requested_expiration_date) : '--/--/----';
-    const prevStr = item.previous_quantity !== undefined ? ` (Anterior: ${item.previous_quantity} un)` : '';
-    const diffStr = item.difference !== undefined ? (item.difference > 0 ? ` [Dif: +${item.difference}]` : ` [Dif: ${item.difference}]`) : '';
 
     if (item.result === 'TEM') {
       countTem++;
       totalQty += Number(item.total_quantity) || 0;
-      temLines.push(`• *${prodName}*\n  Validade: ${dateFormatted} | Qtd Atual: *${formatNumber(item.total_quantity)} un*${diffStr}${prevStr}\n  Cód: ${item.barcode}`);
-    } else if (item.result === 'NAO_TEM') {
-      countNaoTem++;
-      naoTemLines.push(`• *${prodName}*\n  Validade: ${dateFormatted} | *EM FALTA (0 un)*${prevStr}\n  Cód: ${item.barcode}`);
+      temLines.push(`• *${prodName}*\n  Validade: ${dateFormatted} | Qtd: *${formatNumber(item.total_quantity)} un*\n  Cód: ${item.barcode}`);
     } else {
-      countUnidentified++;
-      unregLines.push(`• *Código: ${item.barcode}*\n  Item não cadastrado na loja (Verificar depois)`);
+      countNaoTem++;
+      naoTemLines.push(`• *${prodName}*\n  Validade: ${dateFormatted} | *NÃO TEM (0 un)*\n  Cód: ${item.barcode}`);
     }
   }
 
-  let text = `📋 *RELATÓRIO DA BLITZ SEMANAL*\n`;
-  text += `Setor: *${sectorObj.label.toUpperCase()}* ${sectorObj.icon}\n`;
+  let text = `📋 *RELATÓRIO DA BLITZ POR PERÍODO*\n`;
+  text += `📅 Período: *${periodLabel}*\n`;
   text += `Responsável: *${session.user_name || 'Ana Luiza'}*\n`;
   text += `Início: ${startDate}\n`;
   text += `Término: ${finishDate}\n`;
@@ -2236,11 +2191,8 @@ export async function formatBlitzSessionWhatsApp(session, items) {
   text += `━━━━━━━━━━━━━━━━━━━━━\n`;
   text += `📊 *RESUMO GERAL:*\n`;
   text += `• Total de Conferências: *${items.length}*\n`;
-  text += `• Produtos Encontrados (TEM): *${countTem}* (${formatNumber(totalQty)} unidades)\n`;
-  text += `• Produtos em Falta (NÃO TEM): *${countNaoTem}*\n`;
-  if (countUnidentified > 0) {
-    text += `• Produtos para Verificar: *${countUnidentified}*\n`;
-  }
+  text += `• 🟢 TEM (Encontrados): *${countTem}* (${formatNumber(totalQty)} unidades)\n`;
+  text += `• 🔴 NÃO TEM (Em falta): *${countNaoTem}*\n`;
   text += `━━━━━━━━━━━━━━━━━━━━━\n\n`;
 
   if (temLines.length > 0) {
@@ -2252,12 +2204,6 @@ export async function formatBlitzSessionWhatsApp(session, items) {
   if (naoTemLines.length > 0) {
     text += `❌ *PRODUTOS EM FALTA (NÃO TEM):*\n\n`;
     text += naoTemLines.join('\n\n') + '\n\n';
-    text += `━━━━━━━━━━━━━━━━━━━━━\n\n`;
-  }
-
-  if (unregLines.length > 0) {
-    text += `⚠️ *PRODUTOS NÃO IDENTIFICADOS (VERIFICAR DEPOIS):*\n\n`;
-    text += unregLines.join('\n\n') + '\n\n';
     text += `━━━━━━━━━━━━━━━━━━━━━\n\n`;
   }
 

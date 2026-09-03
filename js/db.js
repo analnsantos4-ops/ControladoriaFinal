@@ -424,7 +424,24 @@ export async function deleteProductExpiration(expirationId) {
   if (!expirationId) return false;
   const now = new Date().toISOString();
 
-  // Busca contagens dessa validade
+  // 1. Descobre o product_id da validade antes de deletar
+  let productId = null;
+  try {
+    const { tx } = await getSafeTransaction('product_expirations', 'readonly');
+    const store = tx.objectStore('product_expirations');
+    const expObj = await new Promise((resolve) => {
+      const req = store.get(expirationId);
+      req.onsuccess = () => resolve(req.result || null);
+      req.onerror = () => resolve(null);
+    });
+    if (expObj && expObj.product_id) {
+      productId = expObj.product_id;
+    }
+  } catch (e) {
+    // ignora
+  }
+
+  // 2. Busca contagens dessa validade
   const counts = await new Promise(async (resolve) => {
     try {
       const { tx } = await getSafeTransaction('inventory_counts', 'readonly');
@@ -440,7 +457,7 @@ export async function deleteProductExpiration(expirationId) {
 
   try {
     const { tx } = await getSafeTransaction(['product_expirations', 'inventory_counts', 'sync_queue'], 'readwrite');
-    return new Promise((resolve, reject) => {
+    await new Promise((resolve, reject) => {
       try {
         const expStore = tx.objectStore('product_expirations');
         const countStore = tx.objectStore('inventory_counts');
@@ -478,9 +495,81 @@ export async function deleteProductExpiration(expirationId) {
         reject(e);
       }
     });
+
+    // 3. Atualiza o produto pai para recalcular estoque e validade mais próxima
+    if (productId) {
+      await updateProductAfterExpirationRemoved(productId);
+    }
+
+    return true;
   } catch (err) {
     console.error('Erro ao deletar validade:', err);
     return false;
+  }
+}
+
+/**
+ * Atualiza o produto pai quando uma validade é excluída ou expurgada:
+ * Se sobrarem outras validades ativas, recalcula o estoque e aponta para a data mais próxima.
+ * Se não sobrar nenhuma data ativa, zera estoques e last_expiration_date, preservando o produto.
+ */
+export async function updateProductAfterExpirationRemoved(productId) {
+  if (!productId) return;
+  try {
+    const product = await getProductById(productId);
+    if (!product) return;
+
+    const allExps = await getProductExpirations(productId);
+    const activeExps = (allExps || []).filter(
+      (e) => !(e.is_triaged === true || e.is_triaged === 1 || e.is_triaged === 'true')
+    );
+
+    if (activeExps.length > 0) {
+      const locationSums = {};
+      LOCATIONS.forEach((l) => (locationSums[l] = 0));
+      let newTotal = 0;
+
+      for (const exp of activeExps) {
+        const counts = await getLatestCountsForExpiration(exp.id);
+        newTotal += counts.total || 0;
+        Object.entries(counts.countsByLocation || {}).forEach(([loc, qty]) => {
+          locationSums[loc] = (locationSums[loc] || 0) + Number(qty);
+        });
+      }
+
+      activeExps.sort((a, b) => (a.expiration_date > b.expiration_date ? 1 : -1));
+      const earliestExp = activeExps[0];
+
+      product.total_quantity = newTotal;
+      product.deposit_qty = locationSums['DEPÓSITO'] || 0;
+      product.fridge_qty = locationSums['GELADEIRA'] || 0;
+      product.shelf_qty = locationSums['PRATELEIRA'] || 0;
+      product.gondola_end_qty = locationSums['PONTA DE GÔNDOLA'] || 0;
+      product.ear_qty = locationSums['ORELHA'] || 0;
+      product.island_qty = locationSums['ILHA'] || 0;
+      product.cart_qty = locationSums['CARRINHO'] || 0;
+      product.checkout_qty = locationSums['FRENTE DE LOJA'] || 0;
+      product.last_expiration_date = earliestExp ? earliestExp.expiration_date : null;
+      product.updated_at = new Date().toISOString();
+
+      await saveProduct(product);
+    } else {
+      product.total_quantity = 0;
+      product.deposit_qty = 0;
+      product.fridge_qty = 0;
+      product.shelf_qty = 0;
+      product.gondola_end_qty = 0;
+      product.ear_qty = 0;
+      product.island_qty = 0;
+      product.cart_qty = 0;
+      product.checkout_qty = 0;
+      product.last_expiration_date = null;
+      product.updated_at = new Date().toISOString();
+
+      await saveProduct(product);
+    }
+  } catch (err) {
+    console.warn('[updateProductAfterExpirationRemoved Error]:', err);
   }
 }
 
@@ -1320,40 +1409,96 @@ export async function restoreProductExpirationFromTriage(productId, expirationId
 export const TRIAGE_RETENTION_MS = 3 * 24 * 60 * 60 * 1000;
 
 /**
- * Limpeza automática de triagem:
- * Exclui definitivamente do banco de dados qualquer lote em triagem após 3 dias (72 horas)
- * do momento em que foi enviado para a triagem.
+ * Limpeza automática de triagem e lotes zerados vencidos:
+ * 1. REGRA: Quando um lote estiver com 0 unidades e 1 dia ou mais depois do vencimento (days <= -1),
+ *    ele vai diretamente para a triagem e é removido definitivamente do banco de dados (IndexedDB e Supabase)
+ *    para não sobrecarregar e manter o banco limpo e rápido.
+ * 2. Exclui definitivamente qualquer lote em triagem após o prazo de retenção (3 dias).
  */
 export async function runAutomaticTriageCleanup() {
   try {
     const expirations = await getAllExpirations();
     if (!expirations || expirations.length === 0) return 0;
 
+    const [products, allCounts] = await Promise.all([
+      getAllProducts(),
+      getAllCounts()
+    ]);
+
+    const productMap = {};
+    products.forEach((p) => {
+      productMap[p.id] = p;
+    });
+
+    // Mapeia as contagens mais recentes por expiration_id
+    const latestCountByExp = {};
+    allCounts.forEach((item) => {
+      if (!item.expiration_id) return;
+      if (!latestCountByExp[item.expiration_id]) {
+        latestCountByExp[item.expiration_id] = {};
+      }
+      const locMap = latestCountByExp[item.expiration_id];
+      const prev = locMap[item.location_type];
+      const itemTime = new Date(item.counted_at || item.created_at || 0).getTime();
+      const prevTime = prev ? new Date(prev.counted_at || prev.created_at || 0).getTime() : 0;
+      if (!prev || itemTime >= prevTime) {
+        locMap[item.location_type] = item;
+      }
+    });
+
+    const expQuantityMap = {};
+    Object.entries(latestCountByExp).forEach(([expId, locMap]) => {
+      let sum = 0;
+      Object.values(locMap).forEach((rec) => {
+        sum += Number(rec.quantity) || 0;
+      });
+      expQuantityMap[expId] = sum;
+    });
+
     let purgedCount = 0;
     const now = Date.now();
 
     for (const exp of expirations) {
+      const product = productMap[exp.product_id];
       const isTriaged = exp.is_triaged === true || exp.is_triaged === 1 || exp.is_triaged === 'true';
-      if (!isTriaged) continue;
+      const days = getDaysUntilExpiration(exp.expiration_date);
 
-      const triagedTimestamp = exp.triaged_at ? new Date(exp.triaged_at).getTime() : null;
+      let units = 0;
+      if (expQuantityMap[exp.id] !== undefined) {
+        units = expQuantityMap[exp.id];
+      } else if (product) {
+        units = Number(product.total_quantity) || 0;
+      }
 
-      // Se possui registro de quando foi triado e já se passaram 3 dias (72 horas)
-      if (triagedTimestamp && (now - triagedTimestamp) >= TRIAGE_RETENTION_MS) {
+      // REGRA: Se está zerado E 1 dia ou mais depois do vencimento (days <= -1):
+      // Vai diretamente para triagem e é removido definitivamente do banco de dados!
+      if (units <= 0 && days <= -1) {
         await deleteProductExpiration(exp.id);
         purgedCount++;
-      } else if (!triagedTimestamp) {
-        // Fallback para itens antigos sem triaged_at: se data de validade já passou há mais de 3 dias
-        const days = getDaysUntilExpiration(exp.expiration_date);
-        if (days < -3) {
+        continue;
+      }
+
+      // Lotes que estão em triagem física
+      if (isTriaged) {
+        const triagedTimestamp = exp.triaged_at ? new Date(exp.triaged_at).getTime() : null;
+
+        // Se possui registro de quando foi triado e já se passaram 3 dias (72 horas)
+        if (triagedTimestamp && (now - triagedTimestamp) >= TRIAGE_RETENTION_MS) {
           await deleteProductExpiration(exp.id);
           purgedCount++;
+        } else if (!triagedTimestamp) {
+          // Fallback para itens antigos sem triaged_at: se data de validade já passou há mais de 3 dias
+          if (days < -3) {
+            await deleteProductExpiration(exp.id);
+            purgedCount++;
+          }
         }
       }
     }
 
     if (purgedCount > 0) {
-      console.log(`[Limpeza Automática] ${purgedCount} lotes em triagem após 3 dias foram excluídos definitivamente do banco de dados.`);
+      console.log(`[Limpeza Automática] ${purgedCount} data(s) de validade zeradas vencidas/triadas foram removidas do banco de dados.`);
+      window.dispatchEvent(new CustomEvent('refresh-dashboard-trigger'));
     }
     return purgedCount;
   } catch (err) {
@@ -1594,16 +1739,30 @@ export async function markQueueItemSynced(id) {
 }
 
 // ----------------------------------------------------
-// BLITZ SEMANAL (blitz_sessions e blitz_items)
+// BLITZ POR PERÍODO (blitz_sessions e blitz_items)
 // ----------------------------------------------------
 
-export async function createBlitzSession({ blitz_type, sector, user_name }) {
+export async function createBlitzSession({ blitz_type, sector, user_name, start_date = null, end_date = null, period_label = null }) {
   const now = new Date().toISOString();
-  const normalizedSector = (sector || blitz_type || 'MERCEARIA').toUpperCase();
+  const normalizedSector = (sector || blitz_type || 'GERAL').toUpperCase();
+  
+  // Período formatado legível DD/MM/AAAA → DD/MM/AAAA
+  let label = period_label;
+  if (!label && start_date && end_date) {
+    const sBR = formatDateBR(start_date);
+    const eBR = formatDateBR(end_date);
+    label = `${sBR} → ${eBR}`;
+  } else if (!label) {
+    label = 'Geral';
+  }
+
   const session = {
     id: generateId(),
-    blitz_type: blitz_type || normalizedSector.toLowerCase(),
+    blitz_type: blitz_type || 'periodo',
     sector: normalizedSector,
+    start_date: start_date || null,
+    end_date: end_date || null,
+    period_label: label,
     user_name: user_name || 'Ana Luiza',
     started_at: now,
     finished_at: null,
@@ -1923,6 +2082,24 @@ export async function getBlitzItemBySessionProductAndDate(sessionId, productId, 
   }
 }
 
+export async function getBlitzItemBySessionBarcodeAndDate(sessionId, barcode, expirationDate) {
+  if (!sessionId || !barcode || !expirationDate) return null;
+  try {
+    const items = await getBlitzItemsBySessionId(sessionId);
+    const cleanBarcode = String(barcode).trim();
+    const cleanDate = String(expirationDate).trim();
+    const cleanDateBR = formatDateBR(cleanDate);
+    return items.find(it => {
+      const itBarcode = String(it.barcode || '').trim();
+      const itDate = String(it.requested_expiration_date || '').trim();
+      const itDateBR = formatDateBR(itDate);
+      return itBarcode === cleanBarcode && (itDate === cleanDate || itDateBR === cleanDateBR);
+    }) || null;
+  } catch (e) {
+    return null;
+  }
+}
+
 /**
  * Consulta a última conferência da Blitz para a combinação EXATA: PRODUTO + DATA DE VALIDADE
  */
@@ -2029,6 +2206,7 @@ export async function getAllBlitzItems() {
  * MAS NUNCA apagando o histórico em blitz_items ou inventory_counts).
  */
 export async function saveBlitzConferenceRecord({
+  id = null,
   sessionId,
   productId,
   barcode,
@@ -2043,8 +2221,9 @@ export async function saveBlitzConferenceRecord({
 }) {
   const diff = Number(newQuantity) - Number(previousQuantity);
 
-  // 1. Salva o registro imutável no histórico da Blitz
+  // 1. Salva o registro no histórico da Blitz (cria ou atualiza se id fornecido)
   const blitzItem = await saveBlitzItem({
+    id: id || null,
     blitz_session_id: sessionId,
     product_id: productId || null,
     barcode: barcode,
@@ -2086,6 +2265,12 @@ export async function saveBlitzConferenceRecord({
 
         // Salva as contagens atuais no inventário (mantendo histórico e atualizando o produto)
         await saveInventoryCounts(productId, expRecord.id, locMap, sessionId);
+
+        // REGRA: Se a quantidade for 0 e estiver 1 dia ou mais depois do vencimento (days <= -1):
+        // Remove definitivamente do banco de dados para não sobrecarregar
+        if (Number(newQuantity) <= 0 && getDaysUntilExpiration(requestedDate) <= -1) {
+          await deleteProductExpiration(expRecord.id);
+        }
       }
     } catch (e) {
       console.warn('[Blitz] Aviso ao atualizar estoque atual da validade:', e);

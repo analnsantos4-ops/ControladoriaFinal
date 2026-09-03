@@ -1,6 +1,6 @@
 // Mecanismo de Conferência de Estoque, Validades e Auditoria por Corredor
-import { LOCATIONS, SETORS, CORRIDORS, formatDateBR, parseDateBRtoISO, formatNumber, triggerHaptic, playBeep, getTodayISO } from './utils.js';
-import { getProductExpirations, getLatestCountsForExpiration, saveInventoryCounts, saveProductExpiration, saveSession, getActiveSession, clearActiveSession, getAllProducts, getProductById, saveBlitzItem } from './db.js';
+import { LOCATIONS, SETORS, CORRIDORS, formatDateBR, parseDateBRtoISO, formatNumber, triggerHaptic, playBeep, getTodayISO, getDaysUntilExpiration } from './utils.js';
+import { getProductExpirations, getLatestCountsForExpiration, saveInventoryCounts, saveProductExpiration, saveSession, getActiveSession, clearActiveSession, getAllProducts, getProductById, saveBlitzItem, deleteProductExpiration } from './db.js';
 import { triggerSyncNow } from './sync.js';
 import { showToast, showView, openPhotoModal } from './ui.js';
 import { formatSingleProductWhatsApp, formatMultipleProductsWhatsApp, openWhatsAppExportModal } from './whatsapp.js';
@@ -399,6 +399,12 @@ export async function confirmConference() {
     triggerHaptic(100);
     playBeep('success');
     showToast('✓ Conferência salva!', 'success');
+
+    // REGRA: Se foi conferido 0 unidades e a data de validade já passou há 1 dia ou mais (days <= -1):
+    // Vai diretamente para a triagem e é removida do banco de dados para não sobrecarregar
+    if (result.total <= 0 && getDaysUntilExpiration(currentSelectedExpiration.expiration_date) <= -1) {
+      await deleteProductExpiration(currentSelectedExpiration.id);
+    }
 
     window.dispatchEvent(new CustomEvent('refresh-dashboard-trigger'));
     triggerSyncNow().catch(e => console.warn('Sync background error:', e));
