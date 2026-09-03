@@ -1,5 +1,5 @@
 // Banco de Dados Local com IndexedDB para Controladoria - Ana Luiza
-import { generateId, getTodayISO, getDaysUntilExpiration, LOCATIONS } from './utils.js';
+import { generateId, getTodayISO, getDaysUntilExpiration, LOCATIONS, formatDateBR, parseDateBRtoISO } from './utils.js';
 
 const DB_NAME = 'ControladoriaAnaLuizaDB';
 const DB_VERSION = 2;
@@ -2245,6 +2245,149 @@ export async function getLastBlitzItemForBarcodeAndDate(barcode, expirationDate)
     matching.sort((a, b) => new Date(b.checked_at || b.created_at || 0) - new Date(a.checked_at || a.created_at || 0));
     return matching[0];
   } catch (e) {
+    return null;
+  }
+}
+
+/**
+ * Busca de forma abrangente qualquer conferência anterior ou registro de validade existente no banco:
+ * 1. Em blitz_items (mesmo com 0 unidades / NÃO TEM)
+ * 2. Em inventory_counts / product_expirations (conferências de inventário geral)
+ * 3. No cadastro do produto (se tiver quantidade ou última validade registrada)
+ */
+export async function getComprehensiveConferenceRecordForProductAndDate(product, expirationDate, excludeItemId = null) {
+  if (!product || !expirationDate) return null;
+
+  try {
+    const cleanDate = String(expirationDate).trim().split('T')[0];
+    const cleanDateBR = formatDateBR(cleanDate);
+    const productId = product.id || null;
+    const barcode = product.barcode ? String(product.barcode).trim() : null;
+
+    const candidates = [];
+
+    // 1. Busca em blitz_items por product_id e por barcode
+    let blitzList = [];
+    if (productId) {
+      try {
+        const byProd = await getAllBlitzItemsForProduct(productId);
+        blitzList.push(...byProd);
+      } catch (_) {}
+    }
+    if (barcode) {
+      try {
+        const byBar = await getAllBlitzItemsForBarcode(barcode);
+        byBar.forEach(b => {
+          if (!blitzList.some(item => item.id === b.id)) {
+            blitzList.push(b);
+          }
+        });
+      } catch (_) {}
+    }
+
+    blitzList.forEach(it => {
+      if (excludeItemId && it.id === excludeItemId) return;
+      const itExp = String(it.requested_expiration_date || '').trim().split('T')[0];
+      const itExpBR = formatDateBR(itExp);
+      if (itExp === cleanDate || itExpBR === cleanDateBR) {
+        const locs = (it.locations && Array.isArray(it.locations)) ? it.locations : [];
+        const tot = Number(it.total_quantity) || 0;
+        candidates.push({
+          source: 'blitz',
+          id: it.id,
+          date: it.checked_at || it.created_at || new Date().toISOString(),
+          total: tot,
+          result: it.result || (tot > 0 ? 'TEM' : 'NAO_TEM'),
+          locations: locs,
+          userName: it.user_name || 'Conferente',
+          productName: product.name || `PRODUTO ${barcode || ''}`,
+          barcode: barcode || it.barcode,
+          requestedDate: itExp || cleanDate
+        });
+      }
+    });
+
+    // 2. Busca em product_expirations e inventory_counts
+    let expRecords = [];
+    if (productId) {
+      try {
+        expRecords = await getProductExpirations(productId);
+      } catch (_) {}
+    }
+    if (expRecords.length === 0 && barcode) {
+      try {
+        const prod = await getProductByBarcode(barcode);
+        if (prod && prod.id) {
+          expRecords = await getProductExpirations(prod.id);
+        }
+      } catch (_) {}
+    }
+
+    for (const exp of expRecords) {
+      const expDate = String(exp.expiration_date || '').trim().split('T')[0];
+      const expDateBR = formatDateBR(expDate);
+      if (expDate === cleanDate || expDateBR === cleanDateBR) {
+        let countsInfo = { countsByLocation: {}, total: 0, lastCountDate: null, hasPreviousCount: false };
+        try {
+          countsInfo = await getLatestCountsForExpiration(exp.id);
+        } catch (_) {}
+
+        const locs = Object.entries(countsInfo.countsByLocation || {})
+          .filter(([_, q]) => Number(q) > 0)
+          .map(([location, quantity]) => ({ location, quantity: Number(quantity) }));
+
+        const countDate = countsInfo.lastCountDate || exp.updated_at || exp.created_at || (product && (product.last_count_date || product.updated_at || product.created_at));
+        const total = countsInfo.hasPreviousCount ? Number(countsInfo.total) : (product && product.total_quantity !== undefined ? Number(product.total_quantity) : 0);
+
+        candidates.push({
+          source: countsInfo.hasPreviousCount ? 'inventario' : 'cadastro',
+          id: exp.id,
+          date: countDate || new Date().toISOString(),
+          total: total,
+          result: total > 0 ? 'TEM' : 'NAO_TEM',
+          locations: locs,
+          userName: 'Conferente',
+          productName: product.name || `PRODUTO ${barcode || ''}`,
+          barcode: barcode,
+          requestedDate: expDate || cleanDate
+        });
+      }
+    }
+
+    // 3. Se ainda não achou, verifica se o próprio produto tem essa data como last_expiration_date
+    if (candidates.length === 0 && product && product.last_expiration_date) {
+      const prodExp = String(product.last_expiration_date).trim().split('T')[0];
+      const prodExpBR = formatDateBR(prodExp);
+      if (prodExp === cleanDate || prodExpBR === cleanDateBR) {
+        const locs = [];
+        if (product.deposit_qty) locs.push({ location: 'Depósito', quantity: product.deposit_qty });
+        if (product.shelf_qty) locs.push({ location: 'Prateleira', quantity: product.shelf_qty });
+        if (product.fridge_qty) locs.push({ location: 'Geladeira', quantity: product.fridge_qty });
+        const tot = Number(product.total_quantity) || 0;
+        candidates.push({
+          source: 'produto',
+          id: product.id,
+          date: product.last_count_date || product.updated_at || product.created_at || new Date().toISOString(),
+          total: tot,
+          result: tot > 0 ? 'TEM' : 'NAO_TEM',
+          locations: locs,
+          userName: 'Conferente',
+          productName: product.name || `PRODUTO ${barcode || ''}`,
+          barcode: barcode,
+          requestedDate: prodExp || cleanDate
+        });
+      }
+    }
+
+    if (candidates.length === 0) {
+      return null;
+    }
+
+    // Ordena do mais recente para o mais antigo
+    candidates.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
+    return candidates[0];
+  } catch (err) {
+    console.warn('Erro ao buscar conferência abrangente:', err);
     return null;
   }
 }

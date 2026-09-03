@@ -32,7 +32,8 @@ import {
   saveProductExpiration,
   getProductExpirations,
   getLatestCountsForExpiration,
-  getExpirationByProductAndDate
+  getExpirationByProductAndDate,
+  getComprehensiveConferenceRecordForProductAndDate
 } from './db.js';
 
 import {
@@ -44,7 +45,8 @@ import {
   parseDateBRtoISO,
   getTodayISO,
   formatDateWithWeekday,
-  compressImage
+  compressImage,
+  speakText
 } from './utils.js';
 
 import { showView, showToast, promptConfirmDialog } from './ui.js';
@@ -1166,7 +1168,8 @@ export async function promptRequestedExpirationDate(product) {
       dateMap.set(exp.expiration_date, {
         iso: exp.expiration_date,
         lastQty: null,
-        lastDate: null
+        lastDate: null,
+        result: null
       });
     }
   });
@@ -1174,14 +1177,23 @@ export async function promptRequestedExpirationDate(product) {
   pastBlitzItems.forEach(item => {
     const d = item.requested_expiration_date;
     if (d) {
-      const existing = dateMap.get(d) || { iso: d, lastQty: null, lastDate: null };
-      if (existing.lastQty === null && item.result) {
-        existing.lastQty = item.result === 'TEM' ? Number(item.total_quantity) || 0 : 0;
-        existing.lastDate = item.checked_at ? formatDateBR(item.checked_at.split('T')[0]) : null;
-      }
+      const existing = dateMap.get(d) || { iso: d, lastQty: null, lastDate: null, result: null };
       dateMap.set(d, existing);
     }
   });
+
+  // Carrega histórico completo para cada validade existente no banco
+  for (const [d, info] of dateMap.entries()) {
+    try {
+      const conf = await getComprehensiveConferenceRecordForProductAndDate(product, d);
+      if (conf) {
+        info.lastQty = Number(conf.total) || 0;
+        info.lastDate = conf.date ? formatDateBR(conf.date.split('T')[0]) : null;
+        info.result = conf.result;
+        info.userName = conf.userName;
+      }
+    } catch (_) {}
+  }
 
   // Data padrão inicial: Início da Blitz ativa ou Hoje
   const defaultDateISO = currentActiveBlitzSession?.start_date || getTodayISO();
@@ -1193,14 +1205,14 @@ export async function promptRequestedExpirationDate(product) {
     const chips = chipsList.map(info => {
       const dateBR = formatDateBR(info.iso);
       let subText = '';
-      if (info.lastQty !== null) {
+      if (info.lastQty !== null && info.lastQty !== undefined) {
         subText = info.lastQty > 0
-          ? `<span style="font-size: 0.72rem; color: #34d399; font-weight: 700;">(Tinha ${info.lastQty} un${info.lastDate ? ` em ${info.lastDate}` : ''})</span>`
-          : `<span style="font-size: 0.72rem; color: #f87171; font-weight: 700;">(0 un / Não tem)</span>`;
+          ? `<span style="font-size: 0.74rem; color: #34d399; font-weight: 800;">(Tinha ${info.lastQty} un${info.lastDate ? ` em ${info.lastDate}` : ''})</span>`
+          : `<span style="font-size: 0.74rem; color: #f87171; font-weight: 800;">(0 un / Não tem${info.lastDate ? ` em ${info.lastDate}` : ''})</span>`;
       }
       return `
-        <button type="button" class="btn-known-chip btn-secondary" data-iso="${info.iso}" style="padding: 8px 10px; font-size: 0.82rem; font-weight: 800; border-color: rgba(16, 185, 129, 0.4); color: #10b981; border-radius: 8px; cursor: pointer; display: flex; align-items: center; justify-content: space-between; gap: 6px; width: 100%; text-align: left;">
-          <span>📅 ${dateBR}</span>
+        <button type="button" class="btn-known-chip btn-secondary" data-iso="${info.iso}" style="padding: 10px 12px; font-size: 0.88rem; font-weight: 800; border-color: rgba(16, 185, 129, 0.4); color: #10b981; border-radius: 8px; cursor: pointer; display: flex; align-items: center; justify-content: space-between; gap: 8px; width: 100%; text-align: left; background: rgba(16, 185, 129, 0.05);">
+          <span>📅 <strong>${dateBR}</strong></span>
           ${subText}
         </button>
       `;
@@ -1211,7 +1223,7 @@ export async function promptRequestedExpirationDate(product) {
         <div style="font-size: 0.72rem; color: #10b981; font-weight: 800; text-transform: uppercase; margin-bottom: 6px;">
           ⚡ Validades já registradas deste produto (Toque para usar):
         </div>
-        <div style="display: flex; flex-direction: column; gap: 5px;">
+        <div style="display: flex; flex-direction: column; gap: 6px;">
           ${chips}
         </div>
       </div>
@@ -1285,6 +1297,9 @@ export async function promptRequestedExpirationDate(product) {
           </button>
         </div>
 
+        <!-- FEEDBACK EM TEMPO REAL DA CONFERÊNCIA ANTERIOR DESTA DATA -->
+        <div id="live-date-conference-feedback"></div>
+
         ${knownChipsHtml}
 
         <!-- ATALHOS RÁPIDOS DE DIAS -->
@@ -1318,10 +1333,70 @@ export async function promptRequestedExpirationDate(product) {
   const pickerInput = document.getElementById('input-requested-date-picker');
   const displayBr = document.getElementById('requested-date-display-br');
 
-  const updateDate = (isoVal) => {
+  // Função para verificar e exibir em tempo real o histórico da data selecionada
+  const checkAndDisplayDateHistory = async (isoVal, shouldSpeak = false) => {
+    const feedbackEl = document.getElementById('live-date-conference-feedback');
+    if (!feedbackEl) return;
+    if (!isoVal) {
+      feedbackEl.innerHTML = '';
+      return;
+    }
+    const conf = await getComprehensiveConferenceRecordForProductAndDate(product, isoVal);
+    if (conf) {
+      const confDateBR = conf.date ? formatDateBR(conf.date.split('T')[0]) : '';
+      const confTime = conf.date && conf.date.includes('T')
+        ? new Date(conf.date).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })
+        : '';
+      const dateFormatted = formatDateBR(isoVal);
+      const prevQty = Number(conf.total) || 0;
+      const prodName = product.name || conf.productName || `PRODUTO ${product.barcode}`;
+      const qtyText = prevQty > 0 ? `${formatNumber(prevQty)} unidades` : '0 unidades (NÃO TEM)';
+      const speechPhrase = `O produto ${prodName} foi conferido para essa data no dia ${confDateBR} e tinha ${prevQty > 0 ? `${prevQty} unidades` : 'zero unidades'}.`;
+
+      feedbackEl.innerHTML = `
+        <div style="background: rgba(30, 58, 138, 0.4); border: 2px solid #3b82f6; border-radius: 10px; padding: 12px; margin-top: 4px; text-align: left; box-shadow: 0 4px 14px rgba(59, 130, 246, 0.2);">
+          <div style="font-size: 0.72rem; color: #60a5fa; font-weight: 900; text-transform: uppercase; display: flex; align-items: center; justify-content: space-between;">
+            <div style="display: flex; align-items: center; gap: 5px;">
+              <span>📢</span> <span>CONFERÊNCIA ANTERIOR NO BANCO:</span>
+            </div>
+            <button type="button" id="btn-speak-date-conf" style="background: rgba(59, 130, 246, 0.25); border: 1px solid #60a5fa; color: #93c5fd; border-radius: 6px; padding: 2px 8px; font-size: 0.72rem; font-weight: 800; cursor: pointer; display: flex; align-items: center; gap: 4px;">
+              🔊 Ouvir
+            </button>
+          </div>
+          <div style="font-size: 0.88rem; font-weight: 800; color: #f0f9ff; margin-top: 6px; line-height: 1.4;">
+            O produto <span style="color: #fef08a;">${prodName}</span> foi conferido para essa data (<strong>${dateFormatted}</strong>) no dia <strong>${confDateBR}</strong>${confTime ? ` às ${confTime}` : ''} e tinha <strong style="color: ${prevQty > 0 ? '#34d399' : '#f87171'};">${qtyText}</strong>.
+          </div>
+          ${conf.locations && conf.locations.length > 0 ? `
+            <div style="margin-top: 6px; display: flex; flex-wrap: wrap; gap: 4px;">
+              ${conf.locations.filter(l => Number(l.quantity) > 0).map(l => `<span style="background: rgba(59, 130, 246, 0.25); border: 1px solid rgba(59, 130, 246, 0.4); padding: 2px 6px; border-radius: 4px; font-size: 0.72rem; color: #bfdbfe;">${l.location}: <strong>${formatNumber(l.quantity)} un</strong></span>`).join(' ')}
+            </div>
+          ` : ''}
+        </div>
+      `;
+
+      document.getElementById('btn-speak-date-conf')?.addEventListener('click', (ev) => {
+        ev.stopPropagation();
+        speakText(speechPhrase);
+      });
+
+      if (shouldSpeak) {
+        speakText(speechPhrase);
+      }
+    } else {
+      feedbackEl.innerHTML = `
+        <div style="background: rgba(39, 39, 42, 0.4); border: 1px dashed #3f3f46; border-radius: 8px; padding: 8px 10px; margin-top: 4px; text-align: left; display: flex; align-items: center; gap: 6px;">
+          <span style="font-size: 0.82rem;">✨</span>
+          <span style="font-size: 0.74rem; color: #a1a1aa;">Primeira conferência registrada para esta data (${formatDateBR(isoVal)}).</span>
+        </div>
+      `;
+    }
+  };
+
+  const updateDate = (isoVal, shouldSpeak = false) => {
     if (!isoVal) return;
     if (pickerInput) pickerInput.value = isoVal;
     if (displayBr) displayBr.textContent = formatDateBR(isoVal);
+    checkAndDisplayDateHistory(isoVal, shouldSpeak);
   };
 
   const triggerCalendar = () => {
@@ -1341,8 +1416,8 @@ export async function promptRequestedExpirationDate(product) {
   pickerInput?.addEventListener('click', triggerCalendar);
 
   // Mudança de data no calendário
-  pickerInput?.addEventListener('input', (e) => updateDate(e.target.value));
-  pickerInput?.addEventListener('change', (e) => updateDate(e.target.value));
+  pickerInput?.addEventListener('input', (e) => updateDate(e.target.value, false));
+  pickerInput?.addEventListener('change', (e) => updateDate(e.target.value, false));
 
   // Atalhos de dias
   modal.querySelectorAll('.btn-quick-date').forEach((btn) => {
@@ -1351,7 +1426,7 @@ export async function promptRequestedExpirationDate(product) {
       const d = new Date();
       d.setDate(d.getDate() + days);
       const iso = d.toISOString().split('T')[0];
-      updateDate(iso);
+      updateDate(iso, false);
     });
   });
 
@@ -1359,9 +1434,12 @@ export async function promptRequestedExpirationDate(product) {
   modal.querySelectorAll('.btn-known-chip').forEach((btn) => {
     btn.addEventListener('click', () => {
       const iso = btn.getAttribute('data-iso');
-      if (iso) updateDate(iso);
+      if (iso) updateDate(iso, true);
     });
   });
+
+  // Checa a data padrão inicial assim que o modal abre
+  checkAndDisplayDateHistory(defaultDateISO, false);
 
   const closeModal = () => modal.classList.remove('open');
   document.getElementById('modal-blitz-date-backdrop')?.addEventListener('click', closeModal);
@@ -1497,62 +1575,65 @@ async function showHasOrNotDecisionModal({ product, requestedDate, existingItem 
     document.body.appendChild(modal);
   }
 
-  // 1. Busca conferência anterior dessa MESMA validade (semana passada ou anterior)
-  let prevBlitz = null;
-  if (product?.id) {
-    prevBlitz = await getLastBlitzItemForProductAndDate(product.id, requestedDate);
-  }
-  if (!prevBlitz && product?.barcode) {
-    prevBlitz = await getLastBlitzItemForBarcodeAndDate(product.barcode, requestedDate);
-  }
-
-  // Se o item encontrado for o mesmo da sessão atual sendo refeito, busca o anterior no histórico
-  if (existingItem && prevBlitz && prevBlitz.id === existingItem.id) {
-    const all = product?.id
-      ? await getAllBlitzItemsForProductAndDate(product.id, requestedDate)
-      : (product?.barcode ? await getAllBlitzItemsForBarcode(product.barcode) : []);
-    prevBlitz = all.find(it => it.id !== existingItem.id && it.requested_expiration_date === requestedDate) || null;
-  }
+  // 1. Busca conferência anterior dessa MESMA validade (no banco de dados de blitz, inventário ou cadastro)
+  const confRecord = await getComprehensiveConferenceRecordForProductAndDate(
+    product,
+    requestedDate,
+    existingItem?.id || null
+  );
 
   let historyBannerHtml = '';
-  if (prevBlitz) {
-    const prevDate = prevBlitz.checked_at ? formatDateBR(prevBlitz.checked_at.split('T')[0]) : '';
-    const prevTime = prevBlitz.checked_at ? new Date(prevBlitz.checked_at).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }) : '';
-    const wasTem = prevBlitz.result === 'TEM';
-    const prevQty = Number(prevBlitz.total_quantity) || 0;
-    const prevUser = prevBlitz.user_name || 'Conferente';
+  let speechPhrase = '';
+
+  if (confRecord) {
+    const confDate = confRecord.date ? formatDateBR(confRecord.date.split('T')[0]) : '';
+    const confTime = confRecord.date && confRecord.date.includes('T')
+      ? new Date(confRecord.date).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })
+      : '';
+    const prevQty = Number(confRecord.total) || 0;
+    const prevUser = confRecord.userName || 'Conferente';
+    const prodName = product.name || confRecord.productName || `PRODUTO ${product.barcode}`;
+    const dateFormatted = formatDateBR(requestedDate);
+    const qtyText = prevQty > 0 ? `${formatNumber(prevQty)} unidades` : '0 unidades (NÃO TEM)';
+
+    speechPhrase = `O produto ${prodName} foi conferido para essa data no dia ${confDate} e tinha ${prevQty > 0 ? `${prevQty} unidades` : 'zero unidades'}.`;
 
     let locsSummary = '';
-    if (prevBlitz.locations && prevBlitz.locations.length > 0) {
-      locsSummary = prevBlitz.locations
+    if (confRecord.locations && confRecord.locations.length > 0) {
+      locsSummary = confRecord.locations
         .filter(l => Number(l.quantity) > 0)
         .map(l => `<span style="background: rgba(59, 130, 246, 0.25); border: 1px solid rgba(59, 130, 246, 0.4); padding: 2px 7px; border-radius: 4px; font-size: 0.74rem;">${l.location}: <strong>${formatNumber(l.quantity)} un</strong></span>`)
         .join(' ');
     }
 
     historyBannerHtml = `
-      <div style="background: rgba(30, 58, 138, 0.35); border: 1.5px solid #3b82f6; border-radius: 10px; padding: 12px; margin-bottom: 14px; text-align: left;">
-        <div style="font-size: 0.72rem; color: #60a5fa; font-weight: 900; text-transform: uppercase; display: flex; align-items: center; gap: 5px;">
-          <span>🕒</span> <span>HISTÓRICO DA CONFERÊNCIA ANTERIOR:</span>
+      <div style="background: rgba(30, 58, 138, 0.4); border: 2px solid #3b82f6; border-radius: 12px; padding: 12px; margin-bottom: 14px; text-align: left; box-shadow: 0 4px 16px rgba(59, 130, 246, 0.2);">
+        <div style="font-size: 0.72rem; color: #60a5fa; font-weight: 900; text-transform: uppercase; display: flex; align-items: center; justify-content: space-between;">
+          <div style="display: flex; align-items: center; gap: 5px;">
+            <span>🕒</span> <span>HISTÓRICO DA CONFERÊNCIA ANTERIOR:</span>
+          </div>
+          <button type="button" id="btn-speak-decision-history" style="background: rgba(59, 130, 246, 0.25); border: 1px solid #60a5fa; color: #93c5fd; border-radius: 6px; padding: 2px 8px; font-size: 0.72rem; font-weight: 800; cursor: pointer; display: flex; align-items: center; gap: 4px;">
+            🔊 Ouvir
+          </button>
         </div>
-        <div style="font-size: 0.88rem; font-weight: 800; color: #f0f9ff; margin-top: 5px; line-height: 1.35;">
-          No dia <strong>${prevDate}</strong>${prevTime ? ` às ${prevTime}` : ''}, essa validade ${wasTem ? `já tinha <strong>${formatNumber(prevQty)} unidades</strong>` : `estava registrada como <strong>NÃO TEM (0 un)</strong>`}
+        <div style="font-size: 0.92rem; font-weight: 800; color: #f0f9ff; margin-top: 6px; line-height: 1.45;">
+          O produto <span style="color: #fef08a;">${prodName}</span> foi conferido para a validade <strong>${dateFormatted}</strong> no dia <strong>${confDate}</strong>${confTime ? ` às ${confTime}` : ''} e tinha <strong style="color: ${prevQty > 0 ? '#34d399' : '#f87171'};">${qtyText}</strong>.
         </div>
         ${locsSummary ? `
-          <div style="margin-top: 6px; display: flex; flex-wrap: wrap; gap: 4px;">
+          <div style="margin-top: 8px; display: flex; flex-wrap: wrap; gap: 4px;">
             ${locsSummary}
           </div>
         ` : ''}
-        <div style="font-size: 0.7rem; color: #94a3b8; margin-top: 5px;">
-          Conferido por: <strong>${prevUser}</strong>
+        <div style="font-size: 0.72rem; color: #94a3b8; margin-top: 6px;">
+          Origem: <strong>${confRecord.source === 'blitz' ? '⚡ Blitz Semanal' : '📋 Inventário / Cadastro'}</strong> | Registrado por: <strong>${prevUser}</strong>
         </div>
       </div>
     `;
   } else {
     historyBannerHtml = `
-      <div style="background: rgba(39, 39, 42, 0.45); border: 1px solid #3f3f46; border-radius: 8px; padding: 8px 12px; margin-bottom: 14px; text-align: left; display: flex; align-items: center; gap: 6px;">
+      <div style="background: rgba(39, 39, 42, 0.45); border: 1px solid #3f3f46; border-radius: 8px; padding: 10px 12px; margin-bottom: 14px; text-align: left; display: flex; align-items: center; gap: 6px;">
         <span style="font-size: 0.85rem;">✨</span>
-        <span style="font-size: 0.76rem; color: #a1a1aa;">Primeira conferência registrada para esta data de validade.</span>
+        <span style="font-size: 0.78rem; color: #a1a1aa;">Primeira conferência registrada para esta data de validade (${formatDateBR(requestedDate)}).</span>
       </div>
     `;
   }
@@ -1638,6 +1719,15 @@ async function showHasOrNotDecisionModal({ product, requestedDate, existingItem 
 
   modal.classList.add('open');
   const closeModal = () => modal.classList.remove('open');
+
+  if (speechPhrase) {
+    document.getElementById('btn-speak-decision-history')?.addEventListener('click', (ev) => {
+      ev.stopPropagation();
+      speakText(speechPhrase);
+    });
+    // Voz sintetizada informando o histórico de conferência anterior
+    speakText(speechPhrase);
+  }
 
   document.getElementById('modal-blitz-hon-backdrop')?.addEventListener('click', closeModal);
   document.getElementById('btn-blitz-hon-cancel')?.addEventListener('click', () => {

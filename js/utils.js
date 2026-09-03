@@ -350,3 +350,22 @@ export function formatNumber(num) {
   if (num === null || num === undefined || isNaN(num)) return '0';
   return Number(num).toLocaleString('pt-BR');
 }
+
+/**
+ * Síntese de voz em português brasileiro para falar conferências e avisos cruciais
+ */
+export function speakText(text) {
+  if (!text || typeof window === 'undefined') return;
+  try {
+    if ('speechSynthesis' in window) {
+      window.speechSynthesis.cancel(); // Interrompe fala anterior
+      const utterance = new SpeechSynthesisUtterance(text);
+      utterance.lang = 'pt-BR';
+      utterance.rate = 1.05;
+      utterance.pitch = 1.0;
+      window.speechSynthesis.speak(utterance);
+    }
+  } catch (e) {
+    console.warn('Síntese de voz indisponível ou bloqueada:', e);
+  }
+}
