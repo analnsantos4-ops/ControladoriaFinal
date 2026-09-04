@@ -52,6 +52,7 @@ import { showView, showToast, promptConfirmDialog } from './ui.js';
 import { startCameraScanner, stopCameraScanner } from './scanner.js';
 import { openWhatsAppExportModal } from './whatsapp.js';
 import { triggerSyncNow } from './sync.js';
+import { openConferenceForProduct } from './inventory.js';
 
 let currentActiveBlitzSession = null;
 
@@ -999,7 +1000,7 @@ function promptUnregisteredProductBlitz(barcode) {
       barcode: String(barcode).trim(),
       defaultSector: currentActiveBlitzSession?.sector || 'MERCEARIA',
       defaultCorridor: 'Corredor 1',
-      onConfirm: async ({ sector, corridor, name, barcode: finalBarcode }) => {
+      onConfirm: async ({ sector, corridor, name, barcode: finalBarcode, image }) => {
         showToast('Guardando produto verificado...', 'sync', 1000);
         try {
           let savedProd = await getProductByBarcode(finalBarcode);
@@ -1009,6 +1010,7 @@ function promptUnregisteredProductBlitz(barcode) {
               name: name || `PRODUTO ${finalBarcode}`,
               sector: sector || 'MERCEARIA',
               corridor: corridor || 'Corredor 1',
+              image: image || null,
               is_verified_only: true
             });
             triggerSyncNow().catch(e => console.warn('Sync error:', e));
@@ -1022,6 +1024,7 @@ function promptUnregisteredProductBlitz(barcode) {
             name: name || `PRODUTO ${finalBarcode}`,
             sector: sector || 'MERCEARIA',
             corridor: corridor || 'Corredor 1',
+            image: image || null,
             is_verified_only: true
           });
         }
@@ -1041,6 +1044,7 @@ export function promptVerifiedProductLocationModal({
   defaultSector = 'MERCEARIA',
   defaultCorridor = 'Corredor 1',
   defaultName = '',
+  defaultImage = '',
   title = 'LOCALIZAÇÃO DO PRODUTO',
   subtitle = 'Informe o Setor e Corredor para registrar este produto verificado:',
   onConfirm,
@@ -1055,10 +1059,11 @@ export function promptVerifiedProductLocationModal({
   }
 
   const generatedCode = barcode || `SCOD-${Date.now().toString().slice(-6)}`;
+  let verifiedProdImage = defaultImage || '';
 
   modal.innerHTML = `
     <div class="modal-backdrop" id="modal-verified-loc-backdrop"></div>
-    <div class="modal-card" style="padding: 20px; max-width: 400px; width: 100%; box-sizing: border-box;">
+    <div class="modal-card" style="padding: 20px; max-width: 420px; width: 100%; box-sizing: border-box; max-height: 92vh; overflow-y: auto;">
       <div style="display: flex; align-items: center; justify-content: space-between; border-bottom: 1px solid #27272a; padding-bottom: 10px; margin-bottom: 12px;">
         <div style="display: flex; align-items: center; gap: 8px;">
           <span style="font-size: 1.3rem;">📍</span>
@@ -1083,6 +1088,25 @@ export function promptVerifiedProductLocationModal({
         <div>
           <label style="font-size: 0.76rem; font-weight: 800; color: #a1a1aa; text-transform: uppercase; margin-bottom: 4px; display: block;">Nome / Descrição Breve (Opcional):</label>
           <input type="text" id="verified-input-name" class="form-input" value="${defaultName || ''}" placeholder="Ex: PRODUTO SEM CÓDIGO" style="text-transform: uppercase; font-weight: 700;" />
+        </div>
+
+        <!-- Foto do Produto (Opcional) -->
+        <div>
+          <label style="font-size: 0.76rem; font-weight: 800; color: #a1a1aa; text-transform: uppercase; margin-bottom: 4px; display: block;">Foto do Produto (Opcional):</label>
+          <div style="display: flex; align-items: center; gap: 12px; background: #18181c; padding: 10px; border-radius: 8px; border: 1px solid #2a2a30;">
+            <div id="verified-photo-preview-box" style="width: 64px; height: 64px; border-radius: 6px; overflow: hidden; background: #09090b; border: 1px solid #3f3f46; display: flex; align-items: center; justify-content: center; flex-shrink: 0;">
+              ${verifiedProdImage ? `<img src="${verifiedProdImage}" alt="Foto" style="width:100%;height:100%;object-fit:cover;" />` : `<span id="verified-no-photo" style="font-size: 0.65rem; color: #71717a; font-weight: 700;">SEM FOTO</span>`}
+            </div>
+            <div style="display: flex; flex-direction: column; gap: 6px; flex: 1;">
+              <div style="display: flex; gap: 6px;">
+                <button type="button" id="btn-verified-photo-camera" class="btn-secondary-mini" style="flex: 1; height: 32px; font-size: 0.75rem; font-weight: 800;">📷 Câmera</button>
+                <button type="button" id="btn-verified-photo-gallery" class="btn-secondary-mini" style="flex: 1; height: 32px; font-size: 0.75rem; font-weight: 800;">🖼️ Galeria</button>
+              </div>
+              <button type="button" id="btn-verified-photo-remove" class="btn-secondary-mini ${verifiedProdImage ? '' : 'hidden'}" style="height: 26px; font-size: 0.7rem; color: #ef4444; border-color: rgba(239, 68, 68, 0.3); font-weight: 700;">🗑️ Remover Foto</button>
+              <input type="file" id="file-camera-verified" accept="image/*" capture="environment" class="hidden" />
+              <input type="file" id="file-gallery-verified" accept="image/*" class="hidden" />
+            </div>
+          </div>
         </div>
 
         <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 8px;">
@@ -1128,6 +1152,57 @@ export function promptVerifiedProductLocationModal({
     if (onCancel) onCancel();
   });
 
+  const fileCameraVer = document.getElementById('file-camera-verified');
+  const fileGalleryVer = document.getElementById('file-gallery-verified');
+  const previewBoxVer = document.getElementById('verified-photo-preview-box');
+  const removeBtnVer = document.getElementById('btn-verified-photo-remove');
+
+  const handleVerifiedImageFile = async (file) => {
+    if (!file) return;
+    try {
+      showToast('Processando foto...', 'sync', 1000);
+      const compressed = await compressImage(file, 600, 600, 0.72);
+      verifiedProdImage = compressed;
+      if (previewBoxVer) {
+        previewBoxVer.innerHTML = `<img src="${compressed}" alt="Foto" style="width: 100%; height: 100%; object-fit: cover;" />`;
+      }
+      if (removeBtnVer) removeBtnVer.classList.remove('hidden');
+      showToast('✓ Foto adicionada', 'success', 1200);
+    } catch (err) {
+      console.error('Erro ao processar imagem:', err);
+      showToast('Erro ao carregar imagem', 'warning');
+    }
+  };
+
+  document.getElementById('btn-verified-photo-camera')?.addEventListener('click', () => {
+    fileCameraVer?.click();
+  });
+  document.getElementById('btn-verified-photo-gallery')?.addEventListener('click', () => {
+    fileGalleryVer?.click();
+  });
+
+  fileCameraVer?.addEventListener('change', (e) => {
+    if (e.target.files && e.target.files[0]) {
+      handleVerifiedImageFile(e.target.files[0]);
+    }
+  });
+  fileGalleryVer?.addEventListener('change', (e) => {
+    if (e.target.files && e.target.files[0]) {
+      handleVerifiedImageFile(e.target.files[0]);
+    }
+  });
+
+  removeBtnVer?.addEventListener('click', () => {
+    verifiedProdImage = '';
+    if (previewBoxVer) {
+      previewBoxVer.innerHTML = `<span id="verified-no-photo" style="font-size: 0.65rem; color: #71717a; font-weight: 700;">SEM FOTO</span>`;
+    }
+    removeBtnVer.classList.add('hidden');
+    if (fileCameraVer) fileCameraVer.value = '';
+    if (fileGalleryVer) fileGalleryVer.value = '';
+    showToast('Foto removida', 'info', 1000);
+  });
+
   document.getElementById('form-verified-location-modal')?.addEventListener('submit', (e) => {
     e.preventDefault();
     const finalBarcode = document.getElementById('verified-input-barcode')?.value?.trim() || generatedCode;
@@ -1140,14 +1215,15 @@ export function promptVerifiedProductLocationModal({
         barcode: finalBarcode,
         name: nameInput || `PRODUTO ${finalBarcode}`,
         sector: chosenSector,
-        corridor: chosenCorridor
+        corridor: chosenCorridor,
+        image: verifiedProdImage || null
       });
     }
   });
 }
 
 // Modal de Cadastro Rápido de Produto
-function openBlitzQuickRegisterModal(barcode) {
+export function openBlitzQuickRegisterModal(barcode, options = {}) {
   let modal = document.getElementById('modal-blitz-quick-form');
   if (!modal) {
     modal = document.createElement('div');
@@ -1160,9 +1236,9 @@ function openBlitzQuickRegisterModal(barcode) {
 
   modal.innerHTML = `
     <div class="modal-backdrop" id="modal-blitz-quick-backdrop"></div>
-    <div class="modal-card" style="padding: 20px; max-width: 420px; width: 100%; box-sizing: border-box;">
+    <div class="modal-card" style="padding: 20px; max-width: 430px; width: 100%; box-sizing: border-box; max-height: 92vh; overflow-y: auto;">
       <div style="display: flex; align-items: center; justify-content: space-between; border-bottom: 1px solid #27272a; padding-bottom: 8px; margin-bottom: 12px;">
-        <h3 style="font-size: 1.05rem; font-weight: 900; color: #f4f4f5; margin: 0;">
+        <h3 style="font-size: 1.05rem; font-weight: 900; color: #f4f4f5; margin: 0; display: flex; align-items: center; gap: 6px;">
           ⚡ CADASTRO RÁPIDO DO PRODUTO
         </h3>
         <button type="button" id="btn-close-quick-reg" class="btn-icon-control" style="font-size: 1rem; width: 30px; height: 30px;">✕</button>
@@ -1171,12 +1247,39 @@ function openBlitzQuickRegisterModal(barcode) {
       <form id="form-blitz-quick-reg" style="display: flex; flex-direction: column; gap: 10px;">
         <div class="form-group">
           <label style="font-size: 0.74rem; font-weight: 800; color: #a1a1aa;">CÓDIGO DE BARRAS:</label>
-          <input type="text" id="quick-prod-barcode" class="form-input" value="${barcode}" readonly style="background: #18181c; color: #fbbf24; font-weight: 800;" />
+          <input type="text" id="quick-prod-barcode" class="form-input" value="${barcode}" readonly style="background: #18181c; color: #fbbf24; font-weight: 800; font-family: monospace;" />
         </div>
 
         <div class="form-group">
           <label for="quick-prod-name" style="font-size: 0.74rem; font-weight: 800; color: #a1a1aa;">NOME DO PRODUTO:</label>
           <input type="text" id="quick-prod-name" class="form-input" placeholder="Ex: BISCOITO RANCHEIRO 90G" required autofocus style="text-transform: uppercase;" />
+        </div>
+
+        <!-- Fotografia do Produto -->
+        <div class="form-group" style="margin-bottom: 2px;">
+          <label style="font-size: 0.74rem; font-weight: 800; color: #a1a1aa; display: block; margin-bottom: 6px;">
+            FOTO DO PRODUTO (OPCIONAL):
+          </label>
+          <div style="display: flex; align-items: center; gap: 12px; background: #18181c; padding: 10px; border-radius: 8px; border: 1px solid #2a2a30;">
+            <div id="quick-photo-preview-box" style="width: 64px; height: 64px; border-radius: 6px; overflow: hidden; background: #09090b; border: 1px solid #3f3f46; display: flex; align-items: center; justify-content: center; flex-shrink: 0;">
+              <span id="quick-no-photo" style="font-size: 0.65rem; color: #71717a; font-weight: 700;">SEM FOTO</span>
+            </div>
+            <div style="display: flex; flex-direction: column; gap: 6px; flex: 1;">
+              <div style="display: flex; gap: 6px;">
+                <button type="button" id="btn-quick-photo-camera" class="btn-secondary-mini" style="flex: 1; height: 32px; font-size: 0.76rem; font-weight: 800;">
+                  📷 Câmera
+                </button>
+                <button type="button" id="btn-quick-photo-gallery" class="btn-secondary-mini" style="flex: 1; height: 32px; font-size: 0.76rem; font-weight: 800;">
+                  🖼️ Galeria
+                </button>
+              </div>
+              <button type="button" id="btn-quick-photo-remove" class="btn-secondary-mini hidden" style="height: 26px; font-size: 0.7rem; color: #ef4444; border-color: rgba(239, 68, 68, 0.3); font-weight: 700;">
+                🗑️ Remover Foto
+              </button>
+              <input type="file" id="file-camera-quick" accept="image/*" capture="environment" class="hidden" />
+              <input type="file" id="file-gallery-quick" accept="image/*" class="hidden" />
+            </div>
+          </div>
         </div>
 
         <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 8px;">
@@ -1196,10 +1299,10 @@ function openBlitzQuickRegisterModal(barcode) {
         </div>
 
         <div style="display: flex; gap: 8px; margin-top: 8px;">
-          <button type="button" id="btn-cancel-quick-reg" class="btn-secondary" style="flex: 1; height: 44px; justify-content: center;">
+          <button type="button" id="btn-cancel-quick-reg" class="btn-secondary" style="flex: 1; height: 44px; justify-content: center; font-weight: 800;">
             Cancelar
           </button>
-          <button type="submit" class="btn-primary" style="flex: 1; height: 44px; justify-content: center; background: #10b981; color: #022c22; font-weight: 900;">
+          <button type="submit" class="btn-primary" style="flex: 1.2; height: 44px; justify-content: center; background: #10b981; color: #022c22; font-weight: 900;">
             ✓ SALVAR E CONFERIR
           </button>
         </div>
@@ -1214,7 +1317,62 @@ function openBlitzQuickRegisterModal(barcode) {
   document.getElementById('btn-close-quick-reg')?.addEventListener('click', closeModal);
   document.getElementById('btn-cancel-quick-reg')?.addEventListener('click', () => {
     closeModal();
-    startBlitzScanning();
+    if (options.onCancel) {
+      options.onCancel();
+    } else {
+      startBlitzScanning();
+    }
+  });
+
+  const fileCameraQuick = document.getElementById('file-camera-quick');
+  const fileGalleryQuick = document.getElementById('file-gallery-quick');
+  const previewBoxQuick = document.getElementById('quick-photo-preview-box');
+  const removeBtnQuick = document.getElementById('btn-quick-photo-remove');
+
+  const handleQuickImageFile = async (file) => {
+    if (!file) return;
+    try {
+      showToast('Processando foto...', 'sync', 1000);
+      const compressed = await compressImage(file, 600, 600, 0.72);
+      quickProdImage = compressed;
+      if (previewBoxQuick) {
+        previewBoxQuick.innerHTML = `<img src="${compressed}" alt="Foto" style="width: 100%; height: 100%; object-fit: cover;" />`;
+      }
+      if (removeBtnQuick) removeBtnQuick.classList.remove('hidden');
+      showToast('✓ Foto adicionada', 'success', 1200);
+    } catch (err) {
+      console.error('Erro ao processar imagem:', err);
+      showToast('Erro ao carregar imagem', 'warning');
+    }
+  };
+
+  document.getElementById('btn-quick-photo-camera')?.addEventListener('click', () => {
+    fileCameraQuick?.click();
+  });
+  document.getElementById('btn-quick-photo-gallery')?.addEventListener('click', () => {
+    fileGalleryQuick?.click();
+  });
+
+  fileCameraQuick?.addEventListener('change', (e) => {
+    if (e.target.files && e.target.files[0]) {
+      handleQuickImageFile(e.target.files[0]);
+    }
+  });
+  fileGalleryQuick?.addEventListener('change', (e) => {
+    if (e.target.files && e.target.files[0]) {
+      handleQuickImageFile(e.target.files[0]);
+    }
+  });
+
+  removeBtnQuick?.addEventListener('click', () => {
+    quickProdImage = '';
+    if (previewBoxQuick) {
+      previewBoxQuick.innerHTML = `<span id="quick-no-photo" style="font-size: 0.65rem; color: #71717a; font-weight: 700;">SEM FOTO</span>`;
+    }
+    removeBtnQuick.classList.add('hidden');
+    if (fileCameraQuick) fileCameraQuick.value = '';
+    if (fileGalleryQuick) fileGalleryQuick.value = '';
+    showToast('Foto removida', 'info', 1000);
   });
 
   document.getElementById('form-blitz-quick-reg')?.addEventListener('submit', async (e) => {
@@ -1234,15 +1392,22 @@ function openBlitzQuickRegisterModal(barcode) {
         barcode: barcode,
         name: name,
         sector: sector,
-        corridor: corridor
+        corridor: corridor,
+        image: quickProdImage || null
       });
 
       closeModal();
       showToast(`✓ Produto cadastrado: ${name}`, 'success', 1500);
       triggerSyncNow().catch(e => console.warn('Sync error:', e));
 
-      // Continua direto para a data solicitada
-      promptRequestedExpirationDate(savedProd);
+      if (options.onSuccess) {
+        options.onSuccess(savedProd);
+      } else if (getActiveBlitz()) {
+        // Continua direto para a data solicitada na blitz
+        promptRequestedExpirationDate(savedProd);
+      } else {
+        openConferenceForProduct(savedProd);
+      }
     } catch (err) {
       console.error('Erro ao salvar produto rápido:', err);
       showToast('Erro ao cadastrar produto', 'warning');

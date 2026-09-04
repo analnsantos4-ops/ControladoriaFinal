@@ -12,7 +12,7 @@ import { openNewProductView, saveNewProduct, handleProductImageFile, openProduct
 import { openConferenceForProduct, confirmConference, openCorridorAuditView, loadCorridorAuditProducts, exportCurrentCorridorWhatsApp, setBlitzConferenceContext, getBlitzConferenceContext } from './inventory.js';
 import { SETORS, CORRIDORS, formatDateBR, formatNumber, getDaysUntilExpiration } from './utils.js';
 import { openWhatsAppImportModal, formatMultipleProductsWhatsApp, openWhatsAppExportModal } from './whatsapp.js';
-import { initBlitzModule, getActiveBlitz, promptStartBlitz, handleBlitzBarcodeScanned, openBlitzDashboardView, openBlitzHistoryView, updateBlitzTopBarIndicator, promptVerifiedProductLocationModal, promptRequestedExpirationDate } from './blitz.js';
+import { initBlitzModule, getActiveBlitz, promptStartBlitz, handleBlitzBarcodeScanned, openBlitzDashboardView, openBlitzHistoryView, updateBlitzTopBarIndicator, promptVerifiedProductLocationModal, openBlitzQuickRegisterModal, promptRequestedExpirationDate } from './blitz.js';
 
 let torchState = false;
 let currentProductTypeFilter = 'REGISTERED'; // 'REGISTERED' | 'VERIFIED'
@@ -612,7 +612,7 @@ function setupEventListeners() {
       subtitle: 'Informe o Setor e Corredor onde o produto se encontra para iniciar a conferência:',
       defaultSector: isBlitz ? (getActiveBlitz()?.sector || 'MERCEARIA') : 'MERCEARIA',
       defaultCorridor: 'Corredor 1',
-      onConfirm: async ({ sector, corridor, name, barcode }) => {
+      onConfirm: async ({ sector, corridor, name, barcode, image }) => {
         showToast('Salvando produto verificado...', 'sync', 1000);
         try {
           const savedProd = await saveProduct({
@@ -620,6 +620,7 @@ function setupEventListeners() {
             name: name || `PRODUTO SEM CÓDIGO (${barcode})`,
             sector: sector || 'MERCEARIA',
             corridor: corridor || 'Corredor 1',
+            image: image || null,
             is_verified_only: true
           });
           triggerSyncNow().catch((e) => console.warn('Sync error:', e));
@@ -636,6 +637,7 @@ function setupEventListeners() {
             name: name || `PRODUTO SEM CÓDIGO (${barcode})`,
             sector: sector || 'MERCEARIA',
             corridor: corridor || 'Corredor 1',
+            image: image || null,
             is_verified_only: true
           };
           if (isBlitz) {
@@ -912,12 +914,16 @@ export function promptUnregisteredProductDirectModal(barcode) {
       </p>
 
       <div style="display: flex; flex-direction: column; gap: 8px;">
-        <button type="button" id="btn-direct-full-register" class="btn-primary" style="height: 48px; font-weight: 900; justify-content: center; background: #10b981; color: #022c22; font-size: 0.92rem;">
-          ➕ CADASTRAR COMPLETO (NOME / FOTO)
+        <button type="button" id="btn-direct-quick-register" class="btn-primary" style="height: 48px; font-weight: 900; justify-content: center; background: #10b981; color: #022c22; font-size: 0.92rem;">
+          ⚡ CADASTRO RÁPIDO (COM FOTO)
         </button>
 
         <button type="button" id="btn-direct-verified-only" class="btn-secondary" style="height: 46px; font-weight: 800; justify-content: center; color: #fbbf24; border: 1px solid rgba(245, 158, 11, 0.45); background: rgba(245, 158, 11, 0.08); font-size: 0.85rem;">
           🔍 APENAS VERIFICAR (SETOR E CORREDOR)
+        </button>
+
+        <button type="button" id="btn-direct-full-register" class="btn-secondary" style="height: 42px; font-weight: 700; justify-content: center; font-size: 0.82rem; color: #d4d4d8;">
+          📋 Cadastro Completo (Validade e Estoque)
         </button>
 
         <button type="button" id="btn-direct-unreg-cancel" style="background: none; border: none; color: #71717a; font-size: 0.8rem; font-weight: 700; cursor: pointer; text-decoration: underline; padding: 8px;">
@@ -936,6 +942,19 @@ export function promptUnregisteredProductDirectModal(barcode) {
     openScannerView({ mode: currentScannerMode });
   });
 
+  // Cadastro rápido com foto
+  document.getElementById('btn-direct-quick-register')?.addEventListener('click', () => {
+    closeModal();
+    openBlitzQuickRegisterModal(barcode, {
+      onSuccess: (savedProd) => {
+        openConferenceForProduct(savedProd);
+      },
+      onCancel: () => {
+        openScannerView({ mode: currentScannerMode });
+      }
+    });
+  });
+
   document.getElementById('btn-direct-full-register')?.addEventListener('click', () => {
     closeModal();
     openNewProductView(barcode);
@@ -949,7 +968,7 @@ export function promptUnregisteredProductDirectModal(barcode) {
       defaultCorridor: 'Corredor 1',
       title: 'LOCALIZAÇÃO DO PRODUTO',
       subtitle: 'Informe o Setor e Corredor para salvar este produto verificado e abrir a conferência:',
-      onConfirm: async ({ sector, corridor, name, barcode: finalBarcode }) => {
+      onConfirm: async ({ sector, corridor, name, barcode: finalBarcode, image }) => {
         showToast('Salvando produto verificado...', 'sync', 1000);
         try {
           const savedProd = await saveProduct({
@@ -957,6 +976,7 @@ export function promptUnregisteredProductDirectModal(barcode) {
             name: name || `PRODUTO ${finalBarcode}`,
             sector: sector || 'MERCEARIA',
             corridor: corridor || 'Corredor 1',
+            image: image || null,
             is_verified_only: true
           });
           triggerSyncNow().catch((e) => console.warn('Sync error:', e));
@@ -969,6 +989,7 @@ export function promptUnregisteredProductDirectModal(barcode) {
             name: name || `PRODUTO ${finalBarcode}`,
             sector: sector || 'MERCEARIA',
             corridor: corridor || 'Corredor 1',
+            image: image || null,
             is_verified_only: true
           });
         }
