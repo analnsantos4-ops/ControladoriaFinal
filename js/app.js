@@ -3,18 +3,19 @@ import '../style.css';
 
 // Orquestrador Principal do Aplicativo Controladoria - Ana Luiza
 import { isAuthenticated, verifyCode, verifyMasterSecurityPin, logout } from './auth.js';
-import { initDB, getProductByBarcode, getProductById, searchProducts, getAllProducts, getProductExpirations, getLatestCountsForExpiration, clearAllDatabaseData, toggleExpirationTriaged, sendProductExpirationToTriage, restoreProductExpirationFromTriage, runAutomaticTriageCleanup, getDatabaseStorageStats, TRIAGE_RETENTION_MS } from './db.js';
+import { initDB, getProductByBarcode, getProductById, searchProducts, getAllProducts, getProductExpirations, getLatestCountsForExpiration, clearAllDatabaseData, toggleExpirationTriaged, sendProductExpirationToTriage, restoreProductExpirationFromTriage, runAutomaticTriageCleanup, getDatabaseStorageStats, TRIAGE_RETENTION_MS, isProductVerifiedOnly, saveProduct } from './db.js';
 import { initSyncEngine, registerSyncStatusListener, wipeSupabaseCloudData, triggerSyncNow, checkSupabaseHealth, syncAllLocalDataToSupabase, SUPABASE_SETUP_SQL, getSyncStatus, getSyncDiagnostics } from './sync.js';
 import { showView, showToast, setupButtonFeedbacks, openPhotoModal, getActiveView, promptTriageBarcodeConfirmation, promptSecurityPin } from './ui.js';
 import { startCameraScanner, stopCameraScanner, toggleTorch, switchCamera, toggleCameraZoom, scanBarcodeFromImageFile } from './scanner.js';
 import { renderDashboard } from './dashboard.js';
-import { openNewProductView, saveNewProduct, handleProductImageFile, openProductDetailView, updateNewProductTotalCalculation, populateSectorAndCorridorSelects } from './products.js';
+import { openNewProductView, saveNewProduct, handleProductImageFile, openProductDetailView, updateNewProductTotalCalculation, populateSectorAndCorridorSelects, openEditProductModal } from './products.js';
 import { openConferenceForProduct, confirmConference, openCorridorAuditView, loadCorridorAuditProducts, exportCurrentCorridorWhatsApp, setBlitzConferenceContext, getBlitzConferenceContext } from './inventory.js';
 import { SETORS, CORRIDORS, formatDateBR, formatNumber, getDaysUntilExpiration } from './utils.js';
 import { openWhatsAppImportModal, formatMultipleProductsWhatsApp, openWhatsAppExportModal } from './whatsapp.js';
-import { initBlitzModule, getActiveBlitz, promptStartBlitz, handleBlitzBarcodeScanned, openBlitzDashboardView, openBlitzHistoryView, updateBlitzTopBarIndicator } from './blitz.js';
+import { initBlitzModule, getActiveBlitz, promptStartBlitz, handleBlitzBarcodeScanned, openBlitzDashboardView, openBlitzHistoryView, updateBlitzTopBarIndicator, promptVerifiedProductLocationModal, promptRequestedExpirationDate } from './blitz.js';
 
 let torchState = false;
+let currentProductTypeFilter = 'REGISTERED'; // 'REGISTERED' | 'VERIFIED'
 
 // Inicialização da Aplicação
 async function initApp() {
@@ -601,6 +602,55 @@ function setupEventListeners() {
     });
   }
 
+  // Botão: Produto Sem Código de Barras (Verificar)
+  document.getElementById('btn-scanner-no-barcode')?.addEventListener('click', () => {
+    stopCameraScanner();
+    const isBlitz = currentScannerMode === 'BLITZ' && getActiveBlitz();
+    promptVerifiedProductLocationModal({
+      barcode: '',
+      title: 'PRODUTO SEM CÓDIGO DE BARRAS',
+      subtitle: 'Informe o Setor e Corredor onde o produto se encontra para iniciar a conferência:',
+      defaultSector: isBlitz ? (getActiveBlitz()?.sector || 'MERCEARIA') : 'MERCEARIA',
+      defaultCorridor: 'Corredor 1',
+      onConfirm: async ({ sector, corridor, name, barcode }) => {
+        showToast('Salvando produto verificado...', 'sync', 1000);
+        try {
+          const savedProd = await saveProduct({
+            barcode,
+            name: name || `PRODUTO SEM CÓDIGO (${barcode})`,
+            sector: sector || 'MERCEARIA',
+            corridor: corridor || 'Corredor 1',
+            is_verified_only: true
+          });
+          triggerSyncNow().catch((e) => console.warn('Sync error:', e));
+          if (isBlitz) {
+            promptRequestedExpirationDate(savedProd);
+          } else {
+            openConferenceForProduct(savedProd);
+          }
+        } catch (e) {
+          console.warn('Erro ao salvar produto sem código:', e);
+          const fallbackProd = {
+            id: null,
+            barcode,
+            name: name || `PRODUTO SEM CÓDIGO (${barcode})`,
+            sector: sector || 'MERCEARIA',
+            corridor: corridor || 'Corredor 1',
+            is_verified_only: true
+          };
+          if (isBlitz) {
+            promptRequestedExpirationDate(fallbackProd);
+          } else {
+            openConferenceForProduct(fallbackProd);
+          }
+        }
+      },
+      onCancel: () => {
+        openScannerView({ mode: currentScannerMode });
+      }
+    });
+  });
+
   // --------------------------------------------------
   // 4. CONFERÊNCIA
   // --------------------------------------------------
@@ -692,12 +742,27 @@ function setupEventListeners() {
     const query = searchInput ? searchInput.value : '';
     const sector = searchSectorSelect ? searchSectorSelect.value : 'TODOS';
     const corridor = searchCorridorSelect ? searchCorridorSelect.value : 'TODOS';
-    await renderSearchResults(query, sector, corridor);
+    await renderSearchResults(query, sector, corridor, currentProductTypeFilter);
   };
 
   searchInput?.addEventListener('input', executeSearch);
   searchSectorSelect?.addEventListener('change', executeSearch);
   searchCorridorSelect?.addEventListener('change', executeSearch);
+
+  // Abas de tipo de produto: Registrados vs Verificados
+  document.getElementById('tab-products-registered')?.addEventListener('click', async () => {
+    currentProductTypeFilter = 'REGISTERED';
+    document.getElementById('tab-products-registered')?.classList.add('active');
+    document.getElementById('tab-products-verified')?.classList.remove('active');
+    await executeSearch();
+  });
+
+  document.getElementById('tab-products-verified')?.addEventListener('click', async () => {
+    currentProductTypeFilter = 'VERIFIED';
+    document.getElementById('tab-products-verified')?.classList.add('active');
+    document.getElementById('tab-products-registered')?.classList.remove('active');
+    await executeSearch();
+  });
 
   // --------------------------------------------------
   // 8. TELA DE VENCIMENTOS
@@ -814,19 +879,146 @@ export async function onBarcodeDetected(barcode) {
     // SIM → ABRIR PRODUTO PARA CONFERÊNCIA DIRETA
     openConferenceForProduct(existingProduct);
   } else {
-    // NÃO → CADASTRAR PRODUTO COM CÓDIGO PREENCHIDO
-    openNewProductView(cleanCode);
+    // NÃO → OPÇÃO ENTRE CADASTRAR COMPLETO OU REGISTRAR VERIFICADO COM SETOR E CORREDOR
+    promptUnregisteredProductDirectModal(cleanCode);
+  }
+}
+
+// Modal de decisão para produto não cadastrado na conferência direta
+export function promptUnregisteredProductDirectModal(barcode) {
+  let modal = document.getElementById('modal-unregistered-direct-choice');
+  if (!modal) {
+    modal = document.createElement('div');
+    modal.id = 'modal-unregistered-direct-choice';
+    modal.className = 'custom-modal';
+    document.body.appendChild(modal);
+  }
+
+  modal.innerHTML = `
+    <div class="modal-backdrop" id="modal-unreg-direct-backdrop"></div>
+    <div class="modal-card" style="padding: 20px; max-width: 420px; width: 92%; box-sizing: border-box; text-align: center;">
+      <div style="font-size: 2.2rem; margin-bottom: 4px;">⚠️</div>
+      <h3 style="font-size: 1.15rem; font-weight: 900; color: #f4f4f5; margin: 0 0 6px 0;">
+        PRODUTO NÃO CADASTRADO
+      </h3>
+
+      <div style="background: #18181c; border: 1px solid #2a2a30; border-radius: 8px; padding: 10px; margin-bottom: 14px;">
+        <div style="font-size: 0.72rem; color: #a1a1aa; text-transform: uppercase; font-weight: 800;">Código Bipado:</div>
+        <div style="font-size: 1.25rem; font-weight: 900; color: #fbbf24; margin-top: 2px; letter-spacing: 1px;">${barcode}</div>
+      </div>
+
+      <p style="font-size: 0.84rem; color: #a1a1aa; margin-bottom: 16px; line-height: 1.4;">
+        Este código de barras não foi encontrado no sistema. Como deseja prosseguir?
+      </p>
+
+      <div style="display: flex; flex-direction: column; gap: 8px;">
+        <button type="button" id="btn-direct-full-register" class="btn-primary" style="height: 48px; font-weight: 900; justify-content: center; background: #10b981; color: #022c22; font-size: 0.92rem;">
+          ➕ CADASTRAR COMPLETO (NOME / FOTO)
+        </button>
+
+        <button type="button" id="btn-direct-verified-only" class="btn-secondary" style="height: 46px; font-weight: 800; justify-content: center; color: #fbbf24; border: 1px solid rgba(245, 158, 11, 0.45); background: rgba(245, 158, 11, 0.08); font-size: 0.85rem;">
+          🔍 APENAS VERIFICAR (SETOR E CORREDOR)
+        </button>
+
+        <button type="button" id="btn-direct-unreg-cancel" style="background: none; border: none; color: #71717a; font-size: 0.8rem; font-weight: 700; cursor: pointer; text-decoration: underline; padding: 8px;">
+          Cancelar e Bipar Próximo
+        </button>
+      </div>
+    </div>
+  `;
+
+  modal.classList.add('open');
+  const closeModal = () => modal.classList.remove('open');
+
+  document.getElementById('modal-unreg-direct-backdrop')?.addEventListener('click', closeModal);
+  document.getElementById('btn-direct-unreg-cancel')?.addEventListener('click', () => {
+    closeModal();
+    openScannerView({ mode: currentScannerMode });
+  });
+
+  document.getElementById('btn-direct-full-register')?.addEventListener('click', () => {
+    closeModal();
+    openNewProductView(barcode);
+  });
+
+  document.getElementById('btn-direct-verified-only')?.addEventListener('click', () => {
+    closeModal();
+    promptVerifiedProductLocationModal({
+      barcode,
+      defaultSector: 'MERCEARIA',
+      defaultCorridor: 'Corredor 1',
+      title: 'LOCALIZAÇÃO DO PRODUTO',
+      subtitle: 'Informe o Setor e Corredor para salvar este produto verificado e abrir a conferência:',
+      onConfirm: async ({ sector, corridor, name, barcode: finalBarcode }) => {
+        showToast('Salvando produto verificado...', 'sync', 1000);
+        try {
+          const savedProd = await saveProduct({
+            barcode: finalBarcode,
+            name: name || `PRODUTO ${finalBarcode}`,
+            sector: sector || 'MERCEARIA',
+            corridor: corridor || 'Corredor 1',
+            is_verified_only: true
+          });
+          triggerSyncNow().catch((e) => console.warn('Sync error:', e));
+          openConferenceForProduct(savedProd);
+        } catch (e) {
+          console.warn('Erro ao salvar produto verificado:', e);
+          openConferenceForProduct({
+            id: null,
+            barcode: finalBarcode,
+            name: name || `PRODUTO ${finalBarcode}`,
+            sector: sector || 'MERCEARIA',
+            corridor: corridor || 'Corredor 1',
+            is_verified_only: true
+          });
+        }
+      },
+      onCancel: () => {
+        openScannerView({ mode: currentScannerMode });
+      }
+    });
+  });
+}
+
+// Atualiza contadores nas abas de busca
+export async function updateSearchTabCounts() {
+  try {
+    const allProducts = await getAllProducts();
+    let regCount = 0;
+    let verCount = 0;
+    for (const p of allProducts) {
+      if (isProductVerifiedOnly(p)) {
+        verCount++;
+      } else {
+        regCount++;
+      }
+    }
+    const regBadge = document.getElementById('tab-count-registered');
+    const verBadge = document.getElementById('tab-count-verified');
+    if (regBadge) regBadge.textContent = regCount;
+    if (verBadge) verBadge.textContent = verCount;
+  } catch (e) {
+    console.warn('Erro ao calcular contagem das abas:', e);
   }
 }
 
 // ----------------------------------------------------
 // TELA DE CONSULTA / BUSCA
 // ----------------------------------------------------
-export async function openSearchView() {
+export async function openSearchView(typeFilter) {
+  if (typeFilter) {
+    currentProductTypeFilter = typeFilter;
+  }
   populateSearchFilters();
   const searchInput = document.getElementById('search-query-input');
   if (searchInput) searchInput.value = '';
-  await renderSearchResults('', 'TODOS', 'TODOS');
+
+  // Atualiza classe ativa nas abas
+  document.getElementById('tab-products-registered')?.classList.toggle('active', currentProductTypeFilter === 'REGISTERED');
+  document.getElementById('tab-products-verified')?.classList.toggle('active', currentProductTypeFilter === 'VERIFIED');
+
+  await updateSearchTabCounts();
+  await renderSearchResults('', 'TODOS', 'TODOS', currentProductTypeFilter);
   showView('view-search');
 }
 
@@ -842,21 +1034,26 @@ function populateSearchFilters() {
   }
 }
 
-async function renderSearchResults(query, sector, corridor) {
-  const results = await searchProducts(query, sector, corridor);
+async function renderSearchResults(query, sector, corridor, typeFilter = currentProductTypeFilter) {
+  const results = await searchProducts(query, sector, corridor, typeFilter);
   const container = document.getElementById('search-results-list');
   const countDisplay = document.getElementById('search-results-count');
 
+  const isVer = typeFilter === 'VERIFIED';
   if (countDisplay) {
-    countDisplay.textContent = `${results.length} ${results.length === 1 ? 'produto encontrado' : 'produtos encontrados'}`;
+    const label = isVer ? (results.length === 1 ? 'produto verificado' : 'produtos verificados') : (results.length === 1 ? 'produto registrado' : 'produtos registrados');
+    countDisplay.textContent = `${results.length} ${label}`;
   }
+
+  // Atualiza também contadores das abas
+  updateSearchTabCounts().catch(() => {});
 
   if (!container) return;
 
   if (results.length === 0) {
     container.innerHTML = `
       <div class="empty-search-card">
-        <p>Nenhum produto encontrado para os filtros selecionados.</p>
+        <p>${isVer ? 'Nenhum produto verificado pendente de cadastro com os filtros selecionados.' : 'Nenhum produto cadastrado encontrado para os filtros selecionados.'}</p>
         <button type="button" class="btn-primary-mini" id="btn-search-add-new">+ Cadastrar Novo Produto</button>
       </div>
     `;
@@ -869,6 +1066,7 @@ async function renderSearchResults(query, sector, corridor) {
   // Calcula estoque ativo e triado de cada produto para exibição rica na busca
   const cardsHtml = await Promise.all(
     results.map(async (p) => {
+      const isVerified = isProductVerifiedOnly(p);
       let activeStock = 0;
       let triagedStock = 0;
       let hasExps = false;
@@ -900,26 +1098,36 @@ async function renderSearchResults(query, sector, corridor) {
         }
       }
 
+      const verifiedBadgeHtml = isVerified
+        ? `<span class="loc-badge" style="background: rgba(245, 158, 11, 0.15); color: #fbbf24; border: 1px solid rgba(245, 158, 11, 0.35); font-weight: 800;">🔍 PRODUTO VERIFICADO</span>`
+        : '';
+
       return `
-        <div class="search-result-card" data-prodid="${p.id}">
+        <div class="search-result-card ${isVerified ? 'search-card-verified' : ''}" data-prodid="${p.id}">
           <div class="search-thumb-col">
             ${
               p.image
                 ? `<img src="${p.image}" alt="" class="compact-prod-thumb" />`
-                : `<div class="photo-placeholder-mini">FOTO</div>`
+                : `<div class="photo-placeholder-mini" style="${isVerified ? 'border-color: rgba(245, 158, 11, 0.4); color: #fbbf24;' : ''}">${isVerified ? 'VERIF' : 'FOTO'}</div>`
             }
           </div>
           <div class="search-info-col">
-            <h4 class="search-prod-name">${p.name}</h4>
+            <h4 class="search-prod-name" style="${isVerified ? 'color: #fef08a;' : ''}">${p.name}</h4>
             <span class="search-barcode">${p.barcode}</span>
             <div class="search-loc-tags">
               <span class="loc-badge sector">${p.sector}</span>
               <span class="loc-badge corridor">${p.corridor}</span>
+              ${verifiedBadgeHtml}
               ${stockTagHtml}
             </div>
           </div>
-          <div class="search-action-col">
+          <div class="search-action-col" style="display: flex; flex-direction: column; gap: 6px; align-items: flex-end;">
             <button type="button" class="btn-search-view" data-prodid="${p.id}">Ver</button>
+            ${
+              isVerified
+                ? `<button type="button" class="btn-complete-reg-action" data-prodid="${p.id}" style="background: #10b981; color: #022c22; border: none; border-radius: 4px; padding: 3px 6px; font-size: 0.68rem; font-weight: 800; cursor: pointer; white-space: nowrap;">✏️ Cadastrar</button>`
+                : ''
+            }
           </div>
         </div>
       `;
@@ -930,8 +1138,20 @@ async function renderSearchResults(query, sector, corridor) {
 
   container.querySelectorAll('.search-result-card').forEach((card) => {
     card.addEventListener('click', (e) => {
+      if (e.target.closest('.btn-complete-reg-action')) return;
       const prodId = card.getAttribute('data-prodid');
       openProductDetailView(prodId);
+    });
+  });
+
+  container.querySelectorAll('.btn-complete-reg-action').forEach((btn) => {
+    btn.addEventListener('click', async (e) => {
+      e.stopPropagation();
+      const prodId = btn.getAttribute('data-prodid');
+      const product = await getProductById(prodId);
+      if (product) {
+        openEditProductModal(product);
+      }
     });
   });
 }

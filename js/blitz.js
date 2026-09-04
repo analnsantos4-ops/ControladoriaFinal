@@ -45,8 +45,7 @@ import {
   parseDateBRtoISO,
   getTodayISO,
   formatDateWithWeekday,
-  compressImage,
-  speakText
+  compressImage
 } from './utils.js';
 
 import { showView, showToast, promptConfirmDialog } from './ui.js';
@@ -993,30 +992,155 @@ function promptUnregisteredProductBlitz(barcode) {
     openBlitzQuickRegisterModal(barcode);
   });
 
-  // Opção: CONTINUAR SEM CADASTRAR (Guarda produto no banco de dados para manter histórico semanal permanente)
-  document.getElementById('btn-blitz-continue-unregistered')?.addEventListener('click', async () => {
+  // Opção: CONTINUAR SEM CADASTRAR (Pergunta Setor e Corredor e salva como Produto Verificado)
+  document.getElementById('btn-blitz-continue-unregistered')?.addEventListener('click', () => {
     closeModal();
-    showToast('Guardando produto no banco...', 'sync', 800);
-    try {
-      let savedProd = await getProductByBarcode(barcode);
-      if (!savedProd) {
-        savedProd = await saveProduct({
-          barcode: String(barcode).trim(),
-          name: `PRODUTO ${String(barcode).trim()}`,
-          sector: currentActiveBlitzSession?.sector || 'GERAL',
-          corridor: '01'
-        });
-        triggerSyncNow().catch(e => console.warn('Sync error:', e));
+    promptVerifiedProductLocationModal({
+      barcode: String(barcode).trim(),
+      defaultSector: currentActiveBlitzSession?.sector || 'MERCEARIA',
+      defaultCorridor: 'Corredor 1',
+      onConfirm: async ({ sector, corridor, name, barcode: finalBarcode }) => {
+        showToast('Guardando produto verificado...', 'sync', 1000);
+        try {
+          let savedProd = await getProductByBarcode(finalBarcode);
+          if (!savedProd) {
+            savedProd = await saveProduct({
+              barcode: finalBarcode,
+              name: name || `PRODUTO ${finalBarcode}`,
+              sector: sector || 'MERCEARIA',
+              corridor: corridor || 'Corredor 1',
+              is_verified_only: true
+            });
+            triggerSyncNow().catch(e => console.warn('Sync error:', e));
+          }
+          promptRequestedExpirationDate(savedProd);
+        } catch (e) {
+          console.warn('Erro ao salvar produto verificado:', e);
+          promptRequestedExpirationDate({
+            id: null,
+            barcode: finalBarcode,
+            name: name || `PRODUTO ${finalBarcode}`,
+            sector: sector || 'MERCEARIA',
+            corridor: corridor || 'Corredor 1',
+            is_verified_only: true
+          });
+        }
+      },
+      onCancel: () => {
+        startBlitzScanning();
       }
-      promptRequestedExpirationDate(savedProd);
-    } catch (e) {
-      console.warn('Erro ao auto-salvar produto provisório:', e);
-      promptRequestedExpirationDate({
-        id: null,
-        barcode: barcode,
-        name: `PRODUTO ${barcode}`,
-        sector: currentActiveBlitzSession?.sector || 'GERAL',
-        corridor: '01'
+    });
+  });
+}
+
+/**
+ * Modal rápido para perguntar Setor e Corredor de um produto verificado (sem cadastro completo ou sem código)
+ */
+export function promptVerifiedProductLocationModal({
+  barcode = '',
+  defaultSector = 'MERCEARIA',
+  defaultCorridor = 'Corredor 1',
+  defaultName = '',
+  title = 'LOCALIZAÇÃO DO PRODUTO',
+  subtitle = 'Informe o Setor e Corredor para registrar este produto verificado:',
+  onConfirm,
+  onCancel
+}) {
+  let modal = document.getElementById('modal-verified-loc-prompt');
+  if (!modal) {
+    modal = document.createElement('div');
+    modal.id = 'modal-verified-loc-prompt';
+    modal.className = 'custom-modal';
+    document.body.appendChild(modal);
+  }
+
+  const generatedCode = barcode || `SCOD-${Date.now().toString().slice(-6)}`;
+
+  modal.innerHTML = `
+    <div class="modal-backdrop" id="modal-verified-loc-backdrop"></div>
+    <div class="modal-card" style="padding: 20px; max-width: 400px; width: 100%; box-sizing: border-box;">
+      <div style="display: flex; align-items: center; justify-content: space-between; border-bottom: 1px solid #27272a; padding-bottom: 10px; margin-bottom: 12px;">
+        <div style="display: flex; align-items: center; gap: 8px;">
+          <span style="font-size: 1.3rem;">📍</span>
+          <div>
+            <h3 style="font-size: 1.02rem; font-weight: 900; color: #f4f4f5; margin: 0;">${title}</h3>
+            <span style="font-size: 0.72rem; color: #fbbf24; font-weight: 800; text-transform: uppercase;">Produto Verificado</span>
+          </div>
+        </div>
+        <button type="button" id="btn-close-verified-loc-modal" class="btn-icon-control" style="font-size: 1rem; width: 32px; height: 32px;">✕</button>
+      </div>
+
+      <p style="font-size: 0.82rem; color: #a1a1aa; margin-bottom: 14px; line-height: 1.4;">
+        ${subtitle}
+      </p>
+
+      <form id="form-verified-location-modal" style="display: flex; flex-direction: column; gap: 12px;">
+        <div>
+          <label style="font-size: 0.76rem; font-weight: 800; color: #a1a1aa; text-transform: uppercase; margin-bottom: 4px; display: block;">Código:</label>
+          <input type="text" id="verified-input-barcode" class="form-input" value="${generatedCode}" style="font-family: monospace; font-weight: 800; color: #fbbf24; background: #18181c;" readonly />
+        </div>
+
+        <div>
+          <label style="font-size: 0.76rem; font-weight: 800; color: #a1a1aa; text-transform: uppercase; margin-bottom: 4px; display: block;">Nome / Descrição Breve (Opcional):</label>
+          <input type="text" id="verified-input-name" class="form-input" value="${defaultName || ''}" placeholder="Ex: PRODUTO SEM CÓDIGO" style="text-transform: uppercase; font-weight: 700;" />
+        </div>
+
+        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 8px;">
+          <div>
+            <label for="verified-select-sector" style="font-size: 0.76rem; font-weight: 800; color: #a1a1aa; text-transform: uppercase; margin-bottom: 4px; display: block;">Setor:</label>
+            <select id="verified-select-sector" class="form-select" style="font-weight: 700; height: 42px;">
+              ${SETORS.map(s => `<option value="${s}" ${s === defaultSector ? 'selected' : ''}>${s}</option>`).join('')}
+            </select>
+          </div>
+          <div>
+            <label for="verified-select-corridor" style="font-size: 0.76rem; font-weight: 800; color: #a1a1aa; text-transform: uppercase; margin-bottom: 4px; display: block;">Corredor:</label>
+            <select id="verified-select-corridor" class="form-select" style="font-weight: 700; height: 42px;">
+              ${CORRIDORS.map(c => `<option value="${c}" ${c === defaultCorridor ? 'selected' : ''}>${c}</option>`).join('')}
+            </select>
+          </div>
+        </div>
+
+        <div style="display: flex; gap: 8px; margin-top: 6px;">
+          <button type="button" id="btn-cancel-verified-loc-modal" class="btn-secondary" style="flex: 1; height: 44px; font-weight: 800;">
+            Cancelar
+          </button>
+          <button type="submit" class="btn-primary" style="flex: 1.4; height: 44px; background: #10b981; color: #022c22; font-weight: 900;">
+            ✓ CONTINUAR
+          </button>
+        </div>
+      </form>
+    </div>
+  `;
+
+  modal.classList.add('open');
+  const closeModal = () => modal.classList.remove('open');
+
+  document.getElementById('modal-verified-loc-backdrop')?.addEventListener('click', () => {
+    closeModal();
+    if (onCancel) onCancel();
+  });
+  document.getElementById('btn-close-verified-loc-modal')?.addEventListener('click', () => {
+    closeModal();
+    if (onCancel) onCancel();
+  });
+  document.getElementById('btn-cancel-verified-loc-modal')?.addEventListener('click', () => {
+    closeModal();
+    if (onCancel) onCancel();
+  });
+
+  document.getElementById('form-verified-location-modal')?.addEventListener('submit', (e) => {
+    e.preventDefault();
+    const finalBarcode = document.getElementById('verified-input-barcode')?.value?.trim() || generatedCode;
+    const nameInput = document.getElementById('verified-input-name')?.value?.trim();
+    const chosenSector = document.getElementById('verified-select-sector')?.value || 'MERCEARIA';
+    const chosenCorridor = document.getElementById('verified-select-corridor')?.value || 'Corredor 1';
+    closeModal();
+    if (onConfirm) {
+      onConfirm({
+        barcode: finalBarcode,
+        name: nameInput || `PRODUTO ${finalBarcode}`,
+        sector: chosenSector,
+        corridor: chosenCorridor
       });
     }
   });
@@ -1359,9 +1483,6 @@ export async function promptRequestedExpirationDate(product) {
             <div style="display: flex; align-items: center; gap: 5px;">
               <span>📢</span> <span>CONFERÊNCIA ANTERIOR NO BANCO:</span>
             </div>
-            <button type="button" id="btn-speak-date-conf" style="background: rgba(59, 130, 246, 0.25); border: 1px solid #60a5fa; color: #93c5fd; border-radius: 6px; padding: 2px 8px; font-size: 0.72rem; font-weight: 800; cursor: pointer; display: flex; align-items: center; gap: 4px;">
-              🔊 Ouvir
-            </button>
           </div>
           <div style="font-size: 0.88rem; font-weight: 800; color: #f0f9ff; margin-top: 6px; line-height: 1.4;">
             O produto <span style="color: #fef08a;">${prodName}</span> foi conferido para essa data (<strong>${dateFormatted}</strong>) no dia <strong>${confDateBR}</strong>${confTime ? ` às ${confTime}` : ''} e tinha <strong style="color: ${prevQty > 0 ? '#34d399' : '#f87171'};">${qtyText}</strong>.
@@ -1373,15 +1494,6 @@ export async function promptRequestedExpirationDate(product) {
           ` : ''}
         </div>
       `;
-
-      document.getElementById('btn-speak-date-conf')?.addEventListener('click', (ev) => {
-        ev.stopPropagation();
-        speakText(speechPhrase);
-      });
-
-      if (shouldSpeak) {
-        speakText(speechPhrase);
-      }
     } else {
       feedbackEl.innerHTML = `
         <div style="background: rgba(39, 39, 42, 0.4); border: 1px dashed #3f3f46; border-radius: 8px; padding: 8px 10px; margin-top: 4px; text-align: left; display: flex; align-items: center; gap: 6px;">
@@ -1612,9 +1724,6 @@ async function showHasOrNotDecisionModal({ product, requestedDate, existingItem 
           <div style="display: flex; align-items: center; gap: 5px;">
             <span>🕒</span> <span>HISTÓRICO DA CONFERÊNCIA ANTERIOR:</span>
           </div>
-          <button type="button" id="btn-speak-decision-history" style="background: rgba(59, 130, 246, 0.25); border: 1px solid #60a5fa; color: #93c5fd; border-radius: 6px; padding: 2px 8px; font-size: 0.72rem; font-weight: 800; cursor: pointer; display: flex; align-items: center; gap: 4px;">
-            🔊 Ouvir
-          </button>
         </div>
         <div style="font-size: 0.92rem; font-weight: 800; color: #f0f9ff; margin-top: 6px; line-height: 1.45;">
           O produto <span style="color: #fef08a;">${prodName}</span> foi conferido para a validade <strong>${dateFormatted}</strong> no dia <strong>${confDate}</strong>${confTime ? ` às ${confTime}` : ''} e tinha <strong style="color: ${prevQty > 0 ? '#34d399' : '#f87171'};">${qtyText}</strong>.
@@ -1719,15 +1828,6 @@ async function showHasOrNotDecisionModal({ product, requestedDate, existingItem 
 
   modal.classList.add('open');
   const closeModal = () => modal.classList.remove('open');
-
-  if (speechPhrase) {
-    document.getElementById('btn-speak-decision-history')?.addEventListener('click', (ev) => {
-      ev.stopPropagation();
-      speakText(speechPhrase);
-    });
-    // Voz sintetizada informando o histórico de conferência anterior
-    speakText(speechPhrase);
-  }
 
   document.getElementById('modal-blitz-hon-backdrop')?.addEventListener('click', closeModal);
   document.getElementById('btn-blitz-hon-cancel')?.addEventListener('click', () => {

@@ -32,9 +32,13 @@ CREATE TABLE IF NOT EXISTS public.products (
   checkout_qty NUMERIC DEFAULT 0,
   last_expiration_date TEXT,
   last_count_date TIMESTAMPTZ,
+  is_verified_only BOOLEAN DEFAULT FALSE,
   created_at TIMESTAMPTZ DEFAULT NOW(),
   updated_at TIMESTAMPTZ DEFAULT NOW()
 );
+
+-- Migração rápida para coluna is_verified_only caso a tabela já exista:
+ALTER TABLE public.products ADD COLUMN IF NOT EXISTS is_verified_only BOOLEAN DEFAULT FALSE;
 
 -- 2. Tabela de Validades (com suporte a Triagem)
 CREATE TABLE IF NOT EXISTS public.product_expirations (
@@ -299,6 +303,7 @@ function cleanPayloadForSupabase(tableName, payload) {
       checkout_qty: Number(payload.checkout_qty) || 0,
       last_expiration_date: payload.last_expiration_date || null,
       last_count_date: payload.last_count_date || new Date().toISOString(),
+      is_verified_only: Boolean(payload.is_verified_only),
       created_at: payload.created_at || new Date().toISOString(),
       updated_at: new Date().toISOString()
     };
@@ -457,6 +462,24 @@ async function pushToSupabase(tableName, operation, rawPayload, skipParentCheck 
     }
 
     console.warn(`[Supabase ${tableName}] Status ${response.status}:`, errText);
+
+    // Se o erro for de coluna 'is_verified_only' ainda não criada no Supabase, envia sem ela para não travar a fila
+    if (tableName === 'products' && payload.is_verified_only !== undefined && (errText.includes('is_verified_only') || errText.includes('column'))) {
+      try {
+        const fallbackPayload = { ...payload };
+        delete fallbackPayload.is_verified_only;
+        const retryRes = await fetch(postUrl, {
+          method: 'POST',
+          headers: getSupabasePostHeaders('resolution=merge-duplicates,return=minimal'),
+          body: JSON.stringify(fallbackPayload)
+        });
+        if (retryRes.ok || retryRes.status === 201 || retryRes.status === 200 || retryRes.status === 204) {
+          lastSyncError = null;
+          lastSyncErrorCode = null;
+          return true;
+        }
+      } catch (_) {}
+    }
 
     // Se o erro for de coluna 'is_triaged' ou 'triaged_at' ainda não criada no Supabase, envia sem essas colunas para não travar a fila
     if (tableName === 'product_expirations' && (payload.is_triaged !== undefined || payload.triaged_at !== undefined) && (errText.includes('is_triaged') || errText.includes('triaged_at') || errText.includes('column'))) {

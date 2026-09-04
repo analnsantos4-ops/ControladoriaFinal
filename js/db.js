@@ -231,11 +231,34 @@ export async function getAllProducts() {
   return products;
 }
 
-export async function searchProducts(searchTerm = '', sectorFilter = '', corridorFilter = '') {
+/**
+ * Determina se o produto é apenas "Verificado" (sem cadastro completo de nome, foto etc.)
+ * ou se é um produto com registro completo.
+ */
+export function isProductVerifiedOnly(product) {
+  if (!product) return false;
+  if (product.is_verified_only === true || product.is_verified_only === 'true' || product.is_verified_only === 1) {
+    return true;
+  }
+  const name = (product.name || '').trim().toUpperCase();
+  const code = (product.barcode || '').trim().toUpperCase();
+  // Se não tem nome ou o nome é provisório/código de barras
+  if (!name || name === code || name === `PRODUTO ${code}` || (name.startsWith('PRODUTO ') && name.includes(code))) {
+    return true;
+  }
+  return false;
+}
+
+export async function searchProducts(searchTerm = '', sectorFilter = '', corridorFilter = '', typeFilter = 'ALL') {
   const all = await getAllProducts();
   const term = searchTerm.toLowerCase().trim();
 
   const filtered = all.filter((p) => {
+    const isVerified = isProductVerifiedOnly(p);
+
+    if (typeFilter === 'REGISTERED' && isVerified) return false;
+    if (typeFilter === 'VERIFIED' && !isVerified) return false;
+
     const matchTerm = !term ||
       (p.name && p.name.toLowerCase().includes(term)) ||
       (p.barcode && p.barcode.toLowerCase().includes(term));
@@ -285,6 +308,20 @@ export async function saveProduct(product) {
     ? Number(product.total_quantity)
     : (depositQty + fridgeQty + shelfQty + gondolaEndQty + earQty + islandQty + cartQty + checkoutQty);
 
+  // Determina se o produto é classificado como apenas verificado
+  let isVerified = false;
+  const rawName = product.name ? product.name.trim().toUpperCase() : '';
+  const rawCode = product.barcode.trim().toUpperCase();
+  if (product.is_verified_only !== undefined) {
+    isVerified = Boolean(product.is_verified_only);
+  } else if (!rawName || rawName === rawCode || rawName === `PRODUTO ${rawCode}` || (rawName.startsWith('PRODUTO ') && rawName.includes(rawCode))) {
+    isVerified = true;
+  } else if (existing && existing.is_verified_only && (!rawName || rawName === rawCode || (rawName.startsWith('PRODUTO ') && rawName.includes(rawCode)))) {
+    isVerified = true;
+  } else {
+    isVerified = false;
+  }
+
   const productData = {
     id: product.id || generateId(),
     barcode: product.barcode.trim(),
@@ -292,6 +329,7 @@ export async function saveProduct(product) {
     image: product.image !== undefined ? product.image : (existing?.image || ''),
     sector: product.sector || existing?.sector || 'MERCEARIA',
     corridor: product.corridor || existing?.corridor || 'Corredor 1',
+    is_verified_only: isVerified,
     total_quantity: totalQty,
     deposit_qty: depositQty,
     fridge_qty: fridgeQty,

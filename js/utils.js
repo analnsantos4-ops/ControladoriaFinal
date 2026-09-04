@@ -352,20 +352,8 @@ export function formatNumber(num) {
 }
 
 /**
- * Síntese de voz em português brasileiro para falar conferências e avisos cruciais
+ * Síntese de voz desativada por solicitação do usuário
  */
 export function speakText(text) {
-  if (!text || typeof window === 'undefined') return;
-  try {
-    if ('speechSynthesis' in window) {
-      window.speechSynthesis.cancel(); // Interrompe fala anterior
-      const utterance = new SpeechSynthesisUtterance(text);
-      utterance.lang = 'pt-BR';
-      utterance.rate = 1.05;
-      utterance.pitch = 1.0;
-      window.speechSynthesis.speak(utterance);
-    }
-  } catch (e) {
-    console.warn('Síntese de voz indisponível ou bloqueada:', e);
-  }
+  // Desativado por solicitação do usuário
 }
