@@ -1937,7 +1937,7 @@ export async function getBlitzSessionById(id) {
   }
 }
 
-export async function updateBlitzSessionPeriod(sessionId, { start_date, end_date, period_label }) {
+export async function updateBlitzSessionPeriod(sessionId, { start_date, end_date, period_label, sector, blitz_type }) {
   if (!sessionId) return null;
   const now = new Date().toISOString();
   try {
@@ -1959,6 +1959,10 @@ export async function updateBlitzSessionPeriod(sessionId, { start_date, end_date
         if (cleanStart) session.start_date = cleanStart;
         if (cleanEnd) session.end_date = cleanEnd;
         if (label) session.period_label = label;
+        if (sector) {
+          session.sector = String(sector).trim().toUpperCase();
+          session.blitz_type = blitz_type ? String(blitz_type).trim().toUpperCase() : session.sector;
+        }
         session.updated_at = now;
         store.put(session);
 

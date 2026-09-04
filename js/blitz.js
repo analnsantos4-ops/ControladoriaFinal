@@ -135,6 +135,9 @@ export function updateBlitzTopBarIndicator() {
             <span style="background: #f59e0b; color: #000; font-size: 0.65rem; font-weight: 900; padding: 2px 6px; border-radius: 4px; text-transform: uppercase;">
               BLITZ ATIVA
             </span>
+            <span style="background: rgba(245, 158, 11, 0.2); border: 1px solid rgba(245, 158, 11, 0.4); color: #fbbf24; font-size: 0.68rem; font-weight: 900; padding: 2px 6px; border-radius: 4px; text-transform: uppercase;">
+              SETOR: ${currentActiveBlitzSession.sector || 'GERAL'}
+            </span>
             <span style="font-size: 0.78rem; color: #fbbf24; font-weight: 800;">
               Período: ${periodLabel}
             </span>
@@ -171,7 +174,7 @@ export function updateBlitzTopBarIndicator() {
       <div style="display: flex; align-items: center; gap: 6px; min-width: 0;">
         <span style="font-size: 1rem;">🔍</span>
         <span style="font-size: 0.74rem; font-weight: 900; color: #fbbf24; text-transform: uppercase; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">
-          BLITZ ATIVA: ${periodLabel}
+          BLITZ [${currentActiveBlitzSession.sector || 'GERAL'}]: ${periodLabel}
         </span>
       </div>
       <div style="display: flex; gap: 6px; align-items: center; flex-shrink: 0;">
@@ -196,7 +199,7 @@ export function updateBlitzTopBarIndicator() {
 }
 
 // ----------------------------------------------------
-// 1. INICIAR BLITZ: SOLICITA APENAS O PERÍODO
+// 1. INICIAR BLITZ: SOLICITA O SETOR E O PERÍODO
 // ----------------------------------------------------
 
 export async function promptStartBlitz() {
@@ -218,6 +221,7 @@ function showActiveBlitzDialog() {
 
   const periodLabel = currentActiveBlitzSession.period_label || 'Geral';
   const startedAt = new Date(currentActiveBlitzSession.started_at).toLocaleString('pt-BR');
+  const sectorLabel = currentActiveBlitzSession.sector || 'GERAL';
 
   modal.innerHTML = `
     <div class="modal-backdrop" id="modal-active-blitz-backdrop"></div>
@@ -227,6 +231,11 @@ function showActiveBlitzDialog() {
         BLITZ ATIVA EM ANDAMENTO
       </h3>
       <div style="background: #18181c; border: 1px solid #2a2a30; border-radius: 8px; padding: 12px; margin-bottom: 14px; text-align: center;">
+        <div style="display: flex; align-items: center; justify-content: center; gap: 8px; margin-bottom: 6px;">
+          <span style="background: rgba(245, 158, 11, 0.2); color: #fbbf24; border: 1px solid rgba(245, 158, 11, 0.4); font-size: 0.8rem; font-weight: 900; padding: 3px 10px; border-radius: 6px;">
+            🏷️ SETOR: ${sectorLabel}
+          </span>
+        </div>
         <div style="font-size: 0.72rem; color: #a1a1aa; text-transform: uppercase; font-weight: 800;">Período da Blitz:</div>
         <div style="font-size: 1.15rem; font-weight: 900; color: #fbbf24; margin-top: 2px;">
           ${periodLabel}
@@ -240,11 +249,14 @@ function showActiveBlitzDialog() {
         <button type="button" id="btn-dialog-resume-blitz" class="btn-primary" style="height: 48px; font-weight: 900; font-size: 0.95rem; justify-content: center; background: #f59e0b; color: #000;">
           ▶ CONTINUAR ESTA BLITZ
         </button>
+        <button type="button" id="btn-dialog-config-blitz" class="btn-secondary" style="height: 44px; font-weight: 800; font-size: 0.88rem; justify-content: center; color: #fbbf24; border-color: rgba(245, 158, 11, 0.4);">
+          ⚙️ Configurar Setor e Período
+        </button>
         <button type="button" id="btn-dialog-finish-blitz" class="btn-secondary" style="height: 44px; font-weight: 800; font-size: 0.88rem; justify-content: center; color: #10b981; border-color: rgba(16, 185, 129, 0.4);">
           ✅ FINALIZAR BLITZ
         </button>
         <button type="button" id="btn-dialog-new-blitz" class="btn-secondary" style="height: 40px; font-weight: 700; font-size: 0.82rem; justify-content: center; color: #a1a1aa;">
-          ➕ Iniciar Outra Blitz (Novo Período)
+          ➕ Iniciar Outra Blitz
         </button>
       </div>
     </div>
@@ -260,6 +272,11 @@ function showActiveBlitzDialog() {
     openBlitzDashboardView();
   });
 
+  document.getElementById('btn-dialog-config-blitz')?.addEventListener('click', () => {
+    closeModal();
+    promptEditActiveBlitzPeriod(currentActiveBlitzSession);
+  });
+
   document.getElementById('btn-dialog-finish-blitz')?.addEventListener('click', async () => {
     closeModal();
     await finishActiveBlitzSession(currentActiveBlitzSession?.id);
@@ -271,7 +288,7 @@ function showActiveBlitzDialog() {
   });
 }
 
-// Modal para informar apenas o Período da Blitz
+// Modal para configurar o Tipo/Setor e o Período da Blitz
 function showStartBlitzModal() {
   let modal = document.getElementById('modal-start-blitz');
   if (!modal) {
@@ -291,7 +308,7 @@ function showStartBlitzModal() {
 
   modal.innerHTML = `
     <div class="modal-backdrop" id="modal-start-blitz-backdrop"></div>
-    <div class="modal-card" style="padding: 20px; max-width: 440px; width: 100%; box-sizing: border-box;">
+    <div class="modal-card" style="padding: 20px; max-width: 440px; width: 100%; box-sizing: border-box; max-height: 92vh; overflow-y: auto;">
       <div style="display: flex; align-items: center; justify-content: space-between; border-bottom: 1px solid #27272a; padding-bottom: 10px; margin-bottom: 14px;">
         <div style="display: flex; align-items: center; gap: 8px;">
           <span style="font-size: 1.4rem;">🔍</span>
@@ -302,14 +319,50 @@ function showStartBlitzModal() {
         <button type="button" id="btn-close-start-blitz" class="btn-icon-control" style="font-size: 1rem; width: 30px; height: 30px;">✕</button>
       </div>
 
-      <div style="background: rgba(245, 158, 11, 0.1); border: 1px solid rgba(245, 158, 11, 0.35); border-radius: 8px; padding: 10px; margin-bottom: 14px;">
+      <div style="background: rgba(245, 158, 11, 0.1); border: 1px solid rgba(245, 158, 11, 0.35); border-radius: 8px; padding: 10px; margin-bottom: 12px;">
         <div style="font-size: 0.78rem; color: #fef08a; line-height: 1.4;">
-          <strong>Conferência com Listagem Física:</strong><br>
-          Informe o período da blitz que consta no papel que você recebeu. Toque no calendário para selecionar.
+          <strong>Defina o Setor e o Período:</strong><br>
+          Escolha o tipo da blitz (ex: Mercearia ou Bebidas) para que a conferência fique restrita e vinculada ao setor desejado.
         </div>
       </div>
 
       <form id="form-start-blitz-period" style="display: flex; flex-direction: column; gap: 12px;">
+        
+        <!-- SELEÇÃO DO TIPO / SETOR DA BLITZ -->
+        <div class="form-group" style="margin-bottom: 0;">
+          <label style="font-size: 0.76rem; font-weight: 800; color: #a1a1aa; text-transform: uppercase; display: flex; align-items: center; justify-content: space-between; margin-bottom: 6px;">
+            <span>🏷️ Tipo / Setor da Blitz:</span>
+            <span style="font-size: 0.68rem; color: #fbbf24; text-transform: none; font-weight: 800;">Foco exclusivo</span>
+          </label>
+
+          <!-- Chips Principais: Mercearia e Bebidas destacados -->
+          <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 6px; margin-bottom: 6px;">
+            <button type="button" class="btn-start-blitz-chip btn-secondary active" data-sector="MERCEARIA" style="padding: 10px 8px; font-size: 0.84rem; font-weight: 900; justify-content: center; border-color: #f59e0b; background: rgba(245, 158, 11, 0.2); color: #fbbf24;">
+              🥫 MERCEARIA
+            </button>
+            <button type="button" class="btn-start-blitz-chip btn-secondary" data-sector="BEBIDAS" style="padding: 10px 8px; font-size: 0.84rem; font-weight: 900; justify-content: center;">
+              🍾 BEBIDAS
+            </button>
+          </div>
+
+          <!-- Outros Setores -->
+          <div style="display: grid; grid-template-columns: repeat(4, 1fr); gap: 4px; margin-bottom: 8px;">
+            <button type="button" class="btn-start-blitz-chip btn-secondary" data-sector="LIMPEZA" style="padding: 6px 2px; font-size: 0.72rem; font-weight: 700; justify-content: center;">🧹 Limpeza</button>
+            <button type="button" class="btn-start-blitz-chip btn-secondary" data-sector="PERFUMARIA" style="padding: 6px 2px; font-size: 0.72rem; font-weight: 700; justify-content: center;">🧴 Perfumaria</button>
+            <button type="button" class="btn-start-blitz-chip btn-secondary" data-sector="ALHO" style="padding: 6px 2px; font-size: 0.72rem; font-weight: 700; justify-content: center;">🧄 Alho</button>
+            <button type="button" class="btn-start-blitz-chip btn-secondary" data-sector="BAZAR" style="padding: 6px 2px; font-size: 0.72rem; font-weight: 700; justify-content: center;">📦 Bazar</button>
+          </div>
+
+          <select id="select-blitz-start-sector" class="form-input" style="font-weight: 800; height: 42px; color: #fbbf24; background: #18181c; border-color: #3f3f46;">
+            ${SETORS.map(s => `<option value="${s}" ${s === 'MERCEARIA' ? 'selected' : ''}>SETOR: ${s}</option>`).join('')}
+            <option value="GERAL">TODOS OS SETORES (GERAL)</option>
+          </select>
+          <div style="font-size: 0.7rem; color: #71717a; margin-top: 4px; line-height: 1.3;">
+            🔒 Todos os produtos conferidos, verificados ou cadastrados nesta blitz ficarão vinculados a este setor.
+          </div>
+        </div>
+
+        <!-- PERÍODO DA BLITZ -->
         <div class="form-group" style="margin-bottom: 0;">
           <label for="input-blitz-start-date" style="font-size: 0.76rem; font-weight: 800; color: #a1a1aa; text-transform: uppercase;">
             📅 Data Inicial:
@@ -338,7 +391,7 @@ function showStartBlitzModal() {
           />
         </div>
 
-        <!-- Atalhos Rápidos -->
+        <!-- Atalhos Rápidos de Datas -->
         <div style="display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; margin-top: 2px;">
           <button type="button" class="btn-quick-period btn-secondary" data-preset="month" style="padding: 6px; font-size: 0.72rem; font-weight: 800; justify-content: center;">Este Mês</button>
           <button type="button" class="btn-quick-period btn-secondary" data-preset="30d" style="padding: 6px; font-size: 0.72rem; font-weight: 800; justify-content: center;">+30 Dias</button>
@@ -349,7 +402,7 @@ function showStartBlitzModal() {
           <button type="button" id="btn-cancel-start-blitz" class="btn-secondary" style="flex: 1; height: 46px; justify-content: center;">
             Cancelar
           </button>
-          <button type="submit" id="btn-confirm-start-blitz" class="btn-primary" style="flex: 1; height: 46px; justify-content: center; background: #f59e0b; color: #000; font-weight: 900; font-size: 0.95rem;">
+          <button type="submit" id="btn-confirm-start-blitz" class="btn-primary" style="flex: 1.2; height: 46px; justify-content: center; background: #f59e0b; color: #000; font-weight: 900; font-size: 0.95rem;">
             🚀 INICIAR BLITZ
           </button>
         </div>
@@ -361,6 +414,43 @@ function showStartBlitzModal() {
 
   const startInput = document.getElementById('input-blitz-start-date');
   const endInput = document.getElementById('input-blitz-end-date');
+  const sectorSelect = document.getElementById('select-blitz-start-sector');
+  const sectorChips = modal.querySelectorAll('.btn-start-blitz-chip');
+
+  // Interação dos chips de setor
+  sectorChips.forEach(chip => {
+    chip.addEventListener('click', () => {
+      const sec = chip.getAttribute('data-sector');
+      if (sectorSelect) sectorSelect.value = sec;
+      sectorChips.forEach(c => {
+        c.classList.remove('active');
+        c.style.borderColor = '';
+        c.style.background = '';
+        c.style.color = '';
+      });
+      chip.classList.add('active');
+      chip.style.borderColor = '#f59e0b';
+      chip.style.background = 'rgba(245, 158, 11, 0.2)';
+      chip.style.color = '#fbbf24';
+    });
+  });
+
+  sectorSelect?.addEventListener('change', () => {
+    const val = sectorSelect.value;
+    sectorChips.forEach(c => {
+      if (c.getAttribute('data-sector') === val) {
+        c.classList.add('active');
+        c.style.borderColor = '#f59e0b';
+        c.style.background = 'rgba(245, 158, 11, 0.2)';
+        c.style.color = '#fbbf24';
+      } else {
+        c.classList.remove('active');
+        c.style.borderColor = '';
+        c.style.background = '';
+        c.style.color = '';
+      }
+    });
+  });
 
   // Presets de período
   modal.querySelectorAll('.btn-quick-period').forEach(btn => {
@@ -395,6 +485,7 @@ function showStartBlitzModal() {
     e.preventDefault();
     const sDateRaw = startInput?.value?.trim();
     const eDateRaw = endInput?.value?.trim();
+    const chosenSector = sectorSelect?.value?.trim() || 'MERCEARIA';
 
     if (!sDateRaw) {
       showToast('Selecione a data inicial no calendário', 'warning');
@@ -408,12 +499,12 @@ function showStartBlitzModal() {
     }
 
     closeModal();
-    await startNewBlitzSession(sDateRaw, eDateRaw);
+    await startNewBlitzSession(sDateRaw, eDateRaw, chosenSector);
   });
 }
 
-// Inicia a sessão com as datas informadas e abre a tela da Blitz
-export async function startNewBlitzSession(startDateInput, endDateInput) {
+// Inicia a sessão com as datas e setor informados e abre a tela da Blitz
+export async function startNewBlitzSession(startDateInput, endDateInput, sectorInput = 'MERCEARIA') {
   try {
     let sDateISO = startDateInput ? (startDateInput.includes('/') ? parseDateBRtoISO(startDateInput) : String(startDateInput).trim().split('T')[0]) : null;
     let eDateISO = endDateInput ? (endDateInput.includes('/') ? parseDateBRtoISO(endDateInput) : String(endDateInput).trim().split('T')[0]) : null;
@@ -426,13 +517,14 @@ export async function startNewBlitzSession(startDateInput, endDateInput) {
       eDateISO = eDateISO || next30.toISOString().split('T')[0];
     }
 
+    const chosenSector = (sectorInput || 'MERCEARIA').trim().toUpperCase();
     const periodLabel = `${formatDateBR(sDateISO)} → ${formatDateBR(eDateISO)}`;
 
-    showToast(`Iniciando Blitz: ${periodLabel}...`, 'sync', 1000);
+    showToast(`Iniciando Blitz [${chosenSector}]: ${periodLabel}...`, 'sync', 1000);
 
     const session = await createBlitzSession({
-      blitz_type: 'periodo',
-      sector: 'GERAL',
+      blitz_type: chosenSector,
+      sector: chosenSector,
       start_date: sDateISO,
       end_date: eDateISO,
       period_label: periodLabel,
@@ -440,7 +532,7 @@ export async function startNewBlitzSession(startDateInput, endDateInput) {
     });
 
     setActiveBlitz(session);
-    showToast(`✓ Blitz iniciada: ${periodLabel}`, 'success', 2000);
+    showToast(`✓ Blitz iniciada: Setor ${chosenSector} (${periodLabel})`, 'success', 2000);
     triggerSyncNow().catch(e => console.warn('Sync error:', e));
 
     // Abre diretamente a tela principal da Blitz
@@ -451,15 +543,23 @@ export async function startNewBlitzSession(startDateInput, endDateInput) {
   }
 }
 
-// Modal para alterar ou definir o período da blitz em andamento
+// Modal para alterar ou definir o setor e período da blitz em andamento
 export async function promptEditActiveBlitzPeriod(session) {
+  if (!session) {
+    session = currentActiveBlitzSession;
+  }
+  if (!session) {
+    showToast('Nenhuma blitz ativa para configurar', 'warning');
+    return;
+  }
+
   let modal = document.getElementById('modal-edit-blitz-period');
   if (!modal) {
     modal = document.createElement('div');
     modal.id = 'modal-edit-blitz-period';
-    modal.className = 'modal';
     document.body.appendChild(modal);
   }
+  modal.className = 'custom-modal';
 
   const today = new Date();
   const todayISO = today.toISOString().split('T')[0];
@@ -467,24 +567,58 @@ export async function promptEditActiveBlitzPeriod(session) {
   next30.setDate(next30.getDate() + 30);
   const next30ISO = next30.toISOString().split('T')[0];
 
-  const currentStart = session.start_date || todayISO;
-  const currentEnd = session.end_date || next30ISO;
+  const currentStart = session.start_date 
+    ? (session.start_date.includes('/') ? parseDateBRtoISO(session.start_date) : String(session.start_date).split('T')[0]) 
+    : todayISO;
+  const currentEnd = session.end_date 
+    ? (session.end_date.includes('/') ? parseDateBRtoISO(session.end_date) : String(session.end_date).split('T')[0]) 
+    : next30ISO;
+  const currentSector = (session.sector || 'MERCEARIA').toUpperCase();
 
   modal.innerHTML = `
     <div class="modal-backdrop" id="modal-edit-blitz-period-backdrop"></div>
-    <div class="modal-card" style="padding: 20px; max-width: 400px; width: 100%; box-sizing: border-box;">
-      <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 12px;">
+    <div class="modal-card" style="padding: 20px; max-width: 420px; width: 100%; box-sizing: border-box; max-height: 92vh; overflow-y: auto;">
+      <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 12px; border-bottom: 1px solid #27272a; padding-bottom: 10px;">
         <h3 style="font-size: 1.1rem; font-weight: 900; color: #f4f4f5; margin: 0; display: flex; align-items: center; gap: 8px;">
-          📅 <span>Definir Período da Blitz</span>
+          ⚙️ <span>Configurar Blitz</span>
         </h3>
-        <button type="button" id="btn-close-edit-blitz-period" class="btn-icon-link" style="color: #a1a1aa; font-size: 1.3rem;">✕</button>
+        <button type="button" id="btn-close-edit-blitz-period" class="btn-icon-control" style="font-size: 1rem; width: 30px; height: 30px;">✕</button>
       </div>
 
       <p style="font-size: 0.8rem; color: #a1a1aa; margin: 0 0 12px 0;">
-        Escolha as datas da listagem no calendário. A alteração é salva imediatamente sem perder os itens já conferidos.
+        Altere o setor ou as datas da blitz. A alteração é salva imediatamente sem perder os itens já conferidos.
       </p>
 
       <form id="form-edit-blitz-period" style="display: flex; flex-direction: column; gap: 12px;">
+        
+        <!-- ALTERAÇÃO DO SETOR DA BLITZ -->
+        <div class="form-group" style="margin-bottom: 0;">
+          <label style="font-size: 0.76rem; font-weight: 800; color: #a1a1aa; text-transform: uppercase; margin-bottom: 6px; display: block;">
+            🏷️ Setor da Blitz:
+          </label>
+
+          <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 6px; margin-bottom: 6px;">
+            <button type="button" class="btn-edit-blitz-chip btn-secondary ${currentSector === 'MERCEARIA' ? 'active' : ''}" data-sector="MERCEARIA" style="padding: 8px; font-size: 0.8rem; font-weight: 800; justify-content: center; ${currentSector === 'MERCEARIA' ? 'border-color: #f59e0b; background: rgba(245, 158, 11, 0.2); color: #fbbf24;' : ''}">
+              🥫 MERCEARIA
+            </button>
+            <button type="button" class="btn-edit-blitz-chip btn-secondary ${currentSector === 'BEBIDAS' ? 'active' : ''}" data-sector="BEBIDAS" style="padding: 8px; font-size: 0.8rem; font-weight: 800; justify-content: center; ${currentSector === 'BEBIDAS' ? 'border-color: #f59e0b; background: rgba(245, 158, 11, 0.2); color: #fbbf24;' : ''}">
+              🍾 BEBIDAS
+            </button>
+          </div>
+
+          <div style="display: grid; grid-template-columns: repeat(4, 1fr); gap: 4px; margin-bottom: 6px;">
+            <button type="button" class="btn-edit-blitz-chip btn-secondary ${currentSector === 'LIMPEZA' ? 'active' : ''}" data-sector="LIMPEZA" style="padding: 6px 2px; font-size: 0.7rem; font-weight: 700; justify-content: center;">🧹 Limpeza</button>
+            <button type="button" class="btn-edit-blitz-chip btn-secondary ${currentSector === 'PERFUMARIA' ? 'active' : ''}" data-sector="PERFUMARIA" style="padding: 6px 2px; font-size: 0.7rem; font-weight: 700; justify-content: center;">🧴 Perfumaria</button>
+            <button type="button" class="btn-edit-blitz-chip btn-secondary ${currentSector === 'ALHO' ? 'active' : ''}" data-sector="ALHO" style="padding: 6px 2px; font-size: 0.7rem; font-weight: 700; justify-content: center;">🧄 Alho</button>
+            <button type="button" class="btn-edit-blitz-chip btn-secondary ${currentSector === 'BAZAR' ? 'active' : ''}" data-sector="BAZAR" style="padding: 6px 2px; font-size: 0.7rem; font-weight: 700; justify-content: center;">📦 Bazar</button>
+          </div>
+
+          <select id="select-edit-blitz-sector" class="form-input" style="font-weight: 800; height: 42px; color: #fbbf24; background: #18181c; border-color: #3f3f46;">
+            ${SETORS.map(s => `<option value="${s}" ${s === currentSector ? 'selected' : ''}>SETOR: ${s}</option>`).join('')}
+            <option value="GERAL" ${currentSector === 'GERAL' ? 'selected' : ''}>TODOS OS SETORES (GERAL)</option>
+          </select>
+        </div>
+
         <div class="form-group" style="margin-bottom: 0;">
           <label for="input-edit-blitz-start" style="font-size: 0.76rem; font-weight: 800; color: #a1a1aa; text-transform: uppercase;">
             📅 Data Inicial:
@@ -525,7 +659,7 @@ export async function promptEditActiveBlitzPeriod(session) {
             Cancelar
           </button>
           <button type="submit" class="btn-primary" style="flex: 1.2; height: 46px; justify-content: center; background: #f59e0b; color: #000; font-weight: 900; font-size: 0.95rem;">
-            💾 SALVAR PERÍODO
+            💾 SALVAR ALTERAÇÕES
           </button>
         </div>
       </form>
@@ -536,6 +670,42 @@ export async function promptEditActiveBlitzPeriod(session) {
 
   const startInput = document.getElementById('input-edit-blitz-start');
   const endInput = document.getElementById('input-edit-blitz-end');
+  const sectorSelect = document.getElementById('select-edit-blitz-sector');
+  const editSectorChips = modal.querySelectorAll('.btn-edit-blitz-chip');
+
+  editSectorChips.forEach(chip => {
+    chip.addEventListener('click', () => {
+      const sec = chip.getAttribute('data-sector');
+      if (sectorSelect) sectorSelect.value = sec;
+      editSectorChips.forEach(c => {
+        c.classList.remove('active');
+        c.style.borderColor = '';
+        c.style.background = '';
+        c.style.color = '';
+      });
+      chip.classList.add('active');
+      chip.style.borderColor = '#f59e0b';
+      chip.style.background = 'rgba(245, 158, 11, 0.2)';
+      chip.style.color = '#fbbf24';
+    });
+  });
+
+  sectorSelect?.addEventListener('change', () => {
+    const val = sectorSelect.value;
+    editSectorChips.forEach(c => {
+      if (c.getAttribute('data-sector') === val) {
+        c.classList.add('active');
+        c.style.borderColor = '#f59e0b';
+        c.style.background = 'rgba(245, 158, 11, 0.2)';
+        c.style.color = '#fbbf24';
+      } else {
+        c.classList.remove('active');
+        c.style.borderColor = '';
+        c.style.background = '';
+        c.style.color = '';
+      }
+    });
+  });
 
   modal.querySelectorAll('.btn-edit-quick-period').forEach(btn => {
     btn.addEventListener('click', () => {
@@ -560,7 +730,10 @@ export async function promptEditActiveBlitzPeriod(session) {
     });
   });
 
-  const closeModal = () => modal.classList.remove('open');
+  const closeModal = () => {
+    modal.classList.remove('open');
+  };
+
   document.getElementById('modal-edit-blitz-period-backdrop')?.addEventListener('click', closeModal);
   document.getElementById('btn-close-edit-blitz-period')?.addEventListener('click', closeModal);
   document.getElementById('btn-cancel-edit-blitz-period')?.addEventListener('click', closeModal);
@@ -569,6 +742,7 @@ export async function promptEditActiveBlitzPeriod(session) {
     e.preventDefault();
     const sDate = startInput?.value?.trim();
     const eDate = endInput?.value?.trim();
+    const newSector = sectorSelect?.value?.trim() || session.sector || 'MERCEARIA';
 
     if (!sDate || !eDate) {
       showToast('Selecione as datas inicial e final no calendário', 'warning');
@@ -576,19 +750,46 @@ export async function promptEditActiveBlitzPeriod(session) {
     }
 
     const newLabel = `${formatDateBR(sDate)} → ${formatDateBR(eDate)}`;
-    const updated = await updateBlitzSessionPeriod(session.id, {
-      start_date: sDate,
-      end_date: eDate,
-      period_label: newLabel
-    });
+    closeModal();
+    showToast(`Atualizando Blitz [${newSector}]...`, 'sync', 1000);
 
-    if (updated) {
-      currentActiveBlitzSession = updated;
-      setActiveBlitz(updated);
-      showToast(`✓ Período atualizado: ${newLabel}`, 'success', 2000);
-      closeModal();
-      openBlitzDashboardView();
-      triggerSyncNow().catch(e => console.warn('Sync error:', e));
+    try {
+      const updated = await updateBlitzSessionPeriod(session.id, {
+        start_date: sDate,
+        end_date: eDate,
+        period_label: newLabel,
+        sector: newSector,
+        blitz_type: newSector
+      });
+
+      const finalSession = updated || {
+        ...session,
+        start_date: sDate,
+        end_date: eDate,
+        period_label: newLabel,
+        sector: newSector,
+        blitz_type: newSector
+      };
+
+      currentActiveBlitzSession = finalSession;
+      setActiveBlitz(finalSession);
+      showToast(`✓ Blitz atualizada: Setor ${newSector} (${newLabel})`, 'success', 2000);
+      await openBlitzDashboardView();
+      triggerSyncNow().catch(err => console.warn('Sync error:', err));
+    } catch (err) {
+      console.error('Erro ao atualizar período da blitz:', err);
+      const fallbackSession = {
+        ...session,
+        start_date: sDate,
+        end_date: eDate,
+        period_label: newLabel,
+        sector: newSector,
+        blitz_type: newSector
+      };
+      currentActiveBlitzSession = fallbackSession;
+      setActiveBlitz(fallbackSession);
+      showToast(`✓ Blitz atualizada: Setor ${newSector}`, 'success', 2000);
+      await openBlitzDashboardView();
     }
   });
 }
@@ -648,13 +849,18 @@ export async function openBlitzDashboardView() {
           <div style="display: flex; align-items: center; gap: 8px;">
             <span style="font-size: 1.6rem;">🔍</span>
             <div>
-              <h2 style="font-size: 1.05rem; font-weight: 900; color: #f4f4f5; margin: 0;">
-                BLITZ ATIVA
-              </h2>
-              <div style="font-size: 0.88rem; font-weight: 800; color: #fbbf24; margin-top: 3px; display: flex; align-items: center; gap: 8px; flex-wrap: wrap;">
+              <div style="display: flex; align-items: center; gap: 6px; flex-wrap: wrap;">
+                <h2 style="font-size: 1.05rem; font-weight: 900; color: #f4f4f5; margin: 0;">
+                  BLITZ ATIVA
+                </h2>
+                <span style="background: rgba(245, 158, 11, 0.25); border: 1px solid #f59e0b; color: #fbbf24; font-size: 0.72rem; font-weight: 900; padding: 2px 8px; border-radius: 6px; text-transform: uppercase;">
+                  🏷️ ${session.sector || 'GERAL'}
+                </span>
+              </div>
+              <div style="font-size: 0.88rem; font-weight: 800; color: #fbbf24; margin-top: 4px; display: flex; align-items: center; gap: 8px; flex-wrap: wrap;">
                 <span>📅 Período: <strong id="blitz-active-period-text" style="cursor: pointer; text-decoration: underline dotted;">${hasValidPeriod ? periodLabel : '<span style="color: #ef4444; font-weight: 900;">Não Definido</span>'}</strong></span>
                 <button type="button" id="btn-edit-active-blitz-period" style="background: rgba(245, 158, 11, 0.15); border: 1px solid rgba(245, 158, 11, 0.4); color: #fbbf24; padding: 2px 8px; border-radius: 6px; font-size: 0.72rem; font-weight: 800; cursor: pointer; display: inline-flex; align-items: center; gap: 4px;">
-                  ✏️ ${hasValidPeriod ? 'Alterar' : 'Definir Agora'}
+                  ✏️ Configurar
                 </button>
               </div>
             </div>
@@ -990,15 +1196,20 @@ function promptUnregisteredProductBlitz(barcode) {
   // Opção: CADASTRAR PRODUTO
   document.getElementById('btn-blitz-quick-register')?.addEventListener('click', () => {
     closeModal();
-    openBlitzQuickRegisterModal(barcode);
+    openBlitzQuickRegisterModal(barcode, {
+      defaultSector: currentActiveBlitzSession?.sector || 'MERCEARIA'
+    });
   });
 
   // Opção: CONTINUAR SEM CADASTRAR (Pergunta Setor e Corredor e salva como Produto Verificado)
   document.getElementById('btn-blitz-continue-unregistered')?.addEventListener('click', () => {
     closeModal();
+    const activeBlitzSector = currentActiveBlitzSession?.sector;
+    const effectiveSec = (activeBlitzSector && activeBlitzSector !== 'GERAL') ? activeBlitzSector : 'MERCEARIA';
+
     promptVerifiedProductLocationModal({
       barcode: String(barcode).trim(),
-      defaultSector: currentActiveBlitzSession?.sector || 'MERCEARIA',
+      defaultSector: effectiveSec,
       defaultCorridor: 'Corredor 1',
       onConfirm: async ({ sector, corridor, name, barcode: finalBarcode, image }) => {
         showToast('Guardando produto verificado...', 'sync', 1000);
@@ -1008,7 +1219,7 @@ function promptUnregisteredProductBlitz(barcode) {
             savedProd = await saveProduct({
               barcode: finalBarcode,
               name: name || `PRODUTO ${finalBarcode}`,
-              sector: sector || 'MERCEARIA',
+              sector: sector || effectiveSec,
               corridor: corridor || 'Corredor 1',
               image: image || null,
               is_verified_only: true
@@ -1022,7 +1233,7 @@ function promptUnregisteredProductBlitz(barcode) {
             id: null,
             barcode: finalBarcode,
             name: name || `PRODUTO ${finalBarcode}`,
-            sector: sector || 'MERCEARIA',
+            sector: sector || effectiveSec,
             corridor: corridor || 'Corredor 1',
             image: image || null,
             is_verified_only: true
@@ -1060,6 +1271,8 @@ export function promptVerifiedProductLocationModal({
 
   const generatedCode = barcode || `SCOD-${Date.now().toString().slice(-6)}`;
   let verifiedProdImage = defaultImage || '';
+  const blitzSec = currentActiveBlitzSession?.sector;
+  const initialSector = (blitzSec && blitzSec !== 'GERAL') ? blitzSec : defaultSector;
 
   modal.innerHTML = `
     <div class="modal-backdrop" id="modal-verified-loc-backdrop"></div>
@@ -1111,9 +1324,12 @@ export function promptVerifiedProductLocationModal({
 
         <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 8px;">
           <div>
-            <label for="verified-select-sector" style="font-size: 0.76rem; font-weight: 800; color: #a1a1aa; text-transform: uppercase; margin-bottom: 4px; display: block;">Setor:</label>
-            <select id="verified-select-sector" class="form-select" style="font-weight: 700; height: 42px;">
-              ${SETORS.map(s => `<option value="${s}" ${s === defaultSector ? 'selected' : ''}>${s}</option>`).join('')}
+            <label for="verified-select-sector" style="font-size: 0.76rem; font-weight: 800; color: #a1a1aa; text-transform: uppercase; margin-bottom: 4px; display: flex; justify-content: space-between; align-items: center;">
+              <span>Setor:</span>
+              ${(blitzSec && blitzSec !== 'GERAL') ? `<span style="color: #fbbf24; font-size: 0.68rem; font-weight: 900;">🔒 Blitz</span>` : ''}
+            </label>
+            <select id="verified-select-sector" class="form-select" style="font-weight: 800; height: 42px; color: #fbbf24;">
+              ${SETORS.map(s => `<option value="${s}" ${s === initialSector ? 'selected' : ''}>${s}</option>`).join('')}
             </select>
           </div>
           <div>
@@ -1233,6 +1449,8 @@ export function openBlitzQuickRegisterModal(barcode, options = {}) {
   }
 
   let quickProdImage = '';
+  const blitzSec = currentActiveBlitzSession?.sector;
+  const initialSector = (blitzSec && blitzSec !== 'GERAL') ? blitzSec : (options.defaultSector || 'MERCEARIA');
 
   modal.innerHTML = `
     <div class="modal-backdrop" id="modal-blitz-quick-backdrop"></div>
@@ -1284,9 +1502,12 @@ export function openBlitzQuickRegisterModal(barcode, options = {}) {
 
         <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 8px;">
           <div class="form-group">
-            <label for="quick-prod-sector" style="font-size: 0.74rem; font-weight: 800; color: #a1a1aa;">SETOR:</label>
-            <select id="quick-prod-sector" class="form-input">
-              ${SETORS.map(s => `<option value="${s}">${s}</option>`).join('')}
+            <label for="quick-prod-sector" style="font-size: 0.74rem; font-weight: 800; color: #a1a1aa; display: flex; justify-content: space-between; align-items: center;">
+              <span>SETOR:</span>
+              ${(blitzSec && blitzSec !== 'GERAL') ? `<span style="color: #fbbf24; font-size: 0.68rem; font-weight: 900;">🔒 Blitz</span>` : ''}
+            </label>
+            <select id="quick-prod-sector" class="form-input" style="color: #fbbf24; font-weight: 800;">
+              ${SETORS.map(s => `<option value="${s}" ${s === initialSector ? 'selected' : ''}>${s}</option>`).join('')}
             </select>
           </div>
 
@@ -2027,12 +2248,16 @@ async function saveBlitzNaoTemConference(product, requestedDate, existingItem = 
     const confDate = formatDateBR(now.toISOString().split('T')[0]);
     const confTime = now.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
 
+    const activeSector = (currentActiveBlitzSession?.sector && currentActiveBlitzSession.sector !== 'GERAL')
+      ? currentActiveBlitzSession.sector
+      : (product.sector || 'GERAL');
+
     await saveBlitzConferenceRecord({
       id: existingItem?.id || null,
       sessionId: currentActiveBlitzSession.id,
       productId: product.id || null,
       barcode: product.barcode,
-      sector: product.sector || 'GERAL',
+      sector: activeSector,
       requestedDate: requestedDate,
       previousQuantity: existingItem ? Number(existingItem.total_quantity) || 0 : 0,
       newQuantity: 0,
@@ -2245,12 +2470,16 @@ async function saveBlitzTemConference(product, requestedDate, totalQuantity, loc
     const confDate = formatDateBR(now.toISOString().split('T')[0]);
     const confTime = now.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
 
+    const activeSector = (currentActiveBlitzSession?.sector && currentActiveBlitzSession.sector !== 'GERAL')
+      ? currentActiveBlitzSession.sector
+      : (product.sector || 'GERAL');
+
     await saveBlitzConferenceRecord({
       id: existingItem?.id || null,
       sessionId: currentActiveBlitzSession.id,
       productId: product.id || null,
       barcode: product.barcode,
-      sector: product.sector || 'GERAL',
+      sector: activeSector,
       requestedDate: requestedDate,
       previousQuantity: existingItem ? Number(existingItem.total_quantity) || 0 : 0,
       newQuantity: totalQuantity,
@@ -2664,9 +2893,14 @@ async function renderBlitzHistorySessions(sessions) {
         flex-direction: column;
         gap: 8px;
       ">
-        <div style="display: flex; align-items: center; justify-content: space-between;">
-          <div style="font-size: 0.92rem; font-weight: 900; color: #f4f4f5;">
-            📅 ${periodLabel}
+        <div style="display: flex; align-items: center; justify-content: space-between; gap: 8px;">
+          <div style="display: flex; align-items: center; gap: 6px; flex-wrap: wrap;">
+            <span style="background: rgba(245, 158, 11, 0.2); border: 1px solid rgba(245, 158, 11, 0.4); color: #fbbf24; font-size: 0.68rem; font-weight: 900; padding: 2px 6px; border-radius: 4px; text-transform: uppercase;">
+              🏷️ ${s.sector || 'GERAL'}
+            </span>
+            <div style="font-size: 0.92rem; font-weight: 900; color: #f4f4f5;">
+              📅 ${periodLabel}
+            </div>
           </div>
           <span style="
             font-size: 0.68rem;
@@ -2675,6 +2909,7 @@ async function renderBlitzHistorySessions(sessions) {
             border-radius: 9999px;
             background: ${isOngoing ? 'rgba(245, 158, 11, 0.2)' : isCanceled ? 'rgba(239, 68, 68, 0.2)' : 'rgba(16, 185, 129, 0.2)'};
             color: ${isOngoing ? '#fbbf24' : isCanceled ? '#f87171' : '#34d399'};
+            white-space: nowrap;
           ">
             ${isOngoing ? 'EM ANDAMENTO' : isCanceled ? 'CANCELADA' : 'FINALIZADA'}
           </span>
@@ -2931,6 +3166,7 @@ export async function formatBlitzSessionWhatsApp(session, items) {
   }
 
   let text = `📋 *RELATÓRIO DA BLITZ POR PERÍODO*\n`;
+  text += `🏷️ Setor: *${session.sector || 'GERAL'}*\n`;
   text += `📅 Período: *${periodLabel}*\n`;
   text += `Responsável: *${session.user_name || 'Ana Luiza'}*\n`;
   text += `Início: ${startDate}\n`;
