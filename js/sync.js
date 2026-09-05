@@ -123,8 +123,9 @@ ALTER TABLE public.blitz_items ADD COLUMN IF NOT EXISTS user_id TEXT;
 ALTER TABLE public.blitz_items ADD COLUMN IF NOT EXISTS user_name TEXT DEFAULT 'Ana Luiza';
 ALTER TABLE public.blitz_items ADD COLUMN IF NOT EXISTS is_new_expiration BOOLEAN DEFAULT FALSE;
 ALTER TABLE public.blitz_items ADD COLUMN IF NOT EXISTS notes TEXT;
+ALTER TABLE public.blitz_items ADD COLUMN IF NOT EXISTS corridor TEXT;
 
--- Atualização dos nomes de corredores existentes para a nova padronização
+-- Atualização dos nomes de corredores existentes para a nova padronização (14 corredores + Adega e Área do Alho)
 UPDATE public.products SET corridor = 'Corredor 1' WHERE corridor IN ('CORREDOR 01', 'CORREDOR 1', '01');
 UPDATE public.products SET corridor = 'Corredor 2' WHERE corridor IN ('CORREDOR 02', 'CORREDOR 2', '02');
 UPDATE public.products SET corridor = 'Corredor 3' WHERE corridor IN ('CORREDOR 03', 'CORREDOR 3', '03');
@@ -140,8 +141,7 @@ UPDATE public.products SET corridor = 'Corredor 12' WHERE corridor IN ('CORREDOR
 UPDATE public.products SET corridor = 'Corredor 13' WHERE corridor IN ('CORREDOR 13', '13');
 UPDATE public.products SET corridor = 'Corredor 14' WHERE corridor IN ('CORREDOR 14', '14');
 UPDATE public.products SET corridor = 'Adega' WHERE UPPER(corridor) LIKE '%ADEGA%';
-UPDATE public.products SET corridor = 'Perfumaria' WHERE UPPER(corridor) LIKE '%PERFUMARIA%';
-UPDATE public.products SET corridor = 'Zona do Alho' WHERE UPPER(corridor) LIKE '%ALHO%';
+UPDATE public.products SET corridor = 'Área do Alho' WHERE UPPER(corridor) LIKE '%ALHO%' OR UPPER(corridor) LIKE '%ZONA DO ALHO%';
 
 -- Permissões e Segurança
 GRANT USAGE ON SCHEMA public TO anon, authenticated, service_role;

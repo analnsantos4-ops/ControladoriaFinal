@@ -25,8 +25,7 @@ export const CORRIDORS = [
   'Corredor 13',
   'Corredor 14',
   'Adega',
-  'Perfumaria',
-  'Zona do Alho'
+  'Área do Alho'
 ];
 
 export const LOCATIONS = [

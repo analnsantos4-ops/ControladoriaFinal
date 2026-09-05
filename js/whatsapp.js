@@ -159,11 +159,8 @@ export function resolveCorridorString(rawStr) {
   if (clean.includes('ADEGA')) {
     return 'Adega';
   }
-  if (clean.includes('PERFUMARIA')) {
-    return 'Perfumaria';
-  }
   if (clean.includes('ALHO')) {
-    return 'Zona do Alho';
+    return 'Área do Alho';
   }
 
   // Tenta extrair número de 1 a 14

@@ -3,7 +3,7 @@ import '../style.css';
 
 // Orquestrador Principal do Aplicativo Controladoria - Ana Luiza
 import { isAuthenticated, verifyCode, verifyMasterSecurityPin, logout } from './auth.js';
-import { initDB, getProductByBarcode, getProductById, searchProducts, getAllProducts, getProductExpirations, getLatestCountsForExpiration, clearAllDatabaseData, toggleExpirationTriaged, sendProductExpirationToTriage, restoreProductExpirationFromTriage, runAutomaticTriageCleanup, getDatabaseStorageStats, TRIAGE_RETENTION_MS, isProductVerifiedOnly, saveProduct } from './db.js';
+import { initDB, getProductByBarcode, getProductById, searchProducts, getAllProducts, getProductExpirations, getLatestCountsForExpiration, clearAllDatabaseData, toggleExpirationTriaged, sendProductExpirationToTriage, restoreProductExpirationFromTriage, runAutomaticTriageCleanup, getDatabaseStorageStats, TRIAGE_RETENTION_MS, isProductVerifiedOnly, isProductBlitzImport, saveProduct } from './db.js';
 import { initSyncEngine, registerSyncStatusListener, wipeSupabaseCloudData, triggerSyncNow, checkSupabaseHealth, syncAllLocalDataToSupabase, SUPABASE_SETUP_SQL, getSyncStatus, getSyncDiagnostics } from './sync.js';
 import { showView, showToast, setupButtonFeedbacks, openPhotoModal, getActiveView, promptTriageBarcodeConfirmation, promptSecurityPin } from './ui.js';
 import { startCameraScanner, stopCameraScanner, toggleTorch, switchCamera, toggleCameraZoom, scanBarcodeFromImageFile } from './scanner.js';
@@ -12,7 +12,12 @@ import { openNewProductView, saveNewProduct, handleProductImageFile, openProduct
 import { openConferenceForProduct, confirmConference, openCorridorAuditView, loadCorridorAuditProducts, exportCurrentCorridorWhatsApp, setBlitzConferenceContext, getBlitzConferenceContext } from './inventory.js';
 import { SETORS, CORRIDORS, formatDateBR, formatNumber, getDaysUntilExpiration } from './utils.js';
 import { openWhatsAppImportModal, formatMultipleProductsWhatsApp, openWhatsAppExportModal } from './whatsapp.js';
-import { initBlitzModule, getActiveBlitz, promptStartBlitz, handleBlitzBarcodeScanned, openBlitzDashboardView, openBlitzHistoryView, updateBlitzTopBarIndicator, promptVerifiedProductLocationModal, openBlitzQuickRegisterModal, promptRequestedExpirationDate } from './blitz.js';
+import { initBlitzModule, getActiveBlitz, promptStartBlitz, handleBlitzBarcodeScanned, openBlitzDashboardView, renderBlitzDashboard, openBlitzHistoryView, updateBlitzTopBarIndicator, promptVerifiedProductLocationModal, openBlitzQuickRegisterModal, promptRequestedExpirationDate } from './blitz.js';
+
+if (typeof window !== 'undefined') {
+  window.renderBlitzDashboard = openBlitzDashboardView;
+  window.openBlitzDashboardView = openBlitzDashboardView;
+}
 
 let torchState = false;
 let currentProductTypeFilter = 'REGISTERED'; // 'REGISTERED' | 'VERIFIED'
@@ -751,10 +756,19 @@ function setupEventListeners() {
   searchSectorSelect?.addEventListener('change', executeSearch);
   searchCorridorSelect?.addEventListener('change', executeSearch);
 
-  // Abas de tipo de produto: Registrados vs Verificados
+  // Abas de tipo de produto: Registrados vs Exportados da Blitz vs Verificados
   document.getElementById('tab-products-registered')?.addEventListener('click', async () => {
     currentProductTypeFilter = 'REGISTERED';
     document.getElementById('tab-products-registered')?.classList.add('active');
+    document.getElementById('tab-products-blitz')?.classList.remove('active');
+    document.getElementById('tab-products-verified')?.classList.remove('active');
+    await executeSearch();
+  });
+
+  document.getElementById('tab-products-blitz')?.addEventListener('click', async () => {
+    currentProductTypeFilter = 'BLITZ';
+    document.getElementById('tab-products-blitz')?.classList.add('active');
+    document.getElementById('tab-products-registered')?.classList.remove('active');
     document.getElementById('tab-products-verified')?.classList.remove('active');
     await executeSearch();
   });
@@ -763,6 +777,7 @@ function setupEventListeners() {
     currentProductTypeFilter = 'VERIFIED';
     document.getElementById('tab-products-verified')?.classList.add('active');
     document.getElementById('tab-products-registered')?.classList.remove('active');
+    document.getElementById('tab-products-blitz')?.classList.remove('active');
     await executeSearch();
   });
 
@@ -1006,17 +1021,22 @@ export async function updateSearchTabCounts() {
   try {
     const allProducts = await getAllProducts();
     let regCount = 0;
+    let blitzCount = 0;
     let verCount = 0;
     for (const p of allProducts) {
-      if (isProductVerifiedOnly(p)) {
+      if (isProductBlitzImport(p)) {
+        blitzCount++;
+      } else if (isProductVerifiedOnly(p)) {
         verCount++;
       } else {
         regCount++;
       }
     }
     const regBadge = document.getElementById('tab-count-registered');
+    const blitzBadge = document.getElementById('tab-count-blitz');
     const verBadge = document.getElementById('tab-count-verified');
     if (regBadge) regBadge.textContent = regCount;
+    if (blitzBadge) blitzBadge.textContent = blitzCount;
     if (verBadge) verBadge.textContent = verCount;
   } catch (e) {
     console.warn('Erro ao calcular contagem das abas:', e);
@@ -1036,6 +1056,7 @@ export async function openSearchView(typeFilter) {
 
   // Atualiza classe ativa nas abas
   document.getElementById('tab-products-registered')?.classList.toggle('active', currentProductTypeFilter === 'REGISTERED');
+  document.getElementById('tab-products-blitz')?.classList.toggle('active', currentProductTypeFilter === 'BLITZ');
   document.getElementById('tab-products-verified')?.classList.toggle('active', currentProductTypeFilter === 'VERIFIED');
 
   await updateSearchTabCounts();
@@ -1060,9 +1081,11 @@ async function renderSearchResults(query, sector, corridor, typeFilter = current
   const container = document.getElementById('search-results-list');
   const countDisplay = document.getElementById('search-results-count');
 
-  const isVer = typeFilter === 'VERIFIED';
   if (countDisplay) {
-    const label = isVer ? (results.length === 1 ? 'produto verificado' : 'produtos verificados') : (results.length === 1 ? 'produto registrado' : 'produtos registrados');
+    let label = 'produtos registrados';
+    if (typeFilter === 'VERIFIED') label = results.length === 1 ? 'produto verificado' : 'produtos verificados';
+    else if (typeFilter === 'BLITZ') label = results.length === 1 ? 'produto exportado da blitz' : 'produtos exportados da blitz';
+    else label = results.length === 1 ? 'produto registrado' : 'produtos registrados';
     countDisplay.textContent = `${results.length} ${label}`;
   }
 
@@ -1072,9 +1095,12 @@ async function renderSearchResults(query, sector, corridor, typeFilter = current
   if (!container) return;
 
   if (results.length === 0) {
+    let emptyMsg = 'Nenhum produto cadastrado encontrado para os filtros selecionados.';
+    if (typeFilter === 'VERIFIED') emptyMsg = 'Nenhum produto verificado pendente com os filtros selecionados.';
+    else if (typeFilter === 'BLITZ') emptyMsg = 'Nenhum produto na lista de exportados da blitz com os filtros selecionados.';
     container.innerHTML = `
       <div class="empty-search-card">
-        <p>${isVer ? 'Nenhum produto verificado pendente de cadastro com os filtros selecionados.' : 'Nenhum produto cadastrado encontrado para os filtros selecionados.'}</p>
+        <p>${emptyMsg}</p>
         <button type="button" class="btn-primary-mini" id="btn-search-add-new">+ Cadastrar Novo Produto</button>
       </div>
     `;
@@ -1087,6 +1113,7 @@ async function renderSearchResults(query, sector, corridor, typeFilter = current
   // Calcula estoque ativo e triado de cada produto para exibição rica na busca
   const cardsHtml = await Promise.all(
     results.map(async (p) => {
+      const isBlitz = isProductBlitzImport(p);
       const isVerified = isProductVerifiedOnly(p);
       let activeStock = 0;
       let triagedStock = 0;
@@ -1119,9 +1146,12 @@ async function renderSearchResults(query, sector, corridor, typeFilter = current
         }
       }
 
-      const verifiedBadgeHtml = isVerified
-        ? `<span class="loc-badge" style="background: rgba(245, 158, 11, 0.15); color: #fbbf24; border: 1px solid rgba(245, 158, 11, 0.35); font-weight: 800;">🔍 PRODUTO VERIFICADO</span>`
-        : '';
+      let typeBadgeHtml = '';
+      if (isBlitz) {
+        typeBadgeHtml = `<span class="loc-badge" style="background: rgba(14, 165, 233, 0.15); color: #38bdf8; border: 1px solid rgba(14, 165, 233, 0.4); font-weight: 800;">⚡ LISTA DA BLITZ</span>`;
+      } else if (isVerified) {
+        typeBadgeHtml = `<span class="loc-badge" style="background: rgba(245, 158, 11, 0.15); color: #fbbf24; border: 1px solid rgba(245, 158, 11, 0.35); font-weight: 800;">🔍 PRODUTO VERIFICADO</span>`;
+      }
 
       return `
         <div class="search-result-card ${isVerified ? 'search-card-verified' : ''}" data-prodid="${p.id}">
@@ -1137,8 +1167,8 @@ async function renderSearchResults(query, sector, corridor, typeFilter = current
             <span class="search-barcode">${p.barcode}</span>
             <div class="search-loc-tags">
               <span class="loc-badge sector">${p.sector}</span>
-              <span class="loc-badge corridor">${p.corridor}</span>
-              ${verifiedBadgeHtml}
+              <span class="loc-badge corridor">${p.corridor || 'Sem corredor'}</span>
+              ${typeBadgeHtml}
               ${stockTagHtml}
             </div>
           </div>

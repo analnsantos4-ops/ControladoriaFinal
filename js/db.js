@@ -249,15 +249,28 @@ export function isProductVerifiedOnly(product) {
   return false;
 }
 
+/**
+ * Determina se o produto é originário do cadastro em massa da Blitz
+ * (Produtos exportados/importados da Blitz)
+ */
+export function isProductBlitzImport(product) {
+  if (!product) return false;
+  return product.is_blitz_import === true ||
+         product.origin === 'BLITZ_IMPORT' ||
+         product.status === 'LISTA_DE_BLITZ';
+}
+
 export async function searchProducts(searchTerm = '', sectorFilter = '', corridorFilter = '', typeFilter = 'ALL') {
   const all = await getAllProducts();
   const term = searchTerm.toLowerCase().trim();
 
   const filtered = all.filter((p) => {
+    const isBlitz = isProductBlitzImport(p);
     const isVerified = isProductVerifiedOnly(p);
 
-    if (typeFilter === 'REGISTERED' && isVerified) return false;
-    if (typeFilter === 'VERIFIED' && !isVerified) return false;
+    if (typeFilter === 'REGISTERED' && (isVerified || isBlitz)) return false;
+    if (typeFilter === 'VERIFIED' && (!isVerified || isBlitz)) return false;
+    if (typeFilter === 'BLITZ' && !isBlitz) return false;
 
     const matchTerm = !term ||
       (p.name && p.name.toLowerCase().includes(term)) ||
@@ -328,7 +341,8 @@ export async function saveProduct(product) {
     name: product.name ? product.name.trim() : '',
     image: product.image !== undefined ? product.image : (existing?.image || ''),
     sector: product.sector || existing?.sector || 'MERCEARIA',
-    corridor: product.corridor || existing?.corridor || 'Corredor 1',
+    corridor: product.corridor !== undefined ? product.corridor : (existing?.corridor !== undefined ? existing.corridor : null),
+    status: product.status || existing?.status || (isVerified ? 'VERIFICADO' : 'LISTA_DE_BLITZ'),
     is_verified_only: isVerified,
     total_quantity: totalQty,
     deposit_qty: depositQty,
@@ -374,6 +388,155 @@ export async function saveProduct(product) {
   } catch (err) {
     throw err;
   }
+}
+
+/**
+ * Cadastro em massa de produtos para a Blitz (ou catálogo geral)
+ * Regras:
+ * - Código de barras é o identificador principal (não duplica produto se já existir)
+ * - Vincula ao setor selecionado
+ * - Corredor fica vazio (null)
+ * - Não exige validade, quantidade, foto ou localização
+ * - Não cria registro de validade
+ * - Status inicial: "LISTA_DE_BLITZ"
+ */
+export async function bulkRegisterBlitzProducts({ items, sector = 'MERCEARIA' }) {
+  if (!items || !Array.isArray(items) || items.length === 0) {
+    return { total: 0, created: 0, updated: 0, products: [] };
+  }
+
+  const now = new Date().toISOString();
+  const normalizedSector = String(sector || 'MERCEARIA').trim().toUpperCase();
+
+  // Obtém todos os produtos existentes para consulta por código de barras
+  const allExisting = await getAllProducts();
+  const barcodeMap = new Map();
+  allExisting.forEach(p => {
+    if (p.barcode) {
+      barcodeMap.set(String(p.barcode).trim(), p);
+    }
+  });
+
+  const { tx } = await getSafeTransaction(['products', 'sync_queue'], 'readwrite');
+
+  return new Promise((resolve, reject) => {
+    try {
+      const productStore = tx.objectStore('products');
+      const syncStore = tx.objectStore('sync_queue');
+
+      let createdCount = 0;
+      let updatedCount = 0;
+      const savedProducts = [];
+
+      for (const item of items) {
+        const cleanBarcode = String(item.barcode || '').trim();
+        if (!cleanBarcode) continue;
+
+        const cleanName = String(item.name || '').trim().toUpperCase();
+        const existing = barcodeMap.get(cleanBarcode);
+
+        if (existing) {
+          // PRODUTO JÁ EXISTE NO BANCO: NÃO DUPLICAR!
+          // Apenas atualiza nome se o existente estiver genérico ou vazio
+          if (cleanName && (!existing.name || existing.name === cleanBarcode || existing.name === `PRODUTO ${cleanBarcode}`)) {
+            existing.name = cleanName;
+          }
+          existing.sector = normalizedSector;
+          // Se ainda não estiver verificado, garante o status de lista de blitz
+          if (!existing.status || existing.status === 'LISTA_DE_BLITZ') {
+            existing.status = 'LISTA_DE_BLITZ';
+            existing.is_blitz_import = true;
+            existing.origin = 'BLITZ_IMPORT';
+          }
+          existing.updated_at = now;
+
+          productStore.put(existing);
+          syncStore.add({
+            id: generateId(),
+            operation: 'UPSERT',
+            table_name: 'products',
+            record_id: existing.id,
+            payload: existing,
+            created_at: now,
+            synced: 0
+          });
+
+          updatedCount++;
+          savedProducts.push(existing);
+        } else {
+          // NOVO PRODUTO CADASTRADO EM MASSA
+          const newProduct = {
+            id: generateId(),
+            barcode: cleanBarcode,
+            name: cleanName || `PRODUTO ${cleanBarcode}`,
+            sector: normalizedSector,
+            corridor: null, // Corredor vazio conforme especificação
+            status: 'LISTA_DE_BLITZ', // Status inicial obrigatório
+            is_blitz_import: true, // Separado dos registrados, fica em (produtos exportados da blitz)
+            origin: 'BLITZ_IMPORT',
+            image: null,
+            is_verified_only: false,
+            total_quantity: 0,
+            deposit_qty: 0,
+            fridge_qty: 0,
+            shelf_qty: 0,
+            gondola_end_qty: 0,
+            ear_qty: 0,
+            island_qty: 0,
+            cart_qty: 0,
+            checkout_qty: 0,
+            last_expiration_date: null,
+            last_count_date: now,
+            created_at: now,
+            updated_at: now
+          };
+
+          productStore.put(newProduct);
+          syncStore.add({
+            id: generateId(),
+            operation: 'UPSERT',
+            table_name: 'products',
+            record_id: newProduct.id,
+            payload: newProduct,
+            created_at: now,
+            synced: 0
+          });
+
+          barcodeMap.set(cleanBarcode, newProduct);
+          createdCount++;
+          savedProducts.push(newProduct);
+        }
+      }
+
+      tx.oncomplete = () => {
+        resolve({
+          total: savedProducts.length,
+          created: createdCount,
+          updated: updatedCount,
+          products: savedProducts
+        });
+      };
+      tx.onerror = (e) => reject(e.target?.error || e);
+    } catch (e) {
+      reject(e);
+    }
+  });
+}
+
+export async function updateProductCorridor(productId, corridor) {
+  const product = await getProductById(productId);
+  if (!product) return null;
+  product.corridor = corridor ? String(corridor).trim() : null;
+  product.updated_at = new Date().toISOString();
+  return await saveProduct(product);
+}
+
+export async function updateProductStatus(productId, status) {
+  const product = await getProductById(productId);
+  if (!product) return null;
+  product.status = status;
+  product.updated_at = new Date().toISOString();
+  return await saveProduct(product);
 }
 
 // Exclui um produto por completo (produto, todas as validades e contagens)
@@ -1817,13 +1980,23 @@ export async function markQueueItemSynced(id) {
 // BLITZ POR PERÍODO (blitz_sessions e blitz_items)
 // ----------------------------------------------------
 
-export async function createBlitzSession({ blitz_type, sector, user_name, start_date = null, end_date = null, period_label = null }) {
+export async function createBlitzSession({ blitz_type, sector, user_name, start_date = null, end_date = null, period_label = null, target_dates = [] }) {
   const now = new Date().toISOString();
   const normalizedSector = (sector || blitz_type || 'GERAL').toUpperCase();
+
+  // Processa datas procuradas (uma ou várias datas)
+  const cleanTargetDates = Array.isArray(target_dates) && target_dates.length > 0
+    ? target_dates.map(d => d.includes('/') ? parseDateBRtoISO(d) : String(d).trim().split('T')[0]).filter(Boolean)
+    : [];
   
   // Garante datas limpas em formato ISO YYYY-MM-DD
   let cleanStart = start_date ? (start_date.includes('/') ? parseDateBRtoISO(start_date) : start_date.split('T')[0]) : null;
   let cleanEnd = end_date ? (end_date.includes('/') ? parseDateBRtoISO(end_date) : end_date.split('T')[0]) : null;
+
+  if (cleanTargetDates.length > 0) {
+    if (!cleanStart) cleanStart = cleanTargetDates[0];
+    if (!cleanEnd) cleanEnd = cleanTargetDates[cleanTargetDates.length - 1];
+  }
 
   if (!cleanStart || !cleanEnd) {
     const today = new Date();
@@ -1833,18 +2006,27 @@ export async function createBlitzSession({ blitz_type, sector, user_name, start_
     cleanEnd = cleanEnd || next30.toISOString().split('T')[0];
   }
 
-  // Período formatado legível DD/MM/AAAA → DD/MM/AAAA
+  if (cleanTargetDates.length === 0 && cleanStart) {
+    cleanTargetDates.push(cleanStart);
+  }
+
+  // Período formatado legível
   let label = period_label;
   if (!label || label.includes('--/--/----') || label === 'Geral') {
-    label = `${formatDateBR(cleanStart)} → ${formatDateBR(cleanEnd)}`;
+    if (cleanTargetDates.length > 1) {
+      label = cleanTargetDates.map(d => formatDateBR(d)).join(', ');
+    } else {
+      label = `${formatDateBR(cleanStart)} → ${formatDateBR(cleanEnd)}`;
+    }
   }
 
   const session = {
     id: generateId(),
-    blitz_type: blitz_type || 'periodo',
+    blitz_type: blitz_type || normalizedSector,
     sector: normalizedSector,
     start_date: cleanStart,
     end_date: cleanEnd,
+    target_dates: cleanTargetDates,
     period_label: label,
     user_name: user_name || 'Ana Luiza',
     started_at: now,
@@ -1937,13 +2119,13 @@ export async function getBlitzSessionById(id) {
   }
 }
 
-export async function updateBlitzSessionPeriod(sessionId, { start_date, end_date, period_label, sector, blitz_type }) {
+export async function updateBlitzSessionPeriod(sessionId, { start_date, end_date, period_label, sector, blitz_type, target_dates }) {
   if (!sessionId) return null;
   const now = new Date().toISOString();
   try {
     const cleanStart = start_date ? (start_date.includes('/') ? parseDateBRtoISO(start_date) : start_date.split('T')[0]) : null;
     const cleanEnd = end_date ? (end_date.includes('/') ? parseDateBRtoISO(end_date) : end_date.split('T')[0]) : null;
-    const label = period_label || (cleanStart && cleanEnd ? `${formatDateBR(cleanStart)} → ${formatDateBR(cleanEnd)}` : null);
+    let label = period_label;
 
     const { tx } = await getSafeTransaction(['blitz_sessions', 'sync_queue'], 'readwrite');
     return new Promise((resolve, reject) => {
@@ -1958,7 +2140,14 @@ export async function updateBlitzSessionPeriod(sessionId, { start_date, end_date
         }
         if (cleanStart) session.start_date = cleanStart;
         if (cleanEnd) session.end_date = cleanEnd;
+        if (Array.isArray(target_dates)) {
+          session.target_dates = target_dates.map(d => d.includes('/') ? parseDateBRtoISO(d) : String(d).trim().split('T')[0]).filter(Boolean);
+          if (!label && session.target_dates.length > 1) {
+            label = session.target_dates.map(d => formatDateBR(d)).join(', ');
+          }
+        }
         if (label) session.period_label = label;
+        else if (cleanStart && cleanEnd) session.period_label = `${formatDateBR(cleanStart)} → ${formatDateBR(cleanEnd)}`;
         if (sector) {
           session.sector = String(sector).trim().toUpperCase();
           session.blitz_type = blitz_type ? String(blitz_type).trim().toUpperCase() : session.sector;
@@ -2620,6 +2809,20 @@ export async function saveBlitzConferenceRecord({
       }
     } catch (e) {
       console.warn('[Blitz] Aviso ao atualizar estoque atual da validade:', e);
+    }
+  }
+
+  // 3. Atualiza o status do produto para VERIFICADO após passar pela conferência da Blitz
+  if (effectiveProductId) {
+    try {
+      const prodToUpdate = await getProductById(effectiveProductId);
+      if (prodToUpdate && prodToUpdate.status !== 'VERIFICADO') {
+        prodToUpdate.status = 'VERIFICADO';
+        prodToUpdate.updated_at = new Date().toISOString();
+        await saveProduct(prodToUpdate);
+      }
+    } catch (e) {
+      console.warn('[Blitz] Aviso ao atualizar status do produto verificado:', e);
     }
   }
 
