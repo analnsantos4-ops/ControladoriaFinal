@@ -2,7 +2,7 @@
 import { generateId, getTodayISO, getDaysUntilExpiration, LOCATIONS, formatDateBR, parseDateBRtoISO } from './utils.js';
 
 const DB_NAME = 'ControladoriaAnaLuizaDB';
-const DB_VERSION = 2;
+const DB_VERSION = 3;
 
 let dbInstance = null;
 let dbInitPromise = null;
@@ -92,6 +92,53 @@ export function initDB(force = false) {
           itemStore.createIndex('product_id', 'product_id', { unique: false });
           itemStore.createIndex('session_product', ['blitz_session_id', 'product_id'], { unique: false });
           itemStore.createIndex('checked_at', 'checked_at', { unique: false });
+        }
+
+        // 8. Tabela oficial blitz (Especificação Completa e Auditável)
+        if (!db.objectStoreNames.contains('blitz')) {
+          const blitzStore = db.createObjectStore('blitz', { keyPath: 'id' });
+          blitzStore.createIndex('status', 'status', { unique: false });
+          blitzStore.createIndex('setor', 'setor', { unique: false });
+          blitzStore.createIndex('data_inicio', 'data_inicio', { unique: false });
+          blitzStore.createIndex('data_fim', 'data_fim', { unique: false });
+          blitzStore.createIndex('created_at', 'created_at', { unique: false });
+        }
+
+        // 9. Tabela oficial blitz_itens (EAN + DATA_DE_VALIDADE)
+        if (!db.objectStoreNames.contains('blitz_itens')) {
+          const bItensStore = db.createObjectStore('blitz_itens', { keyPath: 'id' });
+          bItensStore.createIndex('blitz_id', 'blitz_id', { unique: false });
+          bItensStore.createIndex('ean', 'ean', { unique: false });
+          bItensStore.createIndex('produto_id', 'produto_id', { unique: false });
+          bItensStore.createIndex('status', 'status', { unique: false });
+          bItensStore.createIndex('blitz_ean_data', ['blitz_id', 'ean', 'data_validade'], { unique: true });
+        }
+
+        // 10. Tabela oficial conferencias_blitz (Registro de cada conferência física)
+        if (!db.objectStoreNames.contains('conferencias_blitz')) {
+          const confStore = db.createObjectStore('conferencias_blitz', { keyPath: 'id' });
+          confStore.createIndex('blitz_id', 'blitz_id', { unique: false });
+          confStore.createIndex('blitz_item_id', 'blitz_item_id', { unique: false });
+          confStore.createIndex('ean', 'ean', { unique: false });
+          confStore.createIndex('conferido_em', 'conferido_em', { unique: false });
+          confStore.createIndex('tipo_conferencia', 'tipo_conferencia', { unique: false });
+        }
+
+        // 11. Tabela oficial historico_alteracoes (Auditoria Completa e Permanente)
+        if (!db.objectStoreNames.contains('historico_alteracoes')) {
+          const histStore = db.createObjectStore('historico_alteracoes', { keyPath: 'id' });
+          histStore.createIndex('registro_id', 'registro_id', { unique: false });
+          histStore.createIndex('tabela', 'tabela', { unique: false });
+          histStore.createIndex('created_at', 'created_at', { unique: false });
+          histStore.createIndex('usuario', 'usuario', { unique: false });
+        }
+
+        // 12. Tabela fotos_produtos (Fotos de cadastro e conferência)
+        if (!db.objectStoreNames.contains('fotos_produtos')) {
+          const fotoStore = db.createObjectStore('fotos_produtos', { keyPath: 'id' });
+          fotoStore.createIndex('produto_id', 'produto_id', { unique: false });
+          fotoStore.createIndex('blitz_id', 'blitz_id', { unique: false });
+          fotoStore.createIndex('created_at', 'created_at', { unique: false });
         }
       };
 
@@ -335,11 +382,13 @@ export async function saveProduct(product) {
     isVerified = false;
   }
 
+  const photoVal = product.image || product.photo_url || existing?.image || existing?.photo_url || '';
   const productData = {
     id: product.id || generateId(),
     barcode: product.barcode.trim(),
     name: product.name ? product.name.trim() : '',
-    image: product.image !== undefined ? product.image : (existing?.image || ''),
+    image: photoVal,
+    photo_url: photoVal,
     sector: product.sector || existing?.sector || 'MERCEARIA',
     corridor: product.corridor !== undefined ? product.corridor : (existing?.corridor !== undefined ? existing.corridor : null),
     status: product.status || existing?.status || (isVerified ? 'VERIFICADO' : 'LISTA_DE_BLITZ'),
@@ -2037,11 +2086,12 @@ export async function createBlitzSession({ blitz_type, sector, user_name, start_
   };
 
   try {
-    const { tx } = await getSafeTransaction(['blitz_sessions', 'sync_queue'], 'readwrite');
+    const { tx } = await getSafeTransaction(['blitz_sessions', 'sync_queue', 'blitz'], 'readwrite');
     return new Promise((resolve, reject) => {
       try {
         const sessionStore = tx.objectStore('blitz_sessions');
         const syncStore = tx.objectStore('sync_queue');
+        const blitzStore = tx.objectStoreNames.contains('blitz') ? tx.objectStore('blitz') : null;
 
         // Fecha preventivamente qualquer outra sessão anterior que tenha ficado em aberto
         const getAllReq = sessionStore.getAll();
@@ -2053,11 +2103,40 @@ export async function createBlitzSession({ blitz_type, sector, user_name, start_
               s.finished_at = now;
               s.updated_at = now;
               sessionStore.put(s);
+              if (blitzStore) {
+                blitzStore.put({
+                  id: s.id,
+                  data_inicio: s.start_date || cleanStart,
+                  data_fim: s.end_date || cleanEnd,
+                  setor: s.sector || normalizedSector,
+                  responsavel: s.user_name || 'Ana Luiza',
+                  status: 'FINALIZADA',
+                  observacao: s.period_label || '',
+                  finalized_at: now,
+                  created_at: s.created_at || now,
+                  updated_at: now
+                });
+              }
             }
           });
         };
 
         sessionStore.put(session);
+
+        if (blitzStore) {
+          blitzStore.put({
+            id: session.id,
+            data_inicio: session.start_date,
+            data_fim: session.end_date,
+            setor: session.sector,
+            responsavel: session.user_name,
+            status: 'EM_ANDAMENTO',
+            observacao: session.period_label || '',
+            finalized_at: null,
+            created_at: now,
+            updated_at: now
+          });
+        }
 
         syncStore.add({
           id: generateId(),
@@ -2179,11 +2258,12 @@ export async function finishBlitzSession(sessionId = null) {
   const now = new Date().toISOString();
 
   try {
-    const { tx } = await getSafeTransaction(['blitz_sessions', 'sync_queue'], 'readwrite');
+    const { tx } = await getSafeTransaction(['blitz_sessions', 'sync_queue', 'blitz'], 'readwrite');
     return new Promise((resolve, reject) => {
       try {
         const store = tx.objectStore('blitz_sessions');
         const syncStore = tx.objectStore('sync_queue');
+        const blitzStore = tx.objectStoreNames.contains('blitz') ? tx.objectStore('blitz') : null;
 
         const getAllReq = store.getAll();
         let updatedSession = null;
@@ -2200,6 +2280,24 @@ export async function finishBlitzSession(sessionId = null) {
                 updatedSession = session;
               }
               store.put(session);
+
+              if (blitzStore) {
+                const getBReq = blitzStore.get(session.id);
+                getBReq.onsuccess = () => {
+                  const bRecord = getBReq.result || {
+                    id: session.id,
+                    data_inicio: session.start_date,
+                    data_fim: session.end_date,
+                    setor: session.sector,
+                    responsavel: session.user_name || 'Ana Luiza',
+                    created_at: session.created_at || now
+                  };
+                  bRecord.status = 'FINALIZADA';
+                  bRecord.finalized_at = now;
+                  bRecord.updated_at = now;
+                  blitzStore.put(bRecord);
+                };
+              }
 
               syncStore.add({
                 id: generateId(),
@@ -2725,15 +2823,19 @@ export async function saveBlitzConferenceRecord({
   productId,
   barcode,
   sector,
+  corridor = null,
   requestedDate,
   previousQuantity = 0,
   newQuantity = 0,
   result, // 'TEM' | 'NAO_TEM' | 'NAO_IDENTIFICADO'
   locations = [], // [{ location: 'Depósito', quantity: 70 }, ...]
+  photo_proof = null,
+  foto_url = null,
   userName = 'Ana Luiza',
   isNewExpiration = false
 }) {
   const diff = Number(newQuantity) - Number(previousQuantity);
+  const photoData = photo_proof || foto_url || null;
 
   // Garante que o produto SEMPRE seja guardado e exista na tabela de produtos do banco de dados
   let effectiveProductId = productId;
@@ -2745,7 +2847,9 @@ export async function saveBlitzConferenceRecord({
           barcode: String(barcode).trim(),
           name: `PRODUTO ${String(barcode).trim()}`,
           sector: sector || 'GERAL',
-          corridor: '01'
+          corridor: corridor || 'Corredor 1',
+          image: photoData || '',
+          photo_url: photoData || ''
         });
       }
       if (existingProd && existingProd.id) {
@@ -2756,9 +2860,58 @@ export async function saveBlitzConferenceRecord({
     }
   }
 
-  // 1. Salva o registro no histórico da Blitz (cria ou atualiza se id fornecido)
+  // Se houver foto e produto, salva foto no produto e na tabela de fotos
+  if (photoData && (effectiveProductId || barcode)) {
+    try {
+      await saveProductPhotoRecord({
+        productId: effectiveProductId,
+        barcode: barcode,
+        photoBase64: photoData,
+        expirationDate: requestedDate,
+        type: 'CONFERENCIA'
+      });
+    } catch (_) {}
+  }
+
+  // 1. Busca se já existe um item desta mesma Blitz, Produto e Validade para SUBSTITUIR (Re-bipagem oficial)
+  let effectiveId = id || null;
+  const cleanBar = barcode ? String(barcode).trim() : '';
+  const cleanReqDate = requestedDate ? String(requestedDate).split('T')[0] : '';
+  const cleanReqDateBR = cleanReqDate ? formatDateBR(cleanReqDate) : '';
+
+  try {
+    const existingSessionItems = await getBlitzItemsBySessionId(sessionId);
+    const duplicates = existingSessionItems.filter(it => {
+      const bMatch = cleanBar && String(it.barcode || '').trim() === cleanBar;
+      const pMatch = effectiveProductId && it.product_id === effectiveProductId;
+      const itExp = String(it.requested_expiration_date || '').split('T')[0];
+      const itExpBR = formatDateBR(itExp);
+      const dMatch = itExp === cleanReqDate || itExpBR === cleanReqDateBR;
+      return (bMatch || pMatch) && dMatch;
+    });
+
+    if (duplicates.length > 0) {
+      // Reutiliza o id do primeiro registro
+      effectiveId = duplicates[0].id;
+
+      // Limpa duplicatas excedentes no banco para manter apenas o registro oficial vigente
+      if (duplicates.length > 1) {
+        try {
+          const { tx: dupTx } = await getSafeTransaction('blitz_items', 'readwrite');
+          const dupStore = dupTx.objectStore('blitz_items');
+          for (let i = 1; i < duplicates.length; i++) {
+            dupStore.delete(duplicates[i].id);
+          }
+        } catch (_) {}
+      }
+    }
+  } catch (err) {
+    console.warn('[Blitz] Aviso ao verificar registros anteriores da Blitz atual:', err);
+  }
+
+  // Salva o registro no histórico da Blitz (atualizando o registro vigente)
   const blitzItem = await saveBlitzItem({
-    id: id || null,
+    id: effectiveId,
     blitz_session_id: sessionId,
     product_id: effectiveProductId || null,
     barcode: barcode,
@@ -2769,9 +2922,89 @@ export async function saveBlitzConferenceRecord({
     difference: diff,
     result: result,
     locations: locations,
+    photo_proof: photoData,
     user_name: userName,
     is_new_expiration: isNewExpiration
   });
+
+  // Também sincroniza atomicamente blitz_itens e conferencias_blitz
+  try {
+    const { tx: bTx } = await getSafeTransaction(['blitz_itens', 'conferencias_blitz'], 'readwrite');
+    const bItensStore = bTx.objectStore('blitz_itens');
+    const confStore = bTx.objectStore('conferencias_blitz');
+
+    // 1. Atualiza blitz_itens para CONFERIDO com as novas quantidades e locais
+    const bItensReq = bItensStore.getAll();
+    bItensReq.onsuccess = () => {
+      const allBItens = bItensReq.result || [];
+      const targetBItem = allBItens.find(it => 
+        it.blitz_id === sessionId &&
+        String(it.ean || '').trim() === cleanBar &&
+        String(it.data_validade || '').split('T')[0] === cleanReqDate
+      );
+      if (targetBItem) {
+        targetBItem.status = 'CONFERIDO';
+        targetBItem.quantidade = Number(newQuantity) || 0;
+        targetBItem.locations = locations;
+        if (photoData) targetBItem.foto_url = photoData;
+        if (corridor) targetBItem.corredor = corridor;
+        targetBItem.conferido_em = new Date().toISOString();
+        targetBItem.updated_at = new Date().toISOString();
+        bItensStore.put(targetBItem);
+      }
+    };
+
+    // 2. Atualiza conferencias_blitz mantendo apenas A ÚLTIMA conferência oficial da Blitz atual
+    const confReq = confStore.getAll();
+    confReq.onsuccess = () => {
+      const allConfs = confReq.result || [];
+      const matchingConfs = allConfs.filter(c => 
+        c.blitz_id === sessionId &&
+        String(c.ean || '').trim() === cleanBar &&
+        String(c.data_validade || '').split('T')[0] === cleanReqDate
+      );
+
+      if (matchingConfs.length > 0) {
+        const primary = matchingConfs[0];
+        primary.quantidade = Number(newQuantity) || 0;
+        primary.locations = locations;
+        primary.tipo_conferencia = 'MANUAL';
+        if (photoData) {
+          primary.foto_url = photoData;
+          primary.foto_conferencia = photoData;
+        }
+        if (corridor) primary.corredor = corridor;
+        primary.conferido_em = new Date().toISOString();
+        confStore.put(primary);
+
+        // Remove duplicatas excedentes
+        for (let i = 1; i < matchingConfs.length; i++) {
+          confStore.delete(matchingConfs[i].id);
+        }
+      } else {
+        confStore.add({
+          id: generateId('conf_'),
+          blitz_id: sessionId,
+          blitz_item_id: blitzItem.id,
+          produto_id: effectiveProductId || null,
+          ean: cleanBar,
+          data_validade: cleanReqDate,
+          quantidade: Number(newQuantity) || 0,
+          quantidade_anterior: Number(previousQuantity) || 0,
+          diferenca: diff,
+          tipo_conferencia: 'MANUAL',
+          locations: locations,
+          corredor: corridor || null,
+          foto_url: photoData || null,
+          foto_conferencia: photoData || null,
+          usuario: userName || 'Ana Luiza',
+          conferido_em: new Date().toISOString()
+        });
+      }
+    };
+  } catch (err) {
+    console.warn('[Blitz] Aviso ao sincronizar conferencias_blitz:', err);
+  }
 
   // 2. Se houver produto (ou auto-criado) e houver data, atualiza o estoque físico atual e salva no histórico semanal
   if (effectiveProductId && requestedDate && result !== 'NAO_IDENTIFICADO') {
@@ -2829,6 +3062,310 @@ export async function saveBlitzConferenceRecord({
   return blitzItem;
 }
 
+/**
+ * REGRA DE OURO: Busca conferência exclusivamente de uma Blitz anterior que esteja FINALIZADA.
+ * Retorna { blitzId, blitzDate, date, quantity, total, locations } ou null se for o primeiro registro do produto/validade.
+ * NUNCA retorna conferência da Blitz atual nem inventa histórico de 0 un.
+ */
+export async function getPreviousFinalizedBlitzConference({ currentBlitzId, barcode, productId, expirationDate }) {
+  if (!barcode && !productId) return null;
+  if (!expirationDate) return null;
+
+  try {
+    const cleanBar = barcode ? String(barcode).trim() : null;
+    const cleanExp = String(expirationDate).trim().split('T')[0];
+    const cleanExpBR = formatDateBR(cleanExp);
+
+    // 1. Busca todas as sessões / blitzes finalizadas (exceto a atual)
+    const { tx } = await getSafeTransaction(['blitz_sessions', 'blitz', 'blitz_items', 'blitz_itens', 'conferencias_blitz'], 'readonly');
+    const sessionStore = tx.objectStore('blitz_sessions');
+    const blitzStore = tx.objectStore('blitz');
+    const bItemsStore = tx.objectStore('blitz_items');
+    const bItensStore = tx.objectStore('blitz_itens');
+    const confStore = tx.objectStore('conferencias_blitz');
+
+    const [allSessions, allBlitzes, allItems, allBItens, allConfs] = await Promise.all([
+      new Promise(r => { const req = sessionStore.getAll(); req.onsuccess = () => r(req.result || []); req.onerror = () => r([]); }),
+      new Promise(r => { const req = blitzStore.getAll(); req.onsuccess = () => r(req.result || []); req.onerror = () => r([]); }),
+      new Promise(r => { const req = bItemsStore.getAll(); req.onsuccess = () => r(req.result || []); req.onerror = () => r([]); }),
+      new Promise(r => { const req = bItensStore.getAll(); req.onsuccess = () => r(req.result || []); req.onerror = () => r([]); }),
+      new Promise(r => { const req = confStore.getAll(); req.onsuccess = () => r(req.result || []); req.onerror = () => r([]); })
+    ]);
+
+    // Mapeia blitzes FINALIZADAS distintas (excluindo estritamente a Blitz atual)
+    const finalizedBlitzMap = new Map();
+
+    allSessions.forEach(s => {
+      if (s.id !== currentBlitzId && (s.status === 'finalizada' || s.status === 'finished' || Boolean(s.finished_at))) {
+        finalizedBlitzMap.set(s.id, {
+          id: s.id,
+          date: s.finished_at || s.started_at || s.start_date || s.created_at,
+          label: s.period_label || ''
+        });
+      }
+    });
+
+    allBlitzes.forEach(b => {
+      if (b.id !== currentBlitzId && (b.status === 'FINALIZADA' || b.status === 'finalizada' || Boolean(b.finalized_at))) {
+        if (!finalizedBlitzMap.has(b.id)) {
+          finalizedBlitzMap.set(b.id, {
+            id: b.id,
+            date: b.finalized_at || b.data_fim || b.data_inicio || b.created_at,
+            label: b.setor || ''
+          });
+        }
+      }
+    });
+
+    if (finalizedBlitzMap.size === 0) {
+      return null;
+    }
+
+    // Ordena as blitzes finalizadas da mais recente para a mais antiga
+    const sortedFinalized = Array.from(finalizedBlitzMap.values()).sort((a, b) => new Date(b.date || 0) - new Date(a.date || 0));
+
+    // Procura conferência deste produto e data na blitz finalizada mais recente
+    for (const b of sortedFinalized) {
+      const formattedDateStr = b.date ? (formatDateBR(b.date) || String(b.date).split('T')[0]) : 'Blitz anterior';
+
+      // Prioridade 1: tabela oficial conferencias_blitz
+      const matchConf = allConfs.find(c => {
+        if (c.blitz_id !== b.id) return false;
+        const eanMatch = cleanBar && String(c.ean || '').trim() === cleanBar;
+        const idMatch = productId && c.produto_id === productId;
+        const dateMatch = String(c.data_validade || '').split('T')[0] === cleanExp || formatDateBR(c.data_validade) === cleanExpBR;
+        return (eanMatch || idMatch) && dateMatch;
+      });
+
+      if (matchConf) {
+        const qty = Number(matchConf.quantidade) || 0;
+        return {
+          blitzId: b.id,
+          blitzDate: formattedDateStr,
+          date: b.date,
+          quantity: qty,
+          total: qty,
+          locations: matchConf.locations || []
+        };
+      }
+
+      // Prioridade 2: tabela blitz_itens
+      const matchBItem = allBItens.find(it => {
+        if (it.blitz_id !== b.id) return false;
+        const eanMatch = cleanBar && String(it.ean || '').trim() === cleanBar;
+        const dateMatch = String(it.data_validade || '').split('T')[0] === cleanExp || formatDateBR(it.data_validade) === cleanExpBR;
+        return eanMatch && dateMatch;
+      });
+
+      if (matchBItem) {
+        const qty = Number(matchBItem.quantidade != null ? matchBItem.quantidade : matchBItem.total_quantity) || 0;
+        return {
+          blitzId: b.id,
+          blitzDate: formattedDateStr,
+          date: b.date,
+          quantity: qty,
+          total: qty,
+          locations: matchBItem.locations || []
+        };
+      }
+
+      // Prioridade 3: blitz_items
+      const matchItem = allItems.find(it => {
+        if (it.blitz_session_id !== b.id) return false;
+        const barMatch = cleanBar && String(it.barcode || '').trim() === cleanBar;
+        const idMatch = productId && it.product_id === productId;
+        const itExp = String(it.requested_expiration_date || '').trim().split('T')[0];
+        const itExpBR = formatDateBR(itExp);
+        const dateMatch = itExp === cleanExp || itExpBR === cleanExpBR;
+        return (barMatch || idMatch) && dateMatch;
+      });
+
+      if (matchItem) {
+        const qty = Number(matchItem.total_quantity != null ? matchItem.total_quantity : matchItem.quantity) || 0;
+        return {
+          blitzId: b.id,
+          blitzDate: formattedDateStr,
+          date: b.date,
+          quantity: qty,
+          total: qty,
+          locations: matchItem.locations || []
+        };
+      }
+    }
+
+    // Não existe conferência em nenhuma Blitz finalizada anterior
+    return null;
+  } catch (err) {
+    console.warn('Erro ao consultar blitz anterior finalizada:', err);
+    return null;
+  }
+}
+
+/**
+ * Busca se o produto e validade já foram conferidos NESTA MESMA BLITZ ATUAL (em andamento).
+ * Evita que ao re-bipar o mesmo produto informe falsamente 'PRIMEIRO REGISTRO'.
+ */
+export async function getCurrentBlitzConferenceRecord({ currentBlitzId, barcode, productId, expirationDate }) {
+  if (!currentBlitzId || (!barcode && !productId) || !expirationDate) return null;
+
+  try {
+    const cleanBar = barcode ? String(barcode).trim() : null;
+    const cleanExp = String(expirationDate).trim().split('T')[0];
+    const cleanExpBR = formatDateBR(cleanExp);
+
+    const { tx } = await getSafeTransaction(['conferencias_blitz', 'blitz_itens', 'blitz_items'], 'readonly');
+    const confStore = tx.objectStore('conferencias_blitz');
+    const bItensStore = tx.objectStore('blitz_itens');
+    const bItemsStore = tx.objectStore('blitz_items');
+
+    const [allConfs, allBItens, allItems] = await Promise.all([
+      new Promise(r => { const req = confStore.getAll(); req.onsuccess = () => r(req.result || []); req.onerror = () => r([]); }),
+      new Promise(r => { const req = bItensStore.getAll(); req.onsuccess = () => r(req.result || []); req.onerror = () => r([]); }),
+      new Promise(r => { const req = bItemsStore.getAll(); req.onsuccess = () => r(req.result || []); req.onerror = () => r([]); })
+    ]);
+
+    // 1. Prioridade: conferencias_blitz da sessão atual
+    const matchConf = allConfs.find(c => {
+      if (c.blitz_id !== currentBlitzId) return false;
+      const eanMatch = cleanBar && String(c.ean || '').trim() === cleanBar;
+      const idMatch = productId && c.produto_id === productId;
+      const dMatch = String(c.data_validade || '').split('T')[0] === cleanExp || formatDateBR(c.data_validade) === cleanExpBR;
+      return (eanMatch || idMatch) && dMatch;
+    });
+
+    if (matchConf) {
+      const qty = Number(matchConf.quantidade) || 0;
+      return {
+        blitzId: currentBlitzId,
+        quantity: qty,
+        total: qty,
+        locations: matchConf.locations || [],
+        conferidoEm: matchConf.conferido_em || matchConf.created_at || null,
+        result: qty > 0 ? 'TEM' : 'NAO_TEM',
+        photo: matchConf.foto_url || matchConf.foto_conferencia || null
+      };
+    }
+
+    // 2. blitz_itens da sessão atual
+    const matchBItem = allBItens.find(it => {
+      if (it.blitz_id !== currentBlitzId) return false;
+      const eanMatch = cleanBar && String(it.ean || '').trim() === cleanBar;
+      const dMatch = String(it.data_validade || '').split('T')[0] === cleanExp || formatDateBR(it.data_validade) === cleanExpBR;
+      return eanMatch && dMatch && (it.status === 'CONFERIDO' || Boolean(it.conferido_em) || Number(it.quantidade) > 0);
+    });
+
+    if (matchBItem) {
+      const qty = Number(matchBItem.quantidade != null ? matchBItem.quantidade : matchBItem.total_quantity) || 0;
+      return {
+        blitzId: currentBlitzId,
+        quantity: qty,
+        total: qty,
+        locations: matchBItem.locations || [],
+        conferidoEm: matchBItem.conferido_em || matchBItem.updated_at || null,
+        result: qty > 0 ? 'TEM' : 'NAO_TEM',
+        photo: matchBItem.foto_url || null
+      };
+    }
+
+    // 3. blitz_items da sessão atual
+    const matchItem = allItems.find(it => {
+      if (it.blitz_session_id !== currentBlitzId) return false;
+      const barMatch = cleanBar && String(it.barcode || '').trim() === cleanBar;
+      const idMatch = productId && it.product_id === productId;
+      const itExp = String(it.requested_expiration_date || '').trim().split('T')[0];
+      const dMatch = itExp === cleanExp || formatDateBR(itExp) === cleanExpBR;
+      return (barMatch || idMatch) && dMatch;
+    });
+
+    if (matchItem) {
+      const qty = Number(matchItem.total_quantity != null ? matchItem.total_quantity : matchItem.quantity) || 0;
+      return {
+        blitzId: currentBlitzId,
+        quantity: qty,
+        total: qty,
+        locations: matchItem.locations || [],
+        conferidoEm: matchItem.updated_at || matchItem.created_at || null,
+        result: matchItem.result || (qty > 0 ? 'TEM' : 'NAO_TEM'),
+        photo: matchItem.photo_proof || null
+      };
+    }
+
+    return null;
+  } catch (err) {
+    console.warn('Erro ao consultar conferência na Blitz atual:', err);
+    return null;
+  }
+}
+
+/**
+ * Salva a fotografia do produto tanto no cadastro do produto quanto
+ * na tabela fotos_produtos e enfileira para sincronização.
+ */
+export async function saveProductPhotoRecord({ productId, barcode, photoBase64, expirationDate = null, type = 'PRODUTO' }) {
+  if (!photoBase64 || (!productId && !barcode)) return false;
+  try {
+    const now = new Date().toISOString();
+    let product = productId ? await getProductById(productId) : await getProductByBarcode(barcode);
+    if (product) {
+      product.image = photoBase64;
+      product.photo_url = photoBase64;
+      product.updated_at = now;
+      await saveProduct(product);
+    }
+
+    const { tx } = await getSafeTransaction(['fotos_produtos', 'sync_queue'], 'readwrite');
+    const fotoStore = tx.objectStore('fotos_produtos');
+    const syncStore = tx.objectStore('sync_queue');
+
+    const photoRecord = {
+      id: generateId('foto_'),
+      produto_id: product?.id || productId || null,
+      ean: String(barcode || product?.barcode || '').trim(),
+      tipo: type || 'PRODUTO',
+      url_ou_base64: photoBase64,
+      data_validade: expirationDate ? String(expirationDate).split('T')[0] : null,
+      criado_em: now
+    };
+
+    fotoStore.put(photoRecord);
+
+    syncStore.add({
+      id: generateId(),
+      operation: 'UPSERT',
+      table_name: 'fotos_produtos',
+      record_id: photoRecord.id,
+      payload: photoRecord,
+      created_at: now,
+      synced: 0
+    });
+
+    return true;
+  } catch (err) {
+    console.warn('Erro ao salvar foto em fotos_produtos:', err);
+    return false;
+  }
+}
+
+/**
+ * Consulta se existe foto salva na tabela fotos_produtos para o produto ou código de barras
+ */
+export async function getProductPhotoFromDb(productId, barcode) {
+  try {
+    const cleanBar = barcode ? String(barcode).trim() : null;
+    const { tx } = await getSafeTransaction('fotos_produtos', 'readonly');
+    const store = tx.objectStore('fotos_produtos');
+    const all = await new Promise(r => {
+      const req = store.getAll();
+      req.onsuccess = () => r(req.result || []);
+      req.onerror = () => r([]);
+    });
+    const match = all.reverse().find(f => (productId && f.produto_id === productId) || (cleanBar && String(f.ean).trim() === cleanBar));
+    return match ? (match.url_ou_base64 || match.url || null) : null;
+  } catch (_) {
+    return null;
+  }
+}
+
 // ----------------------------------------------------
 // ZERAR / LIMPAR BANCO DE DADOS (IndexedDB e Supabase)
 // ----------------------------------------------------
@@ -2841,6 +3378,11 @@ export async function clearAllDatabaseData() {
     'count_sessions',
     'blitz_sessions',
     'blitz_items',
+    'blitz',
+    'blitz_itens',
+    'conferencias_blitz',
+    'historico_alteracoes',
+    'fotos_produtos',
     'sync_queue'
   ];
   try {

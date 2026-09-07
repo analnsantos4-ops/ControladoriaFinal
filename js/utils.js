@@ -80,16 +80,59 @@ export const BLITZ_TYPES = BLITZ_SECTORS.map(s => ({
   schedule: s.schedule
 }));
 
+export const WEEKLY_CYCLES = [
+  {
+    id: 'alho_mercearia',
+    label: 'Alho + Mercearia',
+    icon: '🧄 🛒',
+    sectors: ['ALHO', 'MERCEARIA'],
+    days: [1, 2, 3], // Seg, Ter, Qua
+    periodLabel: 'Segunda a Quarta',
+    daysLabel: 'Seg → Qua'
+  },
+  {
+    id: 'bazar',
+    label: 'Bazar',
+    icon: '🛍️',
+    sectors: ['BAZAR'],
+    days: [4], // Qui
+    periodLabel: 'Quinta-feira',
+    daysLabel: 'Quinta'
+  },
+  {
+    id: 'bebidas',
+    label: 'Bebidas',
+    icon: '🥤',
+    sectors: ['BEBIDAS'],
+    days: [5, 6], // Sex, Sab
+    periodLabel: 'Sexta e Sábado',
+    daysLabel: 'Sex → Sáb'
+  }
+];
+
+export function getWeeklyCycleForDate(date = new Date()) {
+  const d = typeof date === 'string' ? new Date(date.includes('T') ? date : date + 'T12:00:00') : date;
+  const day = d.getDay(); // 0: Dom, 1: Seg ... 6: Sab
+  if (day === 0) {
+    return {
+      id: 'descanso',
+      label: 'Sem Blitz programada',
+      icon: '💤',
+      sectors: [],
+      days: [0],
+      periodLabel: 'Domingo',
+      daysLabel: 'Domingo',
+      isRestDay: true
+    };
+  }
+  const found = WEEKLY_CYCLES.find(c => c.days.includes(day));
+  return found || WEEKLY_CYCLES[0];
+}
+
 export function getSuggestedBlitzType() {
-  const day = new Date().getDay(); // 0: Dom, 1: Seg, 2: Ter, 3: Qua, 4: Qui, 5: Sex, 6: Sab
-  // Cronograma oficial Ana Luiza:
-  // Segunda até quarta - mercearia
-  if (day >= 1 && day <= 3) return 'mercearia';
-  // Quinta - Bazar
-  if (day === 4) return 'bazar';
-  // Sexta e sábado - bebida
-  if (day === 5 || day === 6) return 'bebidas';
-  // Domingo (ou padrão): Mercearia
+  const cycle = getWeeklyCycleForDate();
+  if (cycle.id === 'bazar') return 'bazar';
+  if (cycle.id === 'bebidas') return 'bebidas';
   return 'mercearia';
 }
 
@@ -350,9 +393,90 @@ export function formatNumber(num) {
   return Number(num).toLocaleString('pt-BR');
 }
 
-/**
- * Síntese de voz desativada por solicitação do usuário
- */
-export function speakText(text) {
-  // Desativado por solicitação do usuário
+// -------------------------------------------------------------------
+// SISTEMA DE VOZ E SÍNTESE DE FALA DESATIVADO
+// A pedido do usuário, toda emissão de voz do app foi permanentemente silenciada.
+// -------------------------------------------------------------------
+
+let appVoiceEnabled = false;
+try {
+  localStorage.setItem('app_voice_enabled', 'false');
+} catch (_) {}
+
+let cachedPtVoice = null;
+let isAudioUnlocked = false;
+
+export function getBestPortugueseVoice() {
+  return null;
 }
+
+// Desbloqueia o canal de áudio
+export function unlockAudioOnMobile() {
+  if (isAudioUnlocked) return;
+  try {
+    stopSpeaking();
+    const AudioContext = window.AudioContext || window.webkitAudioContext;
+    if (AudioContext && !audioCtx) {
+      audioCtx = new AudioContext();
+    }
+    if (audioCtx && audioCtx.state === 'suspended') {
+      audioCtx.resume();
+    }
+    isAudioUnlocked = true;
+  } catch (_) {}
+}
+
+if (typeof window !== 'undefined') {
+  ['touchstart', 'touchend', 'click', 'keydown'].forEach(evt => {
+    window.addEventListener(evt, unlockAudioOnMobile, { passive: true, once: false });
+  });
+}
+
+export function isVoiceEnabled() {
+  return false;
+}
+
+export function toggleVoiceEnabled(forceState) {
+  appVoiceEnabled = false;
+  try {
+    localStorage.setItem('app_voice_enabled', 'false');
+  } catch (_) {}
+  stopSpeaking();
+  return false;
+}
+
+/**
+ * Converte data ISO ou BR para texto amigável
+ */
+export function formatDateForSpeech(dateStr) {
+  if (!dateStr || typeof dateStr !== 'string') return '';
+  return formatDateBR(dateStr);
+}
+
+/**
+ * Converte quantidade numérica para texto
+ */
+export function formatQuantityForSpeech(qty) {
+  const n = Math.max(0, parseInt(qty, 10) || 0);
+  return `${n} unidades`;
+}
+
+/**
+ * Fala o texto em voz alta: DESATIVADO
+ */
+export function speakText(text, options = {}) {
+  // Desativado: usuário solicitou a remoção de voz
+  stopSpeaking();
+}
+
+/**
+ * Para imediatamente qualquer fala em andamento
+ */
+export function stopSpeaking() {
+  if (typeof window !== 'undefined' && 'speechSynthesis' in window) {
+    try {
+      window.speechSynthesis.cancel();
+    } catch (_) {}
+  }
+}
+

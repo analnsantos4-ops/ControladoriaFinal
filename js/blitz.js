@@ -34,6 +34,10 @@ import {
   getLatestCountsForExpiration,
   getExpirationByProductAndDate,
   getComprehensiveConferenceRecordForProductAndDate,
+  getPreviousFinalizedBlitzConference,
+  getCurrentBlitzConferenceRecord,
+  saveProductPhotoRecord,
+  getProductPhotoFromDb,
   bulkRegisterBlitzProducts,
   updateProductCorridor,
   updateProductStatus,
@@ -50,8 +54,35 @@ import {
   getTodayISO,
   formatDateWithWeekday,
   compressImage,
-  generateId
+  generateId,
+  speakText,
+  stopSpeaking,
+  isVoiceEnabled,
+  toggleVoiceEnabled,
+  formatDateForSpeech,
+  formatQuantityForSpeech,
+  triggerHaptic,
+  playBeep,
+  unlockAudioOnMobile
 } from './utils.js';
+
+import {
+  parseBlitzInputList,
+  createBlitzRecord,
+  importBlitzItemsWithHistory,
+  getBlitzItens,
+  saveBlitzConference,
+  finalizeBlitzWithAutoZeros,
+  reopenBlitzRecord,
+  correctConferenceQuantity,
+  calculateBlitzMetrics,
+  calculateBlitzPaceMetrics,
+  getSessionBlitzItems,
+  getWeeklyRoutineStatus,
+  getWhatChangedAnalysis,
+  recordAudit,
+  repairBlitzSessionData
+} from './blitz_engine.js';
 
 import { showView, showToast, promptConfirmDialog } from './ui.js';
 import { startCameraScanner, stopCameraScanner } from './scanner.js';
@@ -73,6 +104,47 @@ export function setActiveBlitz(session) {
     localStorage.removeItem('active_blitz_session_cache');
   }
   updateBlitzTopBarIndicator();
+}
+
+/**
+ * Renderizador padronizado e ultra-robusto de foto do produto.
+ * Se a foto não existir ou falhar ao carregar no navegador, ativa imediatamente
+ * o placeholder neutro (.photo-placeholder-neutral) SEM NUNCA exibir interrogação azul ou ícone de imagem quebrada.
+ */
+export function renderProductPhotoHtml(photoUrl, altText = '', options = {}) {
+  const size = options.size || 52;
+  const rounded = options.rounded || '8px';
+  const customStyle = options.style || '';
+  const customClass = options.className || '';
+
+  const cleanUrl = (photoUrl && typeof photoUrl === 'string' && photoUrl.trim() !== '' && photoUrl.trim() !== 'null' && photoUrl.trim() !== 'undefined')
+    ? photoUrl.trim()
+    : null;
+
+  if (cleanUrl) {
+    return `
+      <div class="blitz-prod-thumb-box ${customClass}" style="width: ${size}px; height: ${size}px; border-radius: ${rounded}; ${customStyle}">
+        <img 
+          src="${cleanUrl}" 
+          alt="${altText ? String(altText).replace(/"/g, '&quot;') : 'Foto do Produto'}" 
+          class="blitz-prod-thumb-img" 
+          referrerpolicy="no-referrer"
+          onerror="this.style.display='none'; if (this.nextElementSibling) this.nextElementSibling.style.display='flex';" 
+        />
+        <div class="photo-placeholder-neutral" style="display: none;">
+          <span>📷 Sem foto</span>
+        </div>
+      </div>
+    `;
+  }
+
+  return `
+    <div class="blitz-prod-thumb-box ${customClass}" style="width: ${size}px; height: ${size}px; border-radius: ${rounded}; ${customStyle}">
+      <div class="photo-placeholder-neutral">
+        <span>📷 Sem foto</span>
+      </div>
+    </div>
+  `;
 }
 
 // Inicializa o módulo e recupera sessão ativa se houver
@@ -153,6 +225,9 @@ export function updateBlitzTopBarIndicator() {
         </div>
       </div>
       <div style="display: flex; gap: 6px; flex-shrink: 0; align-items: center;">
+        <button type="button" id="btn-dash-blitz-voice" style="background: ${isVoiceEnabled() ? 'rgba(16, 185, 129, 0.2)' : 'rgba(239, 68, 68, 0.2)'}; border: 1px solid ${isVoiceEnabled() ? '#10b981' : '#ef4444'}; color: ${isVoiceEnabled() ? '#34d399' : '#fca5a5'}; padding: 5px 8px; border-radius: 6px; font-size: 0.74rem; font-weight: 800; cursor: pointer; white-space: nowrap;" title="Ativar/Desativar Voz">
+          ${isVoiceEnabled() ? '🔊 Voz' : '🔇 Mudo'}
+        </button>
         <button type="button" id="btn-dash-resume-blitz" class="btn-primary" style="padding: 6px 12px; font-size: 0.78rem; font-weight: 900; background: #f59e0b; color: #000; border-radius: 6px; white-space: nowrap;">
           🔎 Continuar
         </button>
@@ -166,6 +241,10 @@ export function updateBlitzTopBarIndicator() {
   if (dashBanner) {
     dashBanner.innerHTML = bannerHtml;
     dashBanner.classList.remove('hidden');
+    document.getElementById('btn-dash-blitz-voice')?.addEventListener('click', () => {
+      toggleVoiceEnabled();
+      updateBlitzTopBarIndicator();
+    });
     document.getElementById('btn-dash-resume-blitz')?.addEventListener('click', () => {
       openBlitzDashboardView();
     });
@@ -183,6 +262,9 @@ export function updateBlitzTopBarIndicator() {
         </span>
       </div>
       <div style="display: flex; gap: 6px; align-items: center; flex-shrink: 0;">
+        <button type="button" id="btn-scanner-voice-toggle" style="background: ${isVoiceEnabled() ? 'rgba(16, 185, 129, 0.25)' : 'rgba(239, 68, 68, 0.25)'}; border: 1px solid ${isVoiceEnabled() ? '#10b981' : '#ef4444'}; color: ${isVoiceEnabled() ? '#86efac' : '#fca5a5'}; padding: 3px 8px; border-radius: 4px; font-size: 0.7rem; font-weight: 800; cursor: pointer;" title="Ativar/Desativar Voz">
+          ${isVoiceEnabled() ? '🔊' : '🔇'}
+        </button>
         <button type="button" id="btn-scanner-blitz-dash" style="background: rgba(245, 158, 11, 0.2); border: 1px solid rgba(245, 158, 11, 0.4); color: #fef08a; padding: 3px 8px; border-radius: 4px; font-size: 0.7rem; font-weight: 800; cursor: pointer;">
           📋 Painel
         </button>
@@ -192,6 +274,10 @@ export function updateBlitzTopBarIndicator() {
       </div>
     `;
     scannerBar.classList.remove('hidden');
+    document.getElementById('btn-scanner-voice-toggle')?.addEventListener('click', () => {
+      toggleVoiceEnabled();
+      updateBlitzTopBarIndicator();
+    });
     document.getElementById('btn-scanner-blitz-dash')?.addEventListener('click', () => {
       stopCameraScanner();
       openBlitzDashboardView();
@@ -355,26 +441,26 @@ export function openBlitzMassRegisterModal(defaultSector = 'MERCEARIA') {
     <div class="modal-card" style="padding: 20px; max-width: 480px; width: 100%; box-sizing: border-box; max-height: 92vh; overflow-y: auto;">
       <div style="display: flex; align-items: center; justify-content: space-between; border-bottom: 1px solid #27272a; padding-bottom: 10px; margin-bottom: 12px;">
         <div style="display: flex; align-items: center; gap: 8px;">
-          <span style="font-size: 1.4rem;">📦</span>
+          <span style="font-size: 1.4rem;">📥</span>
           <div>
             <h3 style="font-size: 1.05rem; font-weight: 900; color: #f4f4f5; margin: 0;">
-              CADASTRAR PRODUTOS EM MASSA
+              IMPORTAR LISTA DA BLITZ
             </h3>
-            <span style="font-size: 0.72rem; color: #fbbf24; font-weight: 800; text-transform: uppercase;">Importação Rápida para Blitz</span>
+            <span style="font-size: 0.72rem; color: #fbbf24; font-weight: 800; text-transform: uppercase;">Colar Texto ou Carregar Arquivo</span>
           </div>
         </div>
         <button type="button" id="btn-close-blitz-mass" class="btn-icon-control" style="font-size: 1rem; width: 32px; height: 32px;">✕</button>
       </div>
 
       <div style="background: rgba(245, 158, 11, 0.1); border: 1px solid rgba(245, 158, 11, 0.35); border-radius: 8px; padding: 10px; margin-bottom: 12px; font-size: 0.76rem; color: #fef08a; line-height: 1.4;">
-        💡 <strong>Como funciona:</strong> Cole a lista com código e nome dos produtos. Todos serão vinculados ao setor selecionado com status inicial <strong>"LISTA DE BLITZ"</strong>. Não exige foto, quantidade, validade ou corredor.
+        💡 <strong>Como funciona:</strong> Cole a lista com código e descrição (e opcionalmente validade), ou suba um arquivo <strong>.txt</strong> ou <strong>.csv</strong>. O sistema pesquisa automaticamente o histórico de conferências de cada item!
       </div>
 
       <form id="form-blitz-mass-register" style="display: flex; flex-direction: column; gap: 12px;">
         <!-- Escolha do Setor -->
         <div>
           <label for="select-blitz-mass-sector" style="font-size: 0.76rem; font-weight: 800; color: #a1a1aa; text-transform: uppercase; margin-bottom: 4px; display: block;">
-            🏷️ Selecionar Setor:
+            🏷️ Setor da Blitz:
           </label>
           <select id="select-blitz-mass-sector" class="form-input" style="height: 46px; font-weight: 800; color: #fbbf24; background: #18181c; border-color: #f59e0b;">
             ${SETORS.map(s => `<option value="${s}" ${s === activeSector ? 'selected' : ''}>${s}</option>`).join('')}
@@ -382,11 +468,19 @@ export function openBlitzMassRegisterModal(defaultSector = 'MERCEARIA') {
           </select>
         </div>
 
+        <!-- Botão Carregar Arquivo .txt / .csv -->
+        <div>
+          <input type="file" id="input-file-blitz-list" accept=".txt,.csv" class="hidden" />
+          <button type="button" id="btn-upload-blitz-file" class="btn-secondary" style="width: 100%; height: 42px; font-size: 0.84rem; font-weight: 800; justify-content: center; gap: 6px;">
+            <span>📁</span> <span>Carregar arquivo (.txt ou .csv)</span>
+          </button>
+        </div>
+
         <!-- Textarea para colar a lista -->
         <div>
           <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 4px;">
             <label for="textarea-blitz-mass-input" style="font-size: 0.76rem; font-weight: 800; color: #a1a1aa; text-transform: uppercase;">
-              📋 Campo para colar vários produtos:
+              📋 Ou cole o texto aqui:
             </label>
             <span id="badge-blitz-mass-counter" style="font-size: 0.72rem; color: #10b981; font-weight: 800;">
               0 produtos detectados
@@ -396,7 +490,7 @@ export function openBlitzMassRegisterModal(defaultSector = 'MERCEARIA') {
             id="textarea-blitz-mass-input"
             class="form-input"
             rows="8"
-            placeholder="7896036000717 - EXTRATO TOMATE ELEFANTE POTE 300G&#10;7896036000809 - EXTRATO TOMATE ELEFANTE TP 275G&#10;789517206284 - EXTRATO TOMATE FUGINI SACHE"
+            placeholder="7896036000717 - EXTRATO TOMATE ELEFANTE POTE 300G&#10;7896036000809 - EXTRATO TOMATE ELEFANTE TP 275G 15/10/2025&#10;789517206284 - EXTRATO TOMATE FUGINI SACHE"
             style="font-family: monospace; font-size: 0.84rem; line-height: 1.4; padding: 10px; background: #121214; border-color: #3f3f46; resize: vertical;"
           ></textarea>
         </div>
@@ -406,7 +500,7 @@ export function openBlitzMassRegisterModal(defaultSector = 'MERCEARIA') {
             Cancelar
           </button>
           <button type="submit" id="btn-submit-blitz-mass" class="btn-primary" style="flex: 1.4; height: 46px; justify-content: center; background: #10b981; color: #022c22; font-weight: 900; font-size: 0.95rem;">
-            💾 SALVAR PRODUTOS
+            💾 IMPORTAR LISTA
           </button>
         </div>
       </form>
@@ -422,9 +516,29 @@ export function openBlitzMassRegisterModal(defaultSector = 'MERCEARIA') {
 
   const textarea = document.getElementById('textarea-blitz-mass-input');
   const counterBadge = document.getElementById('badge-blitz-mass-counter');
+  const fileInput = document.getElementById('input-file-blitz-list');
+
+  document.getElementById('btn-upload-blitz-file')?.addEventListener('click', () => {
+    fileInput?.click();
+  });
+
+  fileInput?.addEventListener('change', (e) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = (evt) => {
+      const text = evt.target.result || '';
+      if (textarea) {
+        textarea.value = text;
+        updateCount();
+      }
+      showToast(`Arquivo "${file.name}" carregado!`, 'success', 1500);
+    };
+    reader.readAsText(file);
+  });
 
   const updateCount = () => {
-    const parsed = parseBulkProductText(textarea?.value || '');
+    const parsed = parseBlitzInputList(textarea?.value || '');
     if (counterBadge) {
       counterBadge.textContent = `${parsed.length} produto${parsed.length === 1 ? '' : 's'} detectado${parsed.length === 1 ? '' : 's'}`;
       counterBadge.style.color = parsed.length > 0 ? '#10b981' : '#a1a1aa';
@@ -439,35 +553,126 @@ export function openBlitzMassRegisterModal(defaultSector = 'MERCEARIA') {
     const raw = textarea?.value?.trim() || '';
     const chosenSector = document.getElementById('select-blitz-mass-sector')?.value || 'MERCEARIA';
 
-    const items = parseBulkProductText(raw);
-    if (items.length === 0) {
+    const parsedItems = parseBlitzInputList(raw);
+    if (parsedItems.length === 0) {
       showToast('Cole ao menos um código de barras com descrição', 'warning');
       textarea?.focus();
       return;
     }
 
     try {
-      showToast(`Cadastrando ${items.length} produtos em ${chosenSector}...`, 'sync', 1000);
-      const res = await bulkRegisterBlitzProducts({ items, sector: chosenSector });
+      showToast(`Importando ${parsedItems.length} produtos...`, 'sync', 1200);
+
+      // 1. Cadastra/atualiza produtos no catálogo
+      const bulkPayload = parsedItems.map(p => ({
+        barcode: p.ean,
+        name: p.descricao,
+        sector: chosenSector,
+        corridor: p.corredor || '',
+        expiration_date: p.data_validade || null
+      }));
+      await bulkRegisterBlitzProducts({ items: bulkPayload, sector: chosenSector });
+
+      // 2. Se houver Blitz ativa, vincula como itens oficiais da Blitz com histórico automático
+      let importStats = null;
+      if (currentActiveBlitzSession) {
+        importStats = await importBlitzItemsWithHistory(currentActiveBlitzSession.id, parsedItems, chosenSector);
+      }
+
       closeModal();
-      showToast(`✓ ${res.total} produtos processados (${res.created} novos, ${res.updated} vinculados)`, 'success', 2500);
       triggerSyncNow().catch(err => console.warn('Sync error:', err));
 
-      if (currentActiveBlitzSession) {
-        openBlitzDashboardView();
+      if (importStats && currentActiveBlitzSession) {
+        showBlitzImportSummaryModal(importStats);
+      } else {
+        showToast(`✓ ${parsedItems.length} produtos importados!`, 'success', 2000);
+        if (currentActiveBlitzSession) {
+          openBlitzDashboardView();
+        }
       }
     } catch (err) {
-      console.error('Erro ao cadastrar produtos em massa:', err);
-      showToast('Erro ao cadastrar produtos em massa', 'warning');
+      console.error('Erro ao importar lista da blitz:', err);
+      showToast('Erro ao importar lista da blitz', 'warning');
     }
   });
 }
 
+/**
+ * Resumo da Importação com Estatísticas (Item 17)
+ */
+export function showBlitzImportSummaryModal(stats) {
+  let modal = document.getElementById('modal-blitz-import-summary');
+  if (!modal) {
+    modal = document.createElement('div');
+    modal.id = 'modal-blitz-import-summary';
+    modal.className = 'custom-modal';
+    document.body.appendChild(modal);
+  }
+
+  modal.innerHTML = `
+    <div class="modal-backdrop" id="modal-import-summary-backdrop"></div>
+    <div class="modal-card" style="padding: 20px; max-width: 440px; width: 100%; box-sizing: border-box; text-align: center;">
+      <div style="font-size: 2.2rem; margin-bottom: 6px;">📊</div>
+      <h3 style="font-size: 1.15rem; font-weight: 900; color: #10b981; margin: 0 0 6px 0;">
+        LISTA IMPORTADA COM SUCESSO!
+      </h3>
+      <div style="font-size: 0.84rem; color: #a1a1aa; margin-bottom: 16px;">
+        O sistema analisou o histórico de todas as conferências anteriores:
+      </div>
+
+      <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-bottom: 16px; text-align: left;">
+        <div style="background: #18181c; border: 1px solid #27272a; border-radius: 8px; padding: 10px;">
+          <div style="font-size: 0.68rem; color: #a1a1aa; font-weight: 800;">TOTAL DE ITENS</div>
+          <div style="font-size: 1.3rem; font-weight: 900; color: #f4f4f5;">${stats.total}</div>
+        </div>
+        <div style="background: #18181c; border: 1px solid #27272a; border-radius: 8px; padding: 10px;">
+          <div style="font-size: 0.68rem; color: #34d399; font-weight: 800;">PRODUTOS NOVOS</div>
+          <div style="font-size: 1.3rem; font-weight: 900; color: #34d399;">${stats.novos}</div>
+        </div>
+        <div style="background: #18181c; border: 1px solid #27272a; border-radius: 8px; padding: 10px;">
+          <div style="font-size: 0.68rem; color: #38bdf8; font-weight: 800;">JÁ VERIFICADOS</div>
+          <div style="font-size: 1.3rem; font-weight: 900; color: #38bdf8;">${stats.jaVerificados}</div>
+        </div>
+        <div style="background: #18181c; border: 1px solid #27272a; border-radius: 8px; padding: 10px;">
+          <div style="font-size: 0.68rem; color: #fbbf24; font-weight: 800;">TINHAM QUANTIDADE</div>
+          <div style="font-size: 1.3rem; font-weight: 900; color: #fbbf24;">${stats.tinhamQuantidade}</div>
+        </div>
+        <div style="background: #18181c; border: 1px solid #27272a; border-radius: 8px; padding: 10px; grid-column: span 2;">
+          <div style="font-size: 0.68rem; color: #f87171; font-weight: 800;">TINHAM ZERO NA ÚLTIMA BLITZ</div>
+          <div style="font-size: 1.3rem; font-weight: 900; color: #f87171;">${stats.tinhamZero}</div>
+        </div>
+      </div>
+
+      <div style="display: flex; flex-direction: column; gap: 8px;">
+        <button type="button" id="btn-start-scanning-after-import" class="btn-primary" style="height: 52px; font-size: 1.05rem; font-weight: 900; justify-content: center; background: #10b981; color: #022c22; border-radius: 10px;">
+          📷 COMEÇAR CONFERÊNCIA (BIPAR)
+        </button>
+        <button type="button" id="btn-view-dash-after-import" class="btn-secondary" style="height: 44px; font-size: 0.88rem; font-weight: 800; justify-content: center;">
+          📋 Ver Painel da Blitz
+        </button>
+      </div>
+    </div>
+  `;
+
+  modal.classList.add('open');
+  const closeModal = () => modal.classList.remove('open');
+
+  document.getElementById('modal-import-summary-backdrop')?.addEventListener('click', closeModal);
+  document.getElementById('btn-start-scanning-after-import')?.addEventListener('click', () => {
+    closeModal();
+    startBlitzScanning();
+  });
+  document.getElementById('btn-view-dash-after-import')?.addEventListener('click', () => {
+    closeModal();
+    openBlitzDashboardView();
+  });
+}
+
 // ====================================================
-// 2. INÍCIO DA BLITZ (COM MÚLTIPLAS DATAS PROCURADAS)
+// 2. INÍCIO DA BLITZ (PERÍODO, SETOR E LISTAGEM EM MASSA)
 // ====================================================
 
-// Modal para configurar o Tipo/Setor e as Datas Procuradas da Blitz
+// Modal para configurar o Período, Setor e a Listagem em Massa de Produtos
 function showStartBlitzModal() {
   let modal = document.getElementById('modal-start-blitz');
   if (!modal) {
@@ -487,85 +692,126 @@ function showStartBlitzModal() {
 
   modal.innerHTML = `
     <div class="modal-backdrop" id="modal-start-blitz-backdrop"></div>
-    <div class="modal-card" style="padding: 20px; max-width: 450px; width: 100%; box-sizing: border-box; max-height: 92vh; overflow-y: auto;">
+    <div class="modal-card" style="padding: 20px; max-width: 480px; width: 100%; box-sizing: border-box; max-height: 92vh; overflow-y: auto;">
       <div style="display: flex; align-items: center; justify-content: space-between; border-bottom: 1px solid #27272a; padding-bottom: 10px; margin-bottom: 12px;">
         <div style="display: flex; align-items: center; gap: 8px;">
           <span style="font-size: 1.4rem;">📋</span>
-          <h3 style="font-size: 1.1rem; font-weight: 900; color: #f4f4f5; margin: 0;">
-            INICIAR BLITZ
-          </h3>
+          <div>
+            <h3 style="font-size: 1.1rem; font-weight: 900; color: #f4f4f5; margin: 0;">
+              INICIAR BLITZ
+            </h3>
+            <span style="font-size: 0.72rem; color: #fbbf24; font-weight: 800;">PERÍODO, SETOR E LISTA DE PRODUTOS</span>
+          </div>
         </div>
         <button type="button" id="btn-close-start-blitz" class="btn-icon-control" style="font-size: 1rem; width: 30px; height: 30px;">✕</button>
       </div>
 
-      <!-- BOTÃO CADASTRO EM MASSA DIRETO NO INÍCIO -->
-      <button type="button" id="btn-modal-open-mass-register" class="btn-secondary" style="width: 100%; height: 44px; margin-bottom: 14px; font-weight: 800; font-size: 0.84rem; justify-content: center; color: #10b981; border-color: rgba(16, 185, 129, 0.4); background: rgba(16, 185, 129, 0.08); display: flex; align-items: center; gap: 6px;">
-        <span>📦 + CADASTRAR PRODUTOS EM MASSA</span>
-      </button>
-
       <form id="form-start-blitz-period" style="display: flex; flex-direction: column; gap: 14px;">
         
-        <!-- 1. ESCOLHA DO TIPO / SETOR DA BLITZ -->
-        <div class="form-group" style="margin-bottom: 0;">
-          <label style="font-size: 0.76rem; font-weight: 800; color: #a1a1aa; text-transform: uppercase; display: flex; align-items: center; justify-content: space-between; margin-bottom: 6px;">
-            <span>🏷️ Escolha o Setor da Blitz:</span>
-            <span style="font-size: 0.68rem; color: #fbbf24; text-transform: none; font-weight: 800;">Foco exclusivo</span>
+        <!-- 1. PERÍODO DA BLITZ (DATA INICIAL E DATA FINAL) -->
+        <div style="background: #18181c; border: 1px solid #27272a; border-radius: 10px; padding: 12px;">
+          <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px;">
+            <label style="font-size: 0.78rem; font-weight: 900; color: #fbbf24; text-transform: uppercase; margin: 0;">
+              📅 Período da Blitz:
+            </label>
+            <span style="font-size: 0.7rem; color: #a1a1aa; font-weight: 700;">
+              Ex: 08/09/2026 até 10/10/2026
+            </span>
+          </div>
+
+          <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px;">
+            <div>
+              <label for="input-blitz-start-date" style="font-size: 0.7rem; color: #a1a1aa; font-weight: 800; display: block; margin-bottom: 4px;">
+                Data Inicial:
+              </label>
+              <input
+                type="date"
+                id="input-blitz-start-date"
+                class="form-input"
+                value="${defaultStartISO}"
+                required
+                style="height: 42px; font-size: 0.95rem; font-weight: 800; color-scheme: dark; border-color: #f59e0b;"
+              />
+            </div>
+            <div>
+              <label for="input-blitz-end-date" style="font-size: 0.7rem; color: #a1a1aa; font-weight: 800; display: block; margin-bottom: 4px;">
+                Data Final:
+              </label>
+              <input
+                type="date"
+                id="input-blitz-end-date"
+                class="form-input"
+                value="${defaultEndISO}"
+                required
+                style="height: 42px; font-size: 0.95rem; font-weight: 800; color-scheme: dark; border-color: #f59e0b;"
+              />
+            </div>
+          </div>
+
+          <div style="margin-top: 8px; font-size: 0.76rem; color: #fbbf24; background: rgba(245, 158, 11, 0.1); border: 1px solid rgba(245, 158, 11, 0.25); border-radius: 6px; padding: 6px 10px; font-weight: 800; text-align: center;">
+            Período: <strong id="preview-blitz-period-label">${formatDateBR(defaultStartISO)} até ${formatDateBR(defaultEndISO)}</strong>
+          </div>
+        </div>
+
+        <!-- 2. SETOR DA BLITZ -->
+        <div style="background: #18181c; border: 1px solid #27272a; border-radius: 10px; padding: 12px;">
+          <label style="font-size: 0.78rem; font-weight: 900; color: #fbbf24; text-transform: uppercase; display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px;">
+            <span>🏷️ Setor da Blitz:</span>
+            <span style="font-size: 0.68rem; color: #a1a1aa; text-transform: none; font-weight: 700;">Selecione o setor</span>
           </label>
 
-          <!-- Chips Principais: Mercearia e Bebidas destacados -->
+          <!-- Chips Principais -->
           <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 6px; margin-bottom: 6px;">
-            <button type="button" class="btn-start-blitz-chip btn-secondary active" data-sector="MERCEARIA" style="padding: 10px 8px; font-size: 0.84rem; font-weight: 900; justify-content: center; border-color: #f59e0b; background: rgba(245, 158, 11, 0.2); color: #fbbf24;">
+            <button type="button" class="btn-start-blitz-chip btn-secondary active" data-sector="MERCEARIA" style="padding: 9px 8px; font-size: 0.82rem; font-weight: 900; justify-content: center; border-color: #f59e0b; background: rgba(245, 158, 11, 0.2); color: #fbbf24;">
               🥫 MERCEARIA
             </button>
-            <button type="button" class="btn-start-blitz-chip btn-secondary" data-sector="BEBIDAS" style="padding: 10px 8px; font-size: 0.84rem; font-weight: 900; justify-content: center;">
+            <button type="button" class="btn-start-blitz-chip btn-secondary" data-sector="BEBIDAS" style="padding: 9px 8px; font-size: 0.82rem; font-weight: 900; justify-content: center;">
               🍾 BEBIDAS
             </button>
           </div>
 
           <!-- Outros Setores -->
           <div style="display: grid; grid-template-columns: repeat(4, 1fr); gap: 4px; margin-bottom: 8px;">
-            <button type="button" class="btn-start-blitz-chip btn-secondary" data-sector="LIMPEZA" style="padding: 6px 2px; font-size: 0.72rem; font-weight: 700; justify-content: center;">🧹 Limpeza</button>
-            <button type="button" class="btn-start-blitz-chip btn-secondary" data-sector="PERFUMARIA" style="padding: 6px 2px; font-size: 0.72rem; font-weight: 700; justify-content: center;">🧴 Perfumaria</button>
-            <button type="button" class="btn-start-blitz-chip btn-secondary" data-sector="ALHO" style="padding: 6px 2px; font-size: 0.72rem; font-weight: 700; justify-content: center;">🧄 Alho</button>
-            <button type="button" class="btn-start-blitz-chip btn-secondary" data-sector="BAZAR" style="padding: 6px 2px; font-size: 0.72rem; font-weight: 700; justify-content: center;">📦 Bazar</button>
+            <button type="button" class="btn-start-blitz-chip btn-secondary" data-sector="LIMPEZA" style="padding: 6px 2px; font-size: 0.7rem; font-weight: 700; justify-content: center;">🧹 Limpeza</button>
+            <button type="button" class="btn-start-blitz-chip btn-secondary" data-sector="PERFUMARIA" style="padding: 6px 2px; font-size: 0.7rem; font-weight: 700; justify-content: center;">🧴 Perfumaria</button>
+            <button type="button" class="btn-start-blitz-chip btn-secondary" data-sector="ALHO" style="padding: 6px 2px; font-size: 0.7rem; font-weight: 700; justify-content: center;">🧄 Alho</button>
+            <button type="button" class="btn-start-blitz-chip btn-secondary" data-sector="BAZAR" style="padding: 6px 2px; font-size: 0.7rem; font-weight: 700; justify-content: center;">📦 Bazar</button>
           </div>
 
-          <select id="select-blitz-start-sector" class="form-input" style="font-weight: 800; height: 42px; color: #fbbf24; background: #18181c; border-color: #3f3f46;">
+          <select id="select-blitz-start-sector" class="form-input" style="font-weight: 800; height: 40px; color: #fbbf24; background: #121214; border-color: #3f3f46;">
             ${SETORS.map(s => `<option value="${s}" ${s === 'MERCEARIA' ? 'selected' : ''}>SETOR: ${s}</option>`).join('')}
             <option value="GERAL">TODOS OS SETORES (GERAL)</option>
           </select>
         </div>
 
-        <!-- 2. QUAIS DATAS VOCÊ ESTÁ PROCURANDO? -->
-        <div class="form-group" style="margin-bottom: 0; background: rgba(245, 158, 11, 0.06); border: 1px solid rgba(245, 158, 11, 0.25); border-radius: 10px; padding: 12px;">
-          <label style="font-size: 0.78rem; font-weight: 900; color: #fbbf24; text-transform: uppercase; display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px;">
-            <span>📅 Quais datas você está procurando?</span>
-            <span style="font-size: 0.68rem; color: #a1a1aa; font-weight: 700;">Uma ou várias datas</span>
-          </label>
-
-          <div id="blitz-target-dates-container" style="display: flex; flex-direction: column; gap: 8px;">
-            <!-- Linhas de datas geradas dinamicamente -->
+        <!-- 3. PRODUTOS QUE SERÃO CONFERIDOS (LISTAGEM EM MASSA) -->
+        <div style="background: rgba(16, 185, 129, 0.05); border: 1px solid rgba(16, 185, 129, 0.35); border-radius: 10px; padding: 12px;">
+          <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 6px;">
+            <label for="textarea-start-blitz-mass" style="font-size: 0.78rem; font-weight: 900; color: #34d399; text-transform: uppercase;">
+              📦 Produtos a Conferir (Listagem em Massa):
+            </label>
+            <span id="badge-start-blitz-counter" style="font-size: 0.72rem; color: #10b981; font-weight: 800;">
+              0 produtos detectados
+            </span>
           </div>
 
-          <button type="button" id="btn-add-blitz-target-date" class="btn-secondary" style="margin-top: 8px; width: 100%; height: 40px; font-size: 0.82rem; font-weight: 900; justify-content: center; border-color: rgba(245, 158, 11, 0.4); color: #fbbf24; background: rgba(245, 158, 11, 0.1);">
-            ➕ ADICIONAR DATA
-          </button>
-        </div>
+          <p style="font-size: 0.72rem; color: #a1a1aa; margin: 0 0 8px 0; line-height: 1.3;">
+            Cole a listagem dos produtos (código e descrição). Ao enviar, a Blitz inicia imediatamente com todos os itens carregados!
+          </p>
 
-        <!-- 3. PERÍODO GERAL (Data Inicial e Data Final) -->
-        <div style="background: #18181c; border: 1px solid #27272a; border-radius: 8px; padding: 10px;">
-          <div style="font-size: 0.72rem; color: #a1a1aa; font-weight: 800; text-transform: uppercase; margin-bottom: 6px;">
-            Intervalo Global da Blitz:
-          </div>
-          <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 8px;">
-            <div>
-              <label for="input-blitz-start-date" style="font-size: 0.68rem; color: #71717a; font-weight: 700; display: block; margin-bottom: 2px;">Data Inicial:</label>
-              <input type="date" id="input-blitz-start-date" class="form-input" value="${defaultStartISO}" style="height: 38px; font-size: 0.88rem; font-weight: 800; color-scheme: dark;" />
-            </div>
-            <div>
-              <label for="input-blitz-end-date" style="font-size: 0.68rem; color: #71717a; font-weight: 700; display: block; margin-bottom: 2px;">Data Final:</label>
-              <input type="date" id="input-blitz-end-date" class="form-input" value="${defaultEndISO}" style="height: 38px; font-size: 0.88rem; font-weight: 800; color-scheme: dark;" />
-            </div>
+          <textarea
+            id="textarea-start-blitz-mass"
+            class="form-input"
+            rows="6"
+            placeholder="Cole aqui os produtos para a Blitz...&#10;&#10;Exemplo:&#10;7898530843159 - PACOCA DADINHO ZERO QUADRADA 144G - 28/09/26&#10;7897115108805 - PACOCA ROLHA AMENDUPA 1,005KG - 30/09/26&#10;7896065201079 - ACUCAR CRISTAL CORURIPE 5KG - 09/10/26"
+            style="font-family: monospace; font-size: 0.82rem; line-height: 1.4; padding: 10px; background: #121214; border-color: #3f3f46; resize: vertical;"
+          ></textarea>
+
+          <div style="margin-top: 8px;">
+            <input type="file" id="input-file-start-blitz" accept=".txt,.csv" class="hidden" />
+            <button type="button" id="btn-upload-start-blitz-file" class="btn-secondary" style="width: 100%; height: 38px; font-size: 0.8rem; font-weight: 800; justify-content: center; gap: 6px; border-color: #3f3f46; background: #18181c; color: #d4d4d8;">
+              <span>📁</span> <span>Carregar arquivo pronto (.txt ou .csv)</span>
+            </button>
           </div>
         </div>
 
@@ -573,7 +819,7 @@ function showStartBlitzModal() {
           <button type="button" id="btn-cancel-start-blitz" class="btn-secondary" style="flex: 1; height: 48px; justify-content: center; font-weight: 800;">
             Cancelar
           </button>
-          <button type="submit" id="btn-confirm-start-blitz" class="btn-primary" style="flex: 1.4; height: 48px; justify-content: center; background: #f59e0b; color: #000; font-weight: 900; font-size: 1rem;">
+          <button type="submit" id="btn-confirm-start-blitz" class="btn-primary" style="flex: 1.5; height: 48px; justify-content: center; background: #10b981; color: #022c22; font-weight: 900; font-size: 1rem;">
             🚀 INICIAR BLITZ
           </button>
         </div>
@@ -583,88 +829,56 @@ function showStartBlitzModal() {
 
   modal.classList.add('open');
 
-  const datesContainer = document.getElementById('blitz-target-dates-container');
-  const btnAddDate = document.getElementById('btn-add-blitz-target-date');
   const startInput = document.getElementById('input-blitz-start-date');
   const endInput = document.getElementById('input-blitz-end-date');
   const sectorSelect = document.getElementById('select-blitz-start-sector');
   const sectorChips = modal.querySelectorAll('.btn-start-blitz-chip');
+  const textarea = document.getElementById('textarea-start-blitz-mass');
+  const counterBadge = document.getElementById('badge-start-blitz-counter');
+  const fileInput = document.getElementById('input-file-start-blitz');
+  const previewLabel = document.getElementById('preview-blitz-period-label');
 
-  // Adiciona linhas de data
-  const renderDateRow = (initialValue = '') => {
-    const rowId = `date-row-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`;
-    const row = document.createElement('div');
-    row.id = rowId;
-    row.className = 'blitz-target-date-row';
-    row.style.cssText = 'display: flex; align-items: center; gap: 6px;';
-
-    const index = datesContainer ? datesContainer.children.length + 1 : 1;
-
-    row.innerHTML = `
-      <span style="font-size: 0.78rem; font-weight: 800; color: #fbbf24; min-width: 58px;">Data ${index}:</span>
-      <input
-        type="date"
-        class="form-input blitz-target-date-input"
-        value="${initialValue}"
-        required
-        style="height: 44px; font-size: 1rem; font-weight: 800; color-scheme: dark; flex: 1; border-color: #f59e0b;"
-      />
-      <button type="button" class="btn-remove-target-date btn-icon-control" title="Remover data" style="width: 38px; height: 44px; color: #ef4444; border-color: #3f3f46; font-size: 0.9rem;">
-        ✕
-      </button>
-    `;
-
-    row.querySelector('.btn-remove-target-date')?.addEventListener('click', () => {
-      if (datesContainer && datesContainer.children.length > 1) {
-        row.remove();
-        syncGlobalDatesFromTargets();
-        updateDateRowLabels();
-      } else {
-        showToast('Mantenha ao menos uma data procurada', 'info', 1000);
-      }
-    });
-
-    row.querySelector('.blitz-target-date-input')?.addEventListener('change', () => {
-      syncGlobalDatesFromTargets();
-    });
-
-    datesContainer?.appendChild(row);
-    updateDateRowLabels();
-  };
-
-  const updateDateRowLabels = () => {
-    if (!datesContainer) return;
-    const rows = datesContainer.querySelectorAll('.blitz-target-date-row');
-    rows.forEach((r, idx) => {
-      const span = r.querySelector('span');
-      if (span) span.textContent = `Data ${idx + 1}:`;
-    });
-  };
-
-  const syncGlobalDatesFromTargets = () => {
-    if (!datesContainer) return;
-    const dateInputs = Array.from(datesContainer.querySelectorAll('.blitz-target-date-input'))
-      .map(i => i.value)
-      .filter(Boolean)
-      .sort();
-    if (dateInputs.length > 0) {
-      if (startInput) startInput.value = dateInputs[0];
-      if (endInput) endInput.value = dateInputs[dateInputs.length - 1];
+  // Atualiza o resumo visual do período
+  const updatePeriodPreview = () => {
+    const s = startInput?.value;
+    const e = endInput?.value;
+    if (previewLabel && s && e) {
+      previewLabel.textContent = `${formatDateBR(s)} até ${formatDateBR(e)}`;
     }
   };
+  startInput?.addEventListener('change', updatePeriodPreview);
+  endInput?.addEventListener('change', updatePeriodPreview);
 
-  // Inicializa com uma primeira data
-  renderDateRow(defaultStartISO);
+  // Contador de produtos em tempo real na textarea
+  const updateCount = () => {
+    const eDate = endInput?.value || defaultEndISO;
+    const parsed = parseBlitzInputList(textarea?.value || '', eDate);
+    if (counterBadge) {
+      counterBadge.textContent = `${parsed.length} produto${parsed.length === 1 ? '' : 's'} detectado${parsed.length === 1 ? '' : 's'}`;
+      counterBadge.style.color = parsed.length > 0 ? '#10b981' : '#a1a1aa';
+    }
+  };
+  textarea?.addEventListener('input', updateCount);
+  textarea?.addEventListener('paste', () => setTimeout(updateCount, 50));
 
-  btnAddDate?.addEventListener('click', () => {
-    renderDateRow('');
+  // Carregamento de arquivo .txt ou .csv
+  document.getElementById('btn-upload-start-blitz-file')?.addEventListener('click', () => {
+    fileInput?.click();
   });
 
-  // Botão de cadastro em massa no topo
-  document.getElementById('btn-modal-open-mass-register')?.addEventListener('click', () => {
-    const sec = sectorSelect?.value || 'MERCEARIA';
-    closeModal();
-    openBlitzMassRegisterModal(sec);
+  fileInput?.addEventListener('change', (e) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = (evt) => {
+      const text = evt.target.result || '';
+      if (textarea) {
+        textarea.value = text;
+        updateCount();
+      }
+      showToast(`Arquivo "${file.name}" carregado!`, 'success', 1500);
+    };
+    reader.readAsText(file);
   });
 
   // Interação dos chips de setor
@@ -710,51 +924,45 @@ function showStartBlitzModal() {
   document.getElementById('form-start-blitz-period')?.addEventListener('submit', async (e) => {
     e.preventDefault();
     
-    // Coleta todas as datas procuradas
-    const targetDateInputs = Array.from(modal.querySelectorAll('.blitz-target-date-input'))
-      .map(inp => inp.value?.trim())
-      .filter(Boolean);
+    const sDateRaw = startInput?.value?.trim();
+    const eDateRaw = endInput?.value?.trim();
+    const chosenSector = sectorSelect?.value?.trim() || 'MERCEARIA';
+    const rawList = textarea?.value?.trim() || '';
 
-    if (targetDateInputs.length === 0) {
-      showToast('Adicione ao menos uma data procurada', 'warning');
+    if (!sDateRaw || !eDateRaw) {
+      showToast('Informe o período da Blitz (Data Inicial e Final)', 'warning');
       return;
     }
 
-    const sDateRaw = startInput?.value?.trim() || targetDateInputs[0];
-    const eDateRaw = endInput?.value?.trim() || targetDateInputs[targetDateInputs.length - 1];
-    const chosenSector = sectorSelect?.value?.trim() || 'MERCEARIA';
+    const parsedItems = parseBlitzInputList(rawList, eDateRaw);
+    if (parsedItems.length === 0) {
+      showToast('Cole a listagem dos produtos a serem conferidos para iniciar', 'warning');
+      textarea?.focus();
+      return;
+    }
 
     closeModal();
-    await startNewBlitzSession(sDateRaw, eDateRaw, chosenSector, targetDateInputs);
+    await startNewBlitzSession(sDateRaw, eDateRaw, chosenSector, [sDateRaw, eDateRaw], parsedItems);
   });
 }
 
-// Inicia a sessão com as datas e setor informados e abre a tela da Blitz
-export async function startNewBlitzSession(startDateInput, endDateInput, sectorInput = 'MERCEARIA', targetDates = []) {
+// Inicia a sessão com período, setor e listagem em massa informados e abre a tela da Blitz
+export async function startNewBlitzSession(startDateInput, endDateInput, sectorInput = 'MERCEARIA', targetDates = [], parsedItems = []) {
   try {
     let sDateISO = startDateInput ? (startDateInput.includes('/') ? parseDateBRtoISO(startDateInput) : String(startDateInput).trim().split('T')[0]) : null;
     let eDateISO = endDateInput ? (endDateInput.includes('/') ? parseDateBRtoISO(endDateInput) : String(endDateInput).trim().split('T')[0]) : null;
 
     if (!sDateISO || !eDateISO) {
-      if (targetDates && targetDates.length > 0) {
-        const sorted = [...targetDates].sort();
-        sDateISO = sorted[0];
-        eDateISO = sorted[sorted.length - 1];
-      } else {
-        const today = new Date();
-        const next30 = new Date();
-        next30.setDate(next30.getDate() + 30);
-        sDateISO = sDateISO || today.toISOString().split('T')[0];
-        eDateISO = eDateISO || next30.toISOString().split('T')[0];
-      }
+      const today = new Date();
+      const next30 = new Date();
+      next30.setDate(next30.getDate() + 30);
+      sDateISO = sDateISO || today.toISOString().split('T')[0];
+      eDateISO = eDateISO || next30.toISOString().split('T')[0];
     }
 
-    const cleanTargetDates = (targetDates && targetDates.length > 0) ? targetDates : [sDateISO];
+    const cleanTargetDates = [sDateISO, eDateISO];
     const chosenSector = (sectorInput || 'MERCEARIA').trim().toUpperCase();
-    
-    let periodLabel = cleanTargetDates.length > 1
-      ? cleanTargetDates.map(d => formatDateBR(d)).join(', ')
-      : `${formatDateBR(sDateISO)} → ${formatDateBR(eDateISO)}`;
+    const periodLabel = `${formatDateBR(sDateISO)} até ${formatDateBR(eDateISO)}`;
 
     showToast(`Iniciando Blitz [${chosenSector}]...`, 'sync', 1000);
 
@@ -768,8 +976,31 @@ export async function startNewBlitzSession(startDateInput, endDateInput, sectorI
       user_name: 'Ana Luiza'
     });
 
+    // Se foram fornecidos produtos na listagem em massa:
+    let importStats = null;
+    if (Array.isArray(parsedItems) && parsedItems.length > 0) {
+      // 1. Cadastra/atualiza produtos no catálogo
+      const bulkPayload = parsedItems.map(p => ({
+        barcode: p.ean,
+        name: p.nome,
+        sector: chosenSector,
+        corridor: p.corredor || '',
+        expiration_date: p.dataValidade || null
+      }));
+      await bulkRegisterBlitzProducts({ items: bulkPayload, sector: chosenSector });
+
+      // 2. Vincula à Blitz com histórico de conferências
+      importStats = await importBlitzItemsWithHistory(session.id, parsedItems, chosenSector);
+    }
+
     setActiveBlitz(session);
-    showToast(`✓ Blitz iniciada: Setor ${chosenSector}`, 'success', 2000);
+
+    if (parsedItems && parsedItems.length > 0) {
+      showToast(`✓ Blitz iniciada com ${parsedItems.length} produtos carregados!`, 'success', 2500);
+    } else {
+      showToast(`✓ Blitz iniciada: Setor ${chosenSector}`, 'success', 2000);
+    }
+
     triggerSyncNow().catch(e => console.warn('Sync error:', e));
 
     // Abre diretamente a tela principal da Blitz
@@ -1044,33 +1275,20 @@ export async function openBlitzDashboardView() {
   const session = await getBlitzSessionById(currentActiveBlitzSession.id) || currentActiveBlitzSession;
   currentActiveBlitzSession = session;
 
+  // Auto-reparo prévio para normalizar quaisquer itens antigos gravados com undefined
+  try {
+    await repairBlitzSessionData(session.id);
+  } catch (_) {}
+
+  // Busca métricas completas de ritmo, progresso e conferência
+  const metrics = await calculateBlitzPaceMetrics(session.id);
   const items = await getBlitzItemsBySessionId(session.id);
-  const allProducts = await getAllProducts();
-  const currentSector = session.sector || 'MERCEARIA';
-  const sectorProducts = allProducts.filter(p => !currentSector || currentSector === 'GERAL' || p.sector === currentSector);
-  const verifiedProducts = sectorProducts.filter(p => p.status === 'VERIFICADO');
-  const pendingBlitzProducts = sectorProducts.filter(p => p.status === 'LISTA_DE_BLITZ' || (!p.status && p.status !== 'VERIFICADO'));
-
-  // Estatísticas: Somente o necessário (Conferidos, TEM, NÃO TEM)
-  let countTem = 0;
-  let countNaoTem = 0;
-  let totalUnits = 0;
-
-  items.forEach(it => {
-    if (it.result === 'TEM') {
-      countTem++;
-      totalUnits += Number(it.total_quantity) || 0;
-    } else {
-      countNaoTem++;
-    }
-  });
+  const sessionListItems = await getSessionBlitzItems(session.id);
 
   let periodLabel = session.period_label;
   if (!periodLabel || periodLabel.includes('--/--/----') || periodLabel === 'Geral') {
-    if (session.target_dates && session.target_dates.length > 1) {
-      periodLabel = session.target_dates.map(d => formatDateBR(d)).join(', ');
-    } else if (session.start_date && session.end_date) {
-      periodLabel = `${formatDateBR(session.start_date)} → ${formatDateBR(session.end_date)}`;
+    if (session.start_date && session.end_date) {
+      periodLabel = `${formatDateBR(session.start_date)} até ${formatDateBR(session.end_date)}`;
     }
   }
   const hasValidPeriod = Boolean(periodLabel && !periodLabel.includes('--/--/----') && periodLabel !== 'Geral');
@@ -1078,96 +1296,91 @@ export async function openBlitzDashboardView() {
   const container = document.getElementById('view-blitz-dashboard');
   if (!container) return;
 
+  const totalCount = sessionListItems.length > 0 ? sessionListItems.length : metrics.total;
+  const startTimeFormatted = session.started_at
+    ? new Date(session.started_at).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })
+    : '--:--';
+
   container.innerHTML = `
-    <header class="app-top-bar">
-      <button type="button" id="btn-blitz-dash-back" class="btn-back">← Início</button>
-      <span class="top-bar-title">BLITZ ATIVA</span>
-      <button type="button" id="btn-blitz-dash-history" class="btn-icon-link" style="color: #38bdf8;">Histórico</button>
+    <header class="app-top-bar" style="background: #121216; border-bottom: 1px solid #27272e; padding: 12px 16px; display: flex; align-items: center; justify-content: space-between;">
+      <button type="button" id="btn-blitz-dash-back" class="btn-back" style="color: #a1a1aa; font-weight: 700; font-size: 0.88rem; background: none; border: none; cursor: pointer;">
+        ← Início
+      </button>
+      <div style="display: flex; align-items: center; gap: 6px;">
+        <span style="display: inline-block; width: 8px; height: 8px; border-radius: 9999px; background: #10b981; box-shadow: 0 0 8px #10b981;"></span>
+        <span class="top-bar-title" style="font-weight: 900; font-size: 0.95rem; color: #f4f4f5; letter-spacing: 0.5px;">BLITZ ATIVA</span>
+      </div>
+      <button type="button" id="btn-blitz-dash-history" class="btn-icon-link" style="color: #38bdf8; font-weight: 800; font-size: 0.82rem; background: none; border: none; cursor: pointer;">
+        📋 Histórico
+      </button>
     </header>
 
-    <main style="padding: 12px; max-width: 600px; margin: 0 auto; display: flex; flex-direction: column; gap: 12px;">
+    <main style="padding: 14px 12px 40px; max-width: 640px; margin: 0 auto; display: flex; flex-direction: column; gap: 12px;">
       
-      <!-- Card da Blitz Ativa -->
-      <div style="background: #121214; border: 1px solid rgba(245, 158, 11, 0.45); border-radius: 12px; padding: 14px; display: flex; flex-direction: column; gap: 8px;">
-        <div style="display: flex; align-items: center; justify-content: space-between;">
-          <div style="display: flex; align-items: center; gap: 8px;">
-            <span style="font-size: 1.6rem;">🔍</span>
-            <div>
-              <div style="display: flex; align-items: center; gap: 6px; flex-wrap: wrap;">
-                <h2 style="font-size: 1.05rem; font-weight: 900; color: #f4f4f5; margin: 0;">
-                  BLITZ ATIVA
-                </h2>
-                <span style="background: rgba(245, 158, 11, 0.25); border: 1px solid #f59e0b; color: #fbbf24; font-size: 0.72rem; font-weight: 900; padding: 2px 8px; border-radius: 6px; text-transform: uppercase;">
-                  🏷️ ${session.sector || 'GERAL'}
-                </span>
-              </div>
-              <div style="font-size: 0.88rem; font-weight: 800; color: #fbbf24; margin-top: 4px; display: flex; align-items: center; gap: 8px; flex-wrap: wrap;">
-                <span>📅 Período: <strong id="blitz-active-period-text" style="cursor: pointer; text-decoration: underline dotted;">${hasValidPeriod ? periodLabel : '<span style="color: #ef4444; font-weight: 900;">Não Definido</span>'}</strong></span>
-                <button type="button" id="btn-edit-active-blitz-period" style="background: rgba(245, 158, 11, 0.15); border: 1px solid rgba(245, 158, 11, 0.4); color: #fbbf24; padding: 2px 8px; border-radius: 6px; font-size: 0.72rem; font-weight: 800; cursor: pointer; display: inline-flex; align-items: center; gap: 4px;">
-                  ✏️ Configurar
-                </button>
-              </div>
-
-              <!-- DATAS PROCURADAS DESTACADAS -->
-              ${(session.target_dates && session.target_dates.length > 0) ? `
-                <div style="font-size: 0.82rem; font-weight: 800; color: #10b981; margin-top: 4px; display: flex; align-items: center; gap: 6px; flex-wrap: wrap;">
-                  <span>🎯 Datas Procuradas:</span>
-                  <div style="display: flex; flex-wrap: wrap; gap: 4px;">
-                    ${session.target_dates.map(d => `
-                      <span style="background: rgba(16, 185, 129, 0.2); border: 1px solid #10b981; color: #a7f3d0; padding: 1px 6px; border-radius: 4px; font-weight: 900; font-size: 0.76rem;">
-                        ${formatDateBR(d)}
-                      </span>
-                    `).join('')}
-                  </div>
-                </div>
-              ` : ''}
+      <!-- Card Principal da Blitz Ativa -->
+      <div style="background: #141418; border: 1px solid rgba(245, 158, 11, 0.35); border-radius: 14px; padding: 16px; display: flex; flex-direction: column; gap: 12px; box-shadow: 0 4px 20px rgba(0, 0, 0, 0.4);">
+        <div style="display: flex; align-items: flex-start; justify-content: space-between; gap: 8px;">
+          <div>
+            <div style="display: flex; align-items: center; gap: 8px; flex-wrap: wrap;">
+              <h2 style="font-size: 1.12rem; font-weight: 900; color: #ffffff; margin: 0; letter-spacing: 0.3px;">
+                BLITZ OFICIAL
+              </h2>
+              <span style="background: rgba(245, 158, 11, 0.2); border: 1px solid rgba(245, 158, 11, 0.5); color: #fbbf24; font-size: 0.72rem; font-weight: 900; padding: 3px 8px; border-radius: 6px; text-transform: uppercase;">
+                🏷️ ${session.sector || 'GERAL'}
+              </span>
+            </div>
+            <div style="font-size: 0.84rem; font-weight: 800; color: #fbbf24; margin-top: 6px; display: flex; align-items: center; gap: 8px; flex-wrap: wrap;">
+              <span>📅 Período: <strong id="blitz-active-period-text" style="cursor: pointer; text-decoration: underline dotted;">${hasValidPeriod ? periodLabel : '<span style="color: #ef4444; font-weight: 900;">Não Definido</span>'}</strong></span>
+              <button type="button" id="btn-edit-active-blitz-period" style="background: rgba(245, 158, 11, 0.15); border: 1px solid rgba(245, 158, 11, 0.4); color: #fbbf24; padding: 3px 8px; border-radius: 6px; font-size: 0.72rem; font-weight: 800; cursor: pointer; display: inline-flex; align-items: center; gap: 4px;">
+                ✏️ Alterar
+              </button>
             </div>
           </div>
-          <span style="background: rgba(245, 158, 11, 0.18); color: #fbbf24; border: 1px solid rgba(245, 158, 11, 0.4); font-size: 0.7rem; font-weight: 900; padding: 3px 8px; border-radius: 9999px;">
-            EM ANDAMENTO
+          <span style="background: rgba(16, 185, 129, 0.15); color: #34d399; border: 1px solid rgba(16, 185, 129, 0.35); font-size: 0.7rem; font-weight: 900; padding: 3px 8px; border-radius: 9999px; white-space: nowrap;">
+            ● EM ANDAMENTO
           </span>
         </div>
 
-        <div style="font-size: 0.72rem; color: #a1a1aa; border-top: 1px dashed #27272a; padding-top: 6px; margin-top: 4px;">
-          Responsável: <strong>${session.user_name || 'Ana Luiza'}</strong> • Iniciada às ${new Date(session.started_at).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}
+        <!-- Barra de Progresso Visual e Ritmo da Conferência -->
+        <div style="background: #1a1a20; border: 1px solid #27272f; border-radius: 10px; padding: 12px; display: flex; flex-direction: column; gap: 8px;">
+          <div style="display: flex; justify-content: space-between; align-items: center; font-size: 0.8rem; font-weight: 800;">
+            <span style="color: #f4f4f5;">Progresso: <strong style="color: #38bdf8;">${metrics.conferidos}</strong> de <strong>${totalCount}</strong> itens</span>
+            <span style="background: rgba(16, 185, 129, 0.2); color: #34d399; padding: 2px 8px; border-radius: 6px; font-size: 0.84rem; font-weight: 900;">${metrics.percentual}%</span>
+          </div>
+          <div style="height: 9px; border-radius: 6px; background: #27272f; overflow: hidden; width: 100%;">
+            <div style="height: 100%; width: ${metrics.percentual}%; background: linear-gradient(90deg, #10b981, #34d399); transition: width 0.3s; border-radius: 6px;"></div>
+          </div>
+          <div style="display: flex; justify-content: space-between; align-items: center; font-size: 0.74rem; color: #a1a1aa; flex-wrap: wrap; gap: 6px;">
+            <span>⚡ Ritmo: <strong style="color: ${metrics.ritmoCor};">${metrics.ritmoLabel}</strong> (${metrics.itensPorHora} itens/h)</span>
+            <span>Previsão: <strong style="color: #fef08a;">${metrics.previsaoTermino}</strong></span>
+          </div>
+        </div>
+
+        <div style="font-size: 0.74rem; color: #71717a; border-top: 1px solid #22222a; padding-top: 8px; display: flex; justify-content: space-between; align-items: center;">
+          <span>Auditora: <strong style="color: #d4d4d8;">${session.user_name || 'Ana Luiza'}</strong></span>
+          <span>Iniciada às <strong style="color: #d4d4d8;">${startTimeFormatted}</strong></span>
         </div>
       </div>
 
-      <!-- BOTÃO DE CADASTRO EM MASSA DIRETO NO DASHBOARD -->
-      <button type="button" id="btn-blitz-dash-mass-register" class="btn-secondary" style="
-        height: 44px;
-        font-size: 0.86rem;
-        font-weight: 800;
-        justify-content: center;
-        color: #10b981;
-        border-color: rgba(16, 185, 129, 0.4);
-        background: rgba(16, 185, 129, 0.08);
-        border-radius: 10px;
-        display: flex;
-        align-items: center;
-        gap: 6px;
-        cursor: pointer;
-      ">
-        <span>📦 + CADASTRAR PRODUTOS EM MASSA</span>
-      </button>
-
-      <!-- BOTÃO GIGANTE: 📷 BIPAR PRODUTO -->
+      <!-- BOTÃO GIGANTE: BIPAR PRODUTO -->
       <button type="button" id="btn-blitz-big-scan" class="btn-primary" style="
-        height: 60px;
-        font-size: 1.15rem;
+        height: 56px;
+        font-size: 1.05rem;
         font-weight: 900;
         justify-content: center;
-        background: #10b981;
-        color: #022c22;
+        background: linear-gradient(135deg, #10b981 0%, #059669 100%);
+        color: #ffffff;
+        border: none;
         border-radius: 12px;
-        box-shadow: 0 4px 16px rgba(16, 185, 129, 0.3);
+        box-shadow: 0 4px 16px rgba(16, 185, 129, 0.35);
         display: flex;
         align-items: center;
         gap: 10px;
         cursor: pointer;
+        letter-spacing: 0.3px;
       ">
-        <span style="font-size: 1.5rem;">📷</span>
-        <span>BIPAR PRODUTO</span>
+        <span style="font-size: 1.4rem;">📷</span>
+        <span>BIPAR COM A CÂMERA</span>
       </button>
 
       <!-- Entrada Manual Rápida de Código de Barras -->
@@ -1176,77 +1389,106 @@ export async function openBlitzDashboardView() {
           type="text"
           id="input-blitz-manual-code"
           class="form-input"
-          placeholder="Ou digite o código de barras..."
-          style="height: 42px; font-size: 0.88rem; flex: 1;"
+          placeholder="🏷️ Digitar código de barras ou bipar leitor..."
+          style="height: 44px; font-size: 0.88rem; flex: 1; background: #18181d; border: 1px solid #33333d; border-radius: 8px; color: #f4f4f5; padding: 0 12px;"
         />
-        <button type="submit" class="btn-secondary" style="height: 42px; font-weight: 800; font-size: 0.82rem; padding: 0 14px; white-space: nowrap;">
+        <button type="submit" class="btn-secondary" style="height: 44px; font-weight: 900; font-size: 0.84rem; padding: 0 16px; white-space: nowrap; background: #272730; border: 1px solid #3f3f4e; color: #fbbf24; border-radius: 8px; cursor: pointer;">
           ➔ Bipar
         </button>
       </form>
 
-      <!-- CONTADORES DA BLITZ: Rápido e Focado -->
-      <div style="display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 8px;">
-        <div style="background: #18181c; border: 1px solid #27272a; border-radius: 10px; padding: 10px; text-align: center;">
-          <div style="font-size: 0.7rem; color: #a1a1aa; font-weight: 800; text-transform: uppercase;">Conferidos</div>
-          <div style="font-size: 1.45rem; font-weight: 900; color: #f4f4f5; margin-top: 2px;">
-            ${items.length}
-          </div>
-        </div>
-
-        <div style="background: rgba(16, 185, 129, 0.1); border: 1px solid rgba(16, 185, 129, 0.35); border-radius: 10px; padding: 10px; text-align: center;">
-          <div style="font-size: 0.7rem; color: #10b981; font-weight: 800; text-transform: uppercase;">🟢 TEM</div>
-          <div style="font-size: 1.45rem; font-weight: 900; color: #10b981; margin-top: 2px;">
-            ${countTem}
-          </div>
-          <div style="font-size: 0.65rem; color: #a7f3d0; font-weight: 700;">
-            ${formatNumber(totalUnits)} un
-          </div>
-        </div>
-
-        <div style="background: rgba(239, 68, 68, 0.1); border: 1px solid rgba(239, 68, 68, 0.35); border-radius: 10px; padding: 10px; text-align: center;">
-          <div style="font-size: 0.7rem; color: #ef4444; font-weight: 800; text-transform: uppercase;">🔴 NÃO TEM</div>
-          <div style="font-size: 1.45rem; font-weight: 900; color: #ef4444; margin-top: 2px;">
-            ${countNaoTem}
-          </div>
-          <div style="font-size: 0.65rem; color: #fca5a5; font-weight: 700;">
-            0 un
-          </div>
-        </div>
+      <!-- PAINEL DE AÇÕES COMPLEMENTARES -->
+      <div style="display: grid; grid-template-columns: repeat(4, 1fr); gap: 6px;">
+        <button type="button" id="btn-blitz-dash-mass-register" class="btn-secondary" style="height: 42px; font-size: 0.74rem; font-weight: 800; justify-content: center; padding: 0 4px; text-align: center; background: #191920; border: 1px solid #2d2d38; color: #e4e4e7; border-radius: 8px; cursor: pointer;">
+          📥 + Produtos
+        </button>
+        <button type="button" id="btn-blitz-dash-exported" class="btn-secondary" style="height: 42px; font-size: 0.74rem; font-weight: 800; justify-content: center; padding: 0 4px; text-align: center; background: #191920; border: 1px solid #2d2d38; color: #e4e4e7; border-radius: 8px; cursor: pointer;">
+          📋 Exportados
+        </button>
+        <button type="button" id="btn-blitz-dash-what-changed" class="btn-secondary" style="height: 42px; font-size: 0.74rem; font-weight: 800; justify-content: center; padding: 0 4px; text-align: center; color: #fbbf24; background: #191920; border: 1px solid rgba(245, 158, 11, 0.4); border-radius: 8px; cursor: pointer;">
+          📊 O Que Mudou
+        </button>
+        <button type="button" id="btn-blitz-export-wa-active" class="btn-secondary" style="height: 42px; font-size: 0.74rem; font-weight: 800; justify-content: center; padding: 0 4px; text-align: center; color: #25d366; background: #191920; border: 1px solid rgba(37, 211, 102, 0.4); border-radius: 8px; cursor: pointer;">
+          💬 WhatsApp
+        </button>
       </div>
 
-      <!-- STATUS DOS PRODUTOS DO SETOR (VERIFICADOS vs NA LISTA) -->
-      <div style="background: #18181c; border: 1px solid #27272a; border-radius: 10px; padding: 10px; display: grid; grid-template-columns: 1fr 1fr; gap: 8px; text-align: center;">
-        <div style="background: rgba(16, 185, 129, 0.08); border: 1px solid rgba(16, 185, 129, 0.25); border-radius: 8px; padding: 8px;">
-          <div style="font-size: 0.68rem; color: #10b981; font-weight: 800; text-transform: uppercase;">✅ VERIFICADOS</div>
-          <div style="font-size: 1.25rem; font-weight: 900; color: #10b981;">${verifiedProducts.length}</div>
+      <!-- CONTADORES DA BLITZ -->
+      <div style="display: grid; grid-template-columns: repeat(4, 1fr); gap: 6px;">
+        <div style="background: #16161b; border: 1px solid #272730; border-radius: 10px; padding: 10px 4px; text-align: center;">
+          <div style="font-size: 0.65rem; color: #a1a1aa; font-weight: 800; text-transform: uppercase;">Total</div>
+          <div id="stat-total-count" style="font-size: 1.3rem; font-weight: 900; color: #f4f4f5; margin-top: 2px;">
+            ${totalCount}
+          </div>
         </div>
-        <div style="background: rgba(245, 158, 11, 0.08); border: 1px solid rgba(245, 158, 11, 0.25); border-radius: 8px; padding: 8px;">
-          <div style="font-size: 0.68rem; color: #fbbf24; font-weight: 800; text-transform: uppercase;">📋 NA LISTA DE BLITZ</div>
-          <div style="font-size: 1.25rem; font-weight: 900; color: #fbbf24;">${pendingBlitzProducts.length}</div>
+
+        <div style="background: rgba(16, 185, 129, 0.08); border: 1px solid rgba(16, 185, 129, 0.35); border-radius: 10px; padding: 10px 4px; text-align: center;">
+          <div style="font-size: 0.65rem; color: #34d399; font-weight: 800; text-transform: uppercase;">🟢 Com Qtd</div>
+          <div id="stat-com-qtd" style="font-size: 1.3rem; font-weight: 900; color: #34d399; margin-top: 2px;">
+            ${metrics.comQtd}
+          </div>
+        </div>
+
+        <div style="background: rgba(239, 68, 68, 0.08); border: 1px solid rgba(239, 68, 68, 0.35); border-radius: 10px; padding: 10px 4px; text-align: center;">
+          <div style="font-size: 0.65rem; color: #f87171; font-weight: 800; text-transform: uppercase;">🔴 Zerados</div>
+          <div id="stat-zerados" style="font-size: 1.3rem; font-weight: 900; color: #f87171; margin-top: 2px;">
+            ${metrics.zerados}
+          </div>
+        </div>
+
+        <div style="background: rgba(245, 158, 11, 0.08); border: 1px solid rgba(245, 158, 11, 0.35); border-radius: 10px; padding: 10px 4px; text-align: center;">
+          <div style="font-size: 0.65rem; color: #fbbf24; font-weight: 800; text-transform: uppercase;">⏳ Pendentes</div>
+          <div id="stat-pendentes" style="font-size: 1.3rem; font-weight: 900; color: #fbbf24; margin-top: 2px;">
+            ${metrics.pendentes}
+          </div>
         </div>
       </div>
 
       <!-- BOTÃO PARA FINALIZAR BLITZ -->
-      <div style="display: flex; gap: 8px;">
-        <button type="button" id="btn-blitz-export-wa-active" class="btn-secondary" style="flex: 1; height: 44px; font-size: 0.85rem; font-weight: 800; justify-content: center; color: #25d366; border-color: rgba(37, 211, 102, 0.4);">
-          💬 WhatsApp
+      <button type="button" id="btn-blitz-finish-session" class="btn-primary" style="height: 48px; font-size: 0.95rem; font-weight: 900; justify-content: center; background: #f59e0b; color: #000000; border: none; border-radius: 10px; cursor: pointer; box-shadow: 0 4px 14px rgba(245, 158, 11, 0.25);">
+        🏁 FINALIZAR BLITZ
+      </button>
+
+      <!-- ABAS DE FILTRAGEM -->
+      <div style="display: flex; gap: 6px; overflow-x: auto; padding-bottom: 2px; margin-top: 4px; scrollbar-width: none;">
+        <button type="button" class="btn-filter-pill active" data-filter="TODOS" style="padding: 7px 14px; font-size: 0.76rem; font-weight: 800; border-radius: 9999px; background: #f59e0b; color: #000; border: none; white-space: nowrap; cursor: pointer;">
+          Todos (${totalCount})
         </button>
-        <button type="button" id="btn-blitz-finish-session" class="btn-primary" style="flex: 1.2; height: 44px; font-size: 0.88rem; font-weight: 900; justify-content: center; background: #f59e0b; color: #000;">
-          ✅ FINALIZAR BLITZ
+        <button type="button" class="btn-filter-pill" data-filter="PENDENTES" style="padding: 7px 14px; font-size: 0.76rem; font-weight: 800; border-radius: 9999px; background: #272730; color: #a1a1aa; border: none; white-space: nowrap; cursor: pointer;">
+          ⏳ Pendentes (${metrics.pendentes})
+        </button>
+        <button type="button" class="btn-filter-pill" data-filter="CONFERIDOS" style="padding: 7px 14px; font-size: 0.76rem; font-weight: 800; border-radius: 9999px; background: #272730; color: #a1a1aa; border: none; white-space: nowrap; cursor: pointer;">
+          ✅ Conferidos (${metrics.conferidos})
+        </button>
+        <button type="button" class="btn-filter-pill" data-filter="COM_QTD" style="padding: 7px 14px; font-size: 0.76rem; font-weight: 800; border-radius: 9999px; background: #272730; color: #a1a1aa; border: none; white-space: nowrap; cursor: pointer;">
+          🟢 Com Qtd (${metrics.comQtd})
+        </button>
+        <button type="button" class="btn-filter-pill" data-filter="ZERADOS" style="padding: 7px 14px; font-size: 0.76rem; font-weight: 800; border-radius: 9999px; background: #272730; color: #a1a1aa; border: none; white-space: nowrap; cursor: pointer;">
+          🔴 Zerados (${metrics.zerados})
         </button>
       </div>
 
-      <!-- LISTA DE ITENS CONFERIDOS -->
-      <div style="background: #121214; border: 1px solid #27272a; border-radius: 10px; padding: 12px;">
-        <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 10px;">
-          <span style="font-size: 0.8rem; font-weight: 900; color: #f4f4f5; text-transform: uppercase;">
-            ÚLTIMOS CONFERIDOS (${items.length})
+      <!-- LISTA DE ITENS DA BLITZ -->
+      <div style="background: #141418; border: 1px solid #27272e; border-radius: 12px; padding: 14px; display: flex; flex-direction: column; gap: 10px;">
+        <div style="display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 4px;">
+          <span id="blitz-list-header-title" style="font-size: 0.82rem; font-weight: 900; color: #ffffff; text-transform: uppercase; letter-spacing: 0.5px;">
+            ITENS DA BLITZ (${totalCount})
           </span>
-          <span style="font-size: 0.7rem; color: #71717a;">Ordem decrescente</span>
+          <span style="font-size: 0.72rem; color: #a1a1aa;">Toque para bipar ou editar</span>
         </div>
 
-        <div id="blitz-session-items-list" style="display: flex; flex-direction: column; gap: 6px; max-height: 400px; overflow-y: auto;">
-          <!-- Itens renderizados -->
+        <!-- Barra de busca rápida em tempo real -->
+        <div style="position: relative;">
+          <input
+            type="text"
+            id="input-search-blitz-list"
+            placeholder="🔍 Buscar por nome ou código de barras..."
+            style="width: 100%; height: 38px; background: #1c1c22; border: 1px solid #33333e; border-radius: 8px; padding: 0 12px; font-size: 0.82rem; color: #f4f4f5; outline: none;"
+          />
+        </div>
+
+        <div id="blitz-session-items-list" style="display: flex; flex-direction: column; gap: 8px; max-height: 520px; overflow-y: auto; padding-right: 2px;">
+          <!-- Itens renderizados dinamicamente -->
         </div>
       </div>
 
@@ -1273,6 +1515,14 @@ export async function openBlitzDashboardView() {
 
   document.getElementById('btn-blitz-dash-mass-register')?.addEventListener('click', () => {
     openBlitzMassRegisterModal(session.sector || 'MERCEARIA');
+  });
+
+  document.getElementById('btn-blitz-dash-exported')?.addEventListener('click', () => {
+    openExportedBlitzProductsModal(session.id);
+  });
+
+  document.getElementById('btn-blitz-dash-what-changed')?.addEventListener('click', () => {
+    openWhatChangedModal(session.id);
   });
 
   document.getElementById('btn-edit-active-blitz-period')?.addEventListener('click', () => {
@@ -1311,82 +1561,295 @@ export async function openBlitzDashboardView() {
     await cancelActiveBlitzSession(session.id);
   });
 
-  await renderBlitzSessionItemsList(items);
+  // Alternância de filtros
+  let currentFilter = 'TODOS';
+  let currentSearch = '';
+
+  const searchInput = document.getElementById('input-search-blitz-list');
+  searchInput?.addEventListener('input', async (e) => {
+    currentSearch = e.target.value || '';
+    await renderBlitzSessionItemsListFiltered(session, currentFilter, currentSearch);
+  });
+
+  container.querySelectorAll('.btn-filter-pill').forEach(btn => {
+    btn.addEventListener('click', async () => {
+      container.querySelectorAll('.btn-filter-pill').forEach(b => {
+        b.style.background = '#272730';
+        b.style.color = '#a1a1aa';
+      });
+      btn.style.background = '#f59e0b';
+      btn.style.color = '#000';
+      currentFilter = btn.getAttribute('data-filter') || 'TODOS';
+      await renderBlitzSessionItemsListFiltered(session, currentFilter, currentSearch);
+    });
+  });
+
+  await renderBlitzSessionItemsListFiltered(session, currentFilter, currentSearch);
 }
 
-// Renderiza a lista simplificada de itens da Blitz
-async function renderBlitzSessionItemsList(items) {
+// Renderiza a lista filtrada de itens da Blitz
+async function renderBlitzSessionItemsListFiltered(session, filter = 'TODOS', searchQuery = '') {
   const container = document.getElementById('blitz-session-items-list');
   if (!container) return;
 
-  if (items.length === 0) {
+  const sessionItems = await getSessionBlitzItems(session.id);
+  const conferences = await getBlitzItemsBySessionId(session.id);
+
+  // Mapeia conferências por (barcode + data) para conferência rápida
+  const confMap = new Map();
+  conferences.forEach(c => {
+    const b = String(c.barcode || c.ean || '').trim();
+    const d = String(c.requested_expiration_date || c.data_validade || '').trim();
+    if (b) {
+      confMap.set(`${b}_${d}`, c);
+      confMap.set(b, c);
+    }
+  });
+
+  let itemsToRender = [];
+
+  if (sessionItems.length > 0) {
+    itemsToRender = sessionItems.map(it => {
+      const barcode = String(it.ean || it.barcode || '').trim();
+      const expDate = String(it.data_validade || it.requested_expiration_date || '').trim();
+      const conf = confMap.get(`${barcode}_${expDate}`) || confMap.get(barcode);
+
+      const isConferred = it.status === 'CONFERIDO' || it.status === 'conferido' || Boolean(conf) || Boolean(it.conferido_em);
+      const qty = conf ? (Number(conf.total_quantity) || 0) : (Number(it.total_quantity || it.quantidade) || 0);
+      const result = conf ? conf.result : (qty > 0 ? 'TEM' : (isConferred ? 'NAO_TEM' : 'PENDENTE'));
+
+      return {
+        ...it,
+        ean: barcode,
+        barcode: barcode,
+        data_validade: expDate,
+        requested_expiration_date: expDate,
+        isConferred,
+        total_quantity: qty,
+        result,
+        conferencia_id: conf?.id || it.id,
+        checked_at: conf?.checked_at || it.conferido_em || it.created_at
+      };
+    });
+  } else {
+    itemsToRender = conferences.map(c => {
+      const barcode = String(c.barcode || c.ean || '').trim();
+      const expDate = String(c.requested_expiration_date || c.data_validade || '').trim();
+      return {
+        ...c,
+        ean: barcode,
+        barcode: barcode,
+        isConferred: true,
+        data_validade: expDate,
+        requested_expiration_date: expDate,
+        total_quantity: Number(c.total_quantity) || 0,
+        result: c.result || ((Number(c.total_quantity) || 0) > 0 ? 'TEM' : 'NAO_TEM')
+      };
+    });
+  }
+
+  // Aplica filtro selecionado
+  if (filter === 'PENDENTES') {
+    itemsToRender = itemsToRender.filter(i => !i.isConferred);
+  } else if (filter === 'CONFERIDOS') {
+    itemsToRender = itemsToRender.filter(i => i.isConferred);
+  } else if (filter === 'COM_QTD') {
+    itemsToRender = itemsToRender.filter(i => i.isConferred && (Number(i.total_quantity) || 0) > 0);
+  } else if (filter === 'ZERADOS') {
+    itemsToRender = itemsToRender.filter(i => i.isConferred && (Number(i.total_quantity) || 0) === 0);
+  }
+
+  // Aplica busca por texto em tempo real (se houver)
+  const cleanSearch = String(searchQuery || '').trim().toLowerCase();
+  if (cleanSearch) {
+    itemsToRender = itemsToRender.filter(it => {
+      const b = String(it.barcode || it.ean || '').toLowerCase();
+      const n = String(it.nome_produto || it.nome || it.descricao || it.name || '').toLowerCase();
+      return b.includes(cleanSearch) || n.includes(cleanSearch);
+    });
+  }
+
+  const headerTitle = document.getElementById('blitz-list-header-title');
+  if (headerTitle) {
+    headerTitle.textContent = `ITENS DA BLITZ (${itemsToRender.length}${cleanSearch ? ' filtrados' : ''})`;
+  }
+
+  if (itemsToRender.length === 0) {
     container.innerHTML = `
-      <div style="text-align: center; padding: 24px; color: #71717a; font-size: 0.84rem;">
-        Nenhum produto conferido ainda.<br>
-        Clique em <strong>📷 BIPAR PRODUTO</strong> para iniciar.
+      <div style="text-align: center; padding: 32px 16px; color: #71717a; font-size: 0.85rem; background: #17171c; border-radius: 8px; border: 1px dashed #272730;">
+        ${cleanSearch
+          ? `Nenhum produto encontrado para "<strong>${cleanSearch}</strong>".`
+          : `Nenhum item nesta categoria.<br>Toque em <strong>📷 BIPAR COM A CÂMERA</strong> para conferir.`}
       </div>
     `;
     return;
   }
 
-  // Ordena os itens mais recentes primeiro
-  const sorted = [...items].sort((a, b) => new Date(b.checked_at || 0) - new Date(a.checked_at || 0));
+  // Ordena itens: pendentes primeiro para facilitar conferência rápida
+  itemsToRender.sort((a, b) => {
+    if (a.isConferred !== b.isConferred) {
+      return a.isConferred ? 1 : -1;
+    }
+    return new Date(b.checked_at || 0) - new Date(a.checked_at || 0);
+  });
 
-  const htmlPromises = sorted.map(async (item) => {
-    const isTem = item.result === 'TEM';
-    const prod = item.product_id ? await getProductById(item.product_id) : null;
-    const name = prod?.name || (item.product_id ? `Produto Cadastrado` : `PRODUTO NÃO CADASTRADO`);
-    const dateFormatted = item.requested_expiration_date ? formatDateBR(item.requested_expiration_date) : '--/--/----';
-    const timeFormatted = item.checked_at
-      ? new Date(item.checked_at).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })
-      : '';
+  const cardsHtml = await Promise.all(itemsToRender.map(async (item) => {
+    const barcode = String(item.ean || item.barcode || '').trim();
+    const prodId = item.produto_id || item.product_id;
+
+    let prod = null;
+    if (prodId) {
+      prod = await getProductById(prodId);
+    }
+    if (!prod && barcode && barcode !== 'undefined') {
+      prod = await getProductByBarcode(barcode);
+    }
+
+    // Resolução segura e limpa do nome do produto (sem undefined)
+    let rawName = String(item.nome_produto || item.nome || item.descricao || item.name || '').trim();
+    if (rawName.includes('undefined')) {
+      rawName = '';
+    }
+
+    let name = rawName;
+    if (!name || name.startsWith('PRODUTO ')) {
+      if (prod?.name && !prod.name.includes('undefined')) {
+        name = prod.name;
+      }
+    }
+    if (!name && barcode && barcode !== 'undefined') {
+      name = `PRODUTO ${barcode}`;
+    }
+    if (!name) {
+      name = 'PRODUTO EM CONFERÊNCIA';
+    }
+
+    const expDate = item.data_validade || item.requested_expiration_date;
+    const dateFormatted = expDate ? formatDateBR(expDate) : '--/--/----';
+    const isConferred = Boolean(item.isConferred);
+    const isTem = item.result === 'TEM' || (Number(item.total_quantity) || 0) > 0;
+    const qty = Number(item.total_quantity) || 0;
+    const corridor = prod?.corridor || item.corredor || item.corridor || '';
+
+    // Smart tags de controle
+    let tagHtml = '';
+    if (item.tinha_na_blitz_anterior === true && isConferred && qty === 0) {
+      tagHtml = `<span style="font-size: 0.65rem; font-weight: 800; padding: 2px 6px; border-radius: 4px; background: rgba(239, 68, 68, 0.2); color: #fca5a5;">🔻 Zerou</span>`;
+    } else if (item.tinha_na_blitz_anterior === false && isConferred && qty > 0) {
+      tagHtml = `<span style="font-size: 0.65rem; font-weight: 800; padding: 2px 6px; border-radius: 4px; background: rgba(56, 189, 248, 0.2); color: #7dd3fc;">⚠️ Voltou a ter</span>`;
+    }
+
+    const displayBarcode = (barcode && barcode !== 'undefined') ? barcode : 'S/ CÓDIGO';
+    let photoUrl = prod?.image || prod?.photo_url || item.foto_url || item.photo_proof;
+    if (!photoUrl && (prodId || (barcode && barcode !== 'undefined'))) {
+      try {
+        const dbPhoto = await getProductPhotoFromDb(prodId, barcode);
+        if (dbPhoto) photoUrl = dbPhoto;
+      } catch (_) {}
+    }
 
     return `
-      <div style="
-        background: #18181c;
-        border: 1px solid ${isTem ? 'rgba(16, 185, 129, 0.3)' : 'rgba(239, 68, 68, 0.3)'};
-        border-radius: 8px;
-        padding: 8px 10px;
+      <div class="blitz-item-card-row" data-id="${item.id}" data-barcode="${barcode}" data-date="${expDate || ''}" data-conferred="${isConferred}" style="
+        background: #18181e;
+        border: 1px solid ${!isConferred ? '#2a2a35' : isTem ? 'rgba(16, 185, 129, 0.4)' : 'rgba(239, 68, 68, 0.4)'};
+        border-radius: 10px;
+        padding: 10px 12px;
         display: flex;
         align-items: center;
         justify-content: space-between;
-        gap: 8px;
+        gap: 12px;
+        cursor: pointer;
+        transition: transform 0.1s ease, border-color 0.2s ease, background 0.2s ease;
       ">
-        <div style="flex: 1; min-width: 0;">
-          <div style="display: flex; align-items: center; gap: 6px; margin-bottom: 2px;">
-            <span style="
-              font-size: 0.65rem;
-              font-weight: 900;
-              padding: 2px 6px;
-              border-radius: 4px;
-              background: ${isTem ? 'rgba(16, 185, 129, 0.15)' : 'rgba(239, 68, 68, 0.15)'};
-              color: ${isTem ? '#10b981' : '#ef4444'};
-            ">
-              ${isTem ? '✓ TEM' : '✕ NÃO TEM'}
-            </span>
-            <span style="font-size: 0.72rem; color: #fbbf24; font-weight: 800;">
-              Validade: ${dateFormatted}
-            </span>
+        <div style="display: flex; align-items: center; gap: 10px; flex: 1; min-width: 0;">
+          <div style="flex-shrink: 0;">
+            ${renderProductPhotoHtml(photoUrl, name, { size: 52, rounded: '8px' })}
           </div>
-          <div style="font-size: 0.84rem; font-weight: 800; color: #f4f4f5; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">
-            ${name}
-          </div>
-          <div style="font-size: 0.7rem; color: #71717a; margin-top: 1px;">
-            Cód: ${item.barcode} • às ${timeFormatted}
+          <div style="flex: 1; min-width: 0;">
+            <!-- Linha superior de status e validade -->
+            <div style="display: flex; align-items: center; gap: 6px; margin-bottom: 4px; flex-wrap: wrap;">
+              ${!isConferred ? `
+                <span style="font-size: 0.68rem; font-weight: 900; padding: 2px 7px; border-radius: 9999px; background: rgba(245, 158, 11, 0.18); color: #fbbf24; border: 1px solid rgba(245, 158, 11, 0.35);">
+                  ⏳ PENDENTE
+                </span>
+              ` : isTem ? `
+                <span style="font-size: 0.68rem; font-weight: 900; padding: 2px 7px; border-radius: 9999px; background: rgba(16, 185, 129, 0.18); color: #34d399; border: 1px solid rgba(16, 185, 129, 0.35);">
+                  ✓ TEM (${formatNumber(qty)} un)
+                </span>
+              ` : `
+                <span style="font-size: 0.68rem; font-weight: 900; padding: 2px 7px; border-radius: 9999px; background: rgba(239, 68, 68, 0.18); color: #f87171; border: 1px solid rgba(239, 68, 68, 0.35);">
+                  ✕ ZERADO
+                </span>
+              `}
+              <span style="font-size: 0.72rem; color: #fbbf24; font-weight: 800; background: #22222a; padding: 2px 7px; border-radius: 5px; border: 1px solid #333340;">
+                📅 Val: ${dateFormatted}
+              </span>
+              ${tagHtml}
+            </div>
+
+            <!-- Nome do produto com alto contraste e legibilidade -->
+            <div style="font-size: 0.92rem; font-weight: 800; color: #ffffff; line-height: 1.35; margin: 2px 0 3px 0; word-break: break-word;">
+              ${name}
+            </div>
+
+            <!-- Metadados: Código de barras e corredor -->
+            <div style="font-size: 0.72rem; color: #a1a1aa; display: flex; align-items: center; gap: 8px; flex-wrap: wrap;">
+              <span style="font-family: monospace; background: #121216; padding: 1px 6px; border-radius: 4px; border: 1px solid #282832; color: #d4d4d8;">
+                🏷️ ${displayBarcode}
+              </span>
+              ${corridor ? `<span style="color: #38bdf8; font-weight: 700;">📍 ${corridor}</span>` : ''}
+            </div>
           </div>
         </div>
 
+        <!-- Ação do lado direito: Bipar ou Editar quantidade -->
         <div style="text-align: right; flex-shrink: 0;">
-          <span style="font-size: 1.05rem; font-weight: 900; color: ${isTem ? '#10b981' : '#ef4444'};">
-            ${isTem ? `${formatNumber(item.total_quantity)} un` : '0 un'}
-          </span>
+          ${!isConferred ? `
+            <span style="font-size: 0.78rem; font-weight: 900; color: #fbbf24; background: rgba(245, 158, 11, 0.15); border: 1px solid rgba(245, 158, 11, 0.4); padding: 6px 12px; border-radius: 8px; display: inline-flex; align-items: center; gap: 4px;">
+              ⚡ Bipar ➔
+            </span>
+          ` : `
+            <span style="font-size: 0.95rem; font-weight: 900; color: ${isTem ? '#34d399' : '#f87171'}; background: ${isTem ? 'rgba(16, 185, 129, 0.12)' : 'rgba(239, 68, 68, 0.12)'}; border: 1px solid ${isTem ? 'rgba(16, 185, 129, 0.35)' : 'rgba(239, 68, 68, 0.35)'}; padding: 6px 10px; border-radius: 8px; display: inline-flex; align-items: center; gap: 4px;">
+              ${isTem ? `${formatNumber(qty)} un` : '0 un'} ✏️
+            </span>
+          `}
         </div>
       </div>
     `;
-  });
+  }));
 
-  const cards = await Promise.all(htmlPromises);
-  container.innerHTML = cards.join('');
+  container.innerHTML = cardsHtml.join('');
+
+  // Adiciona click nos cards para abrir edição rápida ou conferir
+  container.querySelectorAll('.blitz-item-card-row').forEach(row => {
+    row.addEventListener('click', async () => {
+      const barcode = row.getAttribute('data-barcode');
+      const isConferred = row.getAttribute('data-conferred') === 'true';
+      const dateISO = row.getAttribute('data-date');
+      const itemObj = itemsToRender.find(i => i.barcode === barcode && (i.data_validade === dateISO || i.requested_expiration_date === dateISO));
+
+      if (isConferred && itemObj) {
+        // Se já conferido -> abre correção auditada
+        promptCorrectBlitzItemQuantity(itemObj, session, () => {
+          renderBlitzSessionItemsListFiltered(session, filter, searchQuery);
+        });
+      } else {
+        // Se pendente -> bipa ou abre a conferência diretamente
+        if (barcode && barcode !== 'undefined') {
+          await handleBlitzBarcodeScanned(barcode);
+        } else if (itemObj) {
+          showToast('Produto sem código de barras registrado', 'warning');
+        }
+      }
+    });
+  });
+}
+
+// Renderiza a lista simplificada de itens da Blitz
+async function renderBlitzSessionItemsList(items) {
+  if (currentActiveBlitzSession) {
+    await renderBlitzSessionItemsListFiltered(currentActiveBlitzSession, 'TODOS');
+  }
 }
 
 // ----------------------------------------------------
@@ -1438,7 +1901,44 @@ export async function handleBlitzBarcodeScanned(cleanBarcode) {
     } catch (_) {}
   }
 
-  // 2. Verifica se o produto já tem corredor registrado
+  // 2. Busca itens na Blitz ativa para este código de barras
+  let blitzItems = [];
+  try {
+    const allItems = await getBlitzItens(currentActiveBlitzSession.id);
+    blitzItems = allItems.filter(it => 
+      String(it.ean).trim() === cleanBarcode ||
+      String(it.barcode || '').trim() === cleanBarcode
+    );
+  } catch (err) {
+    console.warn('Erro ao consultar itens da blitz:', err);
+  }
+
+  // SITUAÇÃO A: O produto está na lista da Blitz com UMA única data
+  if (blitzItems.length === 1) {
+    const item = blitzItems[0];
+    const targetDateISO = item.data_validade || item.requested_expiration_date;
+    routeProductCorridorAndConference(product, targetDateISO, item);
+    return true;
+  }
+
+  // SITUAÇÃO B: O produto está na lista com DUAS OU MAIS datas
+  if (blitzItems.length > 1) {
+    promptBlitzSelectMultipleDates(product, blitzItems);
+    return true;
+  }
+
+  // SITUAÇÃO C: O produto NÃO está na lista da Blitz
+  promptBlitzProductNotInList(product, cleanBarcode);
+  return true;
+}
+
+/**
+ * Roteia a verificação do corredor e prossegue para a conferência
+ */
+function routeProductCorridorAndConference(product, targetDateISO, blitzItem = null) {
+  if (!product.corridor && (blitzItem?.corredor || blitzItem?.corridor)) {
+    product.corridor = blitzItem.corredor || blitzItem.corridor;
+  }
   const rawCorridor = product.corridor ? String(product.corridor).trim() : '';
   const hasCorridor = rawCorridor !== '' &&
     rawCorridor !== 'null' &&
@@ -1446,16 +1946,232 @@ export async function handleBlitzBarcodeScanned(cleanBarcode) {
     rawCorridor !== 'Sem corredor';
 
   if (!hasCorridor) {
-    // Primeira vez que o produto exportado da blitz é verificado:
-    // Pede o corredor uma única vez, grava no banco e depois NÃO pede mais nas próximas verificações!
+    // Não tem corredor cadastrado: solicita os corredores
+    const cleanProdName = (product.name || '').replace(/PRODUTO\s+/i, 'Produto ').slice(0, 35);
+    speakText(`Produto ${cleanProdName}. Informe o corredor.`);
     promptSetProductCorridor(product, (updatedProd) => {
-      promptBlitzDateInputStep(updatedProd);
+      promptBlitzQuantityAndHistoryStep(updatedProd, targetDateISO, blitzItem);
     });
   } else {
-    // Já possui corredor gravado no produto: NÃO PEDE MAIS! Vai direto para a verificação de data
-    promptBlitzDateInputStep(product);
+    // Já tem corredor cadastrado: vai direto para a conferência sem interromper!
+    promptBlitzQuantityAndHistoryStep(product, targetDateISO, blitzItem);
   }
-  return true;
+}
+
+/**
+ * Confirmação rápida de corredor existente (1 toque para confirmar)
+ */
+export function promptConfirmCorridor(product, targetDateISO, blitzItem = null) {
+  let modal = document.getElementById('modal-blitz-confirm-corridor');
+  if (!modal) {
+    modal = document.createElement('div');
+    modal.id = 'modal-blitz-confirm-corridor';
+    modal.className = 'custom-modal';
+    document.body.appendChild(modal);
+  }
+
+  const corridorName = product.corridor || 'Corredor 1';
+  speakText(`Já tenho esse produto no ${corridorName}. Está certo?`);
+
+  modal.innerHTML = `
+    <div class="modal-backdrop" id="modal-confirm-corridor-backdrop"></div>
+    <div class="modal-card" style="padding: 20px; max-width: 420px; width: 100%; box-sizing: border-box; text-align: center;">
+      <div style="display: flex; justify-content: center; margin-bottom: 8px;">
+        ${renderProductPhotoHtml(product.image || product.photo_url || blitzItem?.foto_url, product.name, { size: 68, rounded: '10px' })}
+      </div>
+      <h3 style="font-size: 1.1rem; font-weight: 900; color: #f4f4f5; margin: 0 0 6px 0;">
+        CONFIRMAR CORREDOR
+      </h3>
+      <div style="font-size: 0.95rem; color: #f4f4f5; font-weight: 800; line-height: 1.4; margin-bottom: 12px;">
+        ${product.name}
+      </div>
+      <div style="background: rgba(16, 185, 129, 0.12); border: 1.5px solid #10b981; border-radius: 10px; padding: 14px; margin-bottom: 16px;">
+        <div style="font-size: 0.82rem; color: #a7f3d0; font-weight: 700;">Já tenho esse produto no:</div>
+        <div style="font-size: 1.4rem; font-weight: 900; color: #34d399; margin: 4px 0;">
+          ${corridorName}
+        </div>
+        <div style="font-size: 0.8rem; color: #e4e4e7;">Está certo?</div>
+      </div>
+
+      <div style="display: flex; gap: 10px;">
+        <button type="button" id="btn-alter-corridor" class="btn-secondary" style="flex: 1; height: 50px; justify-content: center; font-weight: 800; border-radius: 8px;">
+          ✏️ Alterar
+        </button>
+        <button type="button" id="btn-confirm-corridor-ok" class="btn-primary" style="flex: 1.5; height: 50px; justify-content: center; background: #10b981; color: #022c22; font-weight: 900; font-size: 1rem; border-radius: 8px;">
+          ✓ Sim, confirmar
+        </button>
+      </div>
+    </div>
+  `;
+
+  modal.classList.add('open');
+  const closeModal = () => modal.classList.remove('open');
+
+  document.getElementById('modal-confirm-corridor-backdrop')?.addEventListener('click', closeModal);
+  document.getElementById('btn-confirm-corridor-ok')?.addEventListener('click', () => {
+    triggerHaptic(30);
+    closeModal();
+    promptBlitzQuantityAndHistoryStep(product, targetDateISO, blitzItem);
+  });
+
+  document.getElementById('btn-alter-corridor')?.addEventListener('click', () => {
+    closeModal();
+    promptSetProductCorridor(product, (updatedProd) => {
+      promptBlitzQuantityAndHistoryStep(updatedProd, targetDateISO, blitzItem);
+    });
+  });
+}
+
+/**
+ * SITUAÇÃO B: Produto com 2 ou mais datas nesta Blitz
+ */
+export function promptBlitzSelectMultipleDates(product, blitzItems) {
+  let modal = document.getElementById('modal-blitz-select-multiple-dates');
+  if (!modal) {
+    modal = document.createElement('div');
+    modal.id = 'modal-blitz-select-multiple-dates';
+    modal.className = 'custom-modal';
+    document.body.appendChild(modal);
+  }
+
+  speakText(`Existem ${blitzItems.length} datas para este produto nesta Blitz. Qual validade você está conferindo agora?`);
+
+  modal.innerHTML = `
+    <div class="modal-backdrop" id="modal-select-mult-dates-backdrop"></div>
+    <div class="modal-card" style="padding: 20px; max-width: 440px; width: 100%; box-sizing: border-box;">
+      <div style="display: flex; align-items: center; justify-content: space-between; border-bottom: 1px solid #27272a; padding-bottom: 8px; margin-bottom: 12px;">
+        <h3 style="font-size: 1.05rem; font-weight: 900; color: #fbbf24; margin: 0; display: flex; align-items: center; gap: 6px;">
+          <span>📅</span> <span>ESCOLHA A VALIDADE</span>
+        </h3>
+        <button type="button" id="btn-close-mult-dates" class="btn-icon-control" style="font-size: 1rem; width: 32px; height: 32px;">✕</button>
+      </div>
+
+      <div style="background: #18181c; border: 1px solid #27272a; border-radius: 8px; padding: 10px; margin-bottom: 12px;">
+        <div style="font-size: 0.95rem; font-weight: 900; color: #f4f4f5; line-height: 1.3;">
+          ${product.name}
+        </div>
+        <div style="font-size: 0.75rem; color: #a1a1aa; margin-top: 4px;">
+          Código: <strong style="color: #fbbf24;">${product.barcode}</strong> • Setor: <strong>${product.sector || 'MERCEARIA'}</strong>
+        </div>
+      </div>
+
+      <div style="font-size: 0.84rem; color: #e4e4e7; font-weight: 700; margin-bottom: 10px;">
+        Existem <strong>${blitzItems.length} datas</strong> para este produto nesta Blitz. Qual validade você está conferindo agora?
+      </div>
+
+      <div style="display: flex; flex-direction: column; gap: 8px; max-height: 280px; overflow-y: auto; margin-bottom: 12px;">
+        ${blitzItems.map(item => {
+          const dateISO = item.data_validade || item.requested_expiration_date;
+          const isConferido = item.status === 'CONFERIDO';
+          const qty = Number(item.total_quantity != null ? item.total_quantity : item.quantidade) || 0;
+          return `
+            <button type="button" class="btn-select-blitz-date-item btn-secondary" data-date="${dateISO}" data-item-id="${item.id}" style="height: 54px; padding: 0 14px; display: flex; align-items: center; justify-content: space-between; border-radius: 8px; border-color: ${isConferido ? 'rgba(16, 185, 129, 0.4)' : '#3f3f46'};">
+              <div style="display: flex; align-items: center; gap: 8px;">
+                <span style="font-size: 1.15rem; font-weight: 900; color: #fbbf24; font-family: monospace;">
+                  ${formatDateBR(dateISO)}
+                </span>
+              </div>
+              <div>
+                ${isConferido
+                  ? `<span style="font-size: 0.74rem; font-weight: 800; background: rgba(16, 185, 129, 0.2); color: #34d399; border: 1px solid #10b981; padding: 2px 8px; border-radius: 6px;">✓ CONFERIDO (${qty} un)</span>`
+                  : `<span style="font-size: 0.74rem; font-weight: 800; background: rgba(245, 158, 11, 0.2); color: #fbbf24; border: 1px solid #f59e0b; padding: 2px 8px; border-radius: 6px;">⏳ PENDENTE</span>`
+                }
+              </div>
+            </button>
+          `;
+        }).join('')}
+      </div>
+
+      <button type="button" id="btn-cancel-mult-dates" class="btn-secondary" style="width: 100%; height: 46px; justify-content: center; font-weight: 800; border-radius: 8px;">
+        Voltar para a Câmera
+      </button>
+    </div>
+  `;
+
+  modal.classList.add('open');
+  const closeModal = () => modal.classList.remove('open');
+
+  document.getElementById('modal-select-mult-dates-backdrop')?.addEventListener('click', closeModal);
+  document.getElementById('btn-close-mult-dates')?.addEventListener('click', () => {
+    closeModal();
+    startBlitzScanning();
+  });
+  document.getElementById('btn-cancel-mult-dates')?.addEventListener('click', () => {
+    closeModal();
+    startBlitzScanning();
+  });
+
+  modal.querySelectorAll('.btn-select-blitz-date-item').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const chosenDate = btn.getAttribute('data-date');
+      const itemId = btn.getAttribute('data-item-id');
+      const chosenItem = blitzItems.find(it => it.id === itemId) || blitzItems.find(it => it.data_validade === chosenDate);
+      triggerHaptic(30);
+      closeModal();
+      routeProductCorridorAndConference(product, chosenDate, chosenItem);
+    });
+  });
+}
+
+/**
+ * SITUAÇÃO C: Produto não está na lista da Blitz atual
+ */
+export function promptBlitzProductNotInList(product, cleanBarcode) {
+  let modal = document.getElementById('modal-blitz-not-in-list');
+  if (!modal) {
+    modal = document.createElement('div');
+    modal.id = 'modal-blitz-not-in-list';
+    modal.className = 'custom-modal';
+    document.body.appendChild(modal);
+  }
+
+  speakText('Este produto não está na lista desta Blitz. Deseja incluir agora?');
+
+  modal.innerHTML = `
+    <div class="modal-backdrop" id="modal-not-in-list-backdrop"></div>
+    <div class="modal-card" style="padding: 20px; max-width: 420px; width: 100%; box-sizing: border-box; text-align: center;">
+      <div style="font-size: 2.2rem; margin-bottom: 6px;">⚠️</div>
+      <h3 style="font-size: 1.1rem; font-weight: 900; color: #fbbf24; margin: 0 0 6px 0;">
+        PRODUTO NÃO ESTÁ NA LISTA
+      </h3>
+      <div style="font-size: 0.95rem; color: #f4f4f5; font-weight: 800; line-height: 1.35; margin-bottom: 12px;">
+        ${product.name}
+      </div>
+      <div style="font-size: 0.78rem; color: #a1a1aa; margin-bottom: 16px;">
+        Código: <strong style="color: #fbbf24;">${cleanBarcode}</strong>
+      </div>
+
+      <div style="background: rgba(245, 158, 11, 0.1); border: 1px solid rgba(245, 158, 11, 0.35); border-radius: 8px; padding: 12px; margin-bottom: 16px; font-size: 0.84rem; color: #fef08a;">
+        Este produto não consta na lista importada desta Blitz.<br>
+        <strong>Deseja incluir agora?</strong>
+      </div>
+
+      <div style="display: flex; gap: 10px;">
+        <button type="button" id="btn-skip-not-in-list" class="btn-secondary" style="flex: 1; height: 50px; justify-content: center; font-weight: 800; border-radius: 8px;">
+          Não, bipar outro
+        </button>
+        <button type="button" id="btn-include-in-blitz" class="btn-primary" style="flex: 1.4; height: 50px; justify-content: center; background: #10b981; color: #022c22; font-weight: 900; font-size: 1rem; border-radius: 8px;">
+          ✓ Sim, incluir
+        </button>
+      </div>
+    </div>
+  `;
+
+  modal.classList.add('open');
+  const closeModal = () => modal.classList.remove('open');
+
+  document.getElementById('modal-not-in-list-backdrop')?.addEventListener('click', closeModal);
+  document.getElementById('btn-skip-not-in-list')?.addEventListener('click', () => {
+    closeModal();
+    startBlitzScanning();
+  });
+
+  document.getElementById('btn-include-in-blitz')?.addEventListener('click', () => {
+    triggerHaptic(30);
+    closeModal();
+    // Abre a seleção de validade para registrar o item na Blitz
+    promptBlitzDateInputStep(product);
+  });
 }
 
 /**
@@ -1490,13 +2206,18 @@ export function promptSetProductCorridor(product, onComplete) {
         Informe o corredor deste produto. Ele será gravado e <strong>não será mais solicitado</strong> nas próximas verificações.
       </div>
 
-      <div style="background: #18181c; border: 1px solid #27272a; border-radius: 8px; padding: 12px; margin-bottom: 14px;">
-        <div style="font-size: 0.95rem; font-weight: 900; color: #f4f4f5; line-height: 1.35;">
-          ➡️ ${product.name || 'PRODUTO SEM NOME'}
+      <div style="background: #18181c; border: 1px solid #27272a; border-radius: 8px; padding: 12px; margin-bottom: 14px; display: flex; align-items: center; gap: 12px;">
+        <div style="flex-shrink: 0;">
+          ${renderProductPhotoHtml(product.image || product.photo_url, product.name, { size: 52, rounded: '8px' })}
         </div>
-        <div style="font-size: 0.78rem; color: #a1a1aa; margin-top: 6px; display: flex; flex-direction: column; gap: 3px;">
-          <span>》 Código: <strong style="color: #fbbf24; font-family: monospace;">${product.barcode}</strong></span>
-          <span>》 Setor: <strong style="color: #38bdf8;">${defaultSector}</strong></span>
+        <div style="flex: 1; min-width: 0;">
+          <div style="font-size: 0.95rem; font-weight: 900; color: #f4f4f5; line-height: 1.35;">
+            ${product.name || 'PRODUTO SEM NOME'}
+          </div>
+          <div style="font-size: 0.78rem; color: #a1a1aa; margin-top: 6px; display: flex; flex-direction: column; gap: 3px;">
+            <span>》 Código: <strong style="color: #fbbf24; font-family: monospace;">${product.barcode}</strong></span>
+            <span>》 Setor: <strong style="color: #38bdf8;">${defaultSector}</strong></span>
+          </div>
         </div>
       </div>
 
@@ -1585,6 +2306,7 @@ export function promptSetProductCorridor(product, onComplete) {
       product.corridor = corridorVal;
       await saveProduct(product);
       showToast(`✓ Corredor salvo: ${corridorVal}`, 'success', 1000);
+      speakText(`Corredor ${corridorVal} salvo.`);
       triggerSyncNow().catch(err => console.warn('Sync error:', err));
     } catch (err) {
       console.warn('Erro ao salvar corredor:', err);
@@ -1627,17 +2349,22 @@ export function promptBlitzDateInputStep(product) {
     <div class="modal-card" style="padding: 20px; max-width: 440px; width: 100%; box-sizing: border-box; max-height: 92vh; overflow-y: auto;">
       
       <!-- Cabeçalho do Produto -->
-      <div style="background: #18181c; border: 1px solid #27272a; border-radius: 10px; padding: 12px; margin-bottom: 14px;">
-        <div style="font-size: 1rem; font-weight: 900; color: #f4f4f5; line-height: 1.35;">
-          ➡️ ${product.name || 'PRODUTO SEM NOME'}
+      <div style="background: #18181c; border: 1px solid #27272a; border-radius: 10px; padding: 12px; margin-bottom: 14px; display: flex; align-items: center; gap: 12px;">
+        <div style="flex-shrink: 0;">
+          ${renderProductPhotoHtml(product.image || product.photo_url, product.name, { size: 52, rounded: '8px' })}
         </div>
-        <div style="display: flex; flex-direction: column; gap: 3px; font-size: 0.78rem; color: #a1a1aa; margin-top: 6px;">
-          <div>》 Código: <strong style="color: #fbbf24; font-family: monospace;">${product.barcode}</strong></div>
-          <div style="display: flex; align-items: center; justify-content: space-between;">
-            <div>》 Setor: <strong style="color: #38bdf8;">${prodSector}</strong> | Corredor: <strong style="color: #10b981;">${prodCorridor}</strong></div>
-            <button type="button" id="btn-quick-change-corridor" style="background: none; border: none; color: #fbbf24; font-size: 0.74rem; font-weight: 700; cursor: pointer; text-decoration: underline; padding: 2px;">
-              ✏️ Alterar
-            </button>
+        <div style="flex: 1; min-width: 0;">
+          <div style="font-size: 1rem; font-weight: 900; color: #f4f4f5; line-height: 1.35;">
+            ➡️ ${product.name || 'PRODUTO SEM NOME'}
+          </div>
+          <div style="display: flex; flex-direction: column; gap: 3px; font-size: 0.78rem; color: #a1a1aa; margin-top: 6px;">
+            <div>》 Código: <strong style="color: #fbbf24; font-family: monospace;">${product.barcode}</strong></div>
+            <div style="display: flex; align-items: center; justify-content: space-between;">
+              <div>》 Setor: <strong style="color: #38bdf8;">${prodSector}</strong> | Corredor: <strong style="color: #10b981;">${prodCorridor}</strong></div>
+              <button type="button" id="btn-quick-change-corridor" style="background: none; border: none; color: #fbbf24; font-size: 0.74rem; font-weight: 700; cursor: pointer; text-decoration: underline; padding: 2px;">
+                ✏️ Alterar
+              </button>
+            </div>
           </div>
         </div>
       </div>
@@ -1704,6 +2431,8 @@ export function promptBlitzDateInputStep(product) {
       const d = btn.getAttribute('data-date');
       if (dateInput && d) {
         dateInput.value = d;
+        triggerHaptic(20);
+        speakText(`Validade ${formatDateForSpeech(d)}.`);
         modal.querySelectorAll('.btn-quick-target-date').forEach(b => {
           b.style.background = '';
           b.style.borderColor = '';
@@ -1733,6 +2462,7 @@ export function promptBlitzDateInputStep(product) {
   // AO DAR OK: Consulta o histórico da data e avisa se é a 1ª vez ou quantas tinham na anterior!
   document.getElementById('form-blitz-date-step')?.addEventListener('submit', async (e) => {
     e.preventDefault();
+    unlockAudioOnMobile();
     const chosenDateISO = dateInput?.value || defaultDateISO;
     closeModal();
     showToast('Consultando histórico da data...', 'sync', 500);
@@ -1761,21 +2491,75 @@ export async function promptBlitzQuantityAndHistoryStep(product, targetDateISO) 
   const session = currentActiveBlitzSession;
   const prodSector = product.sector || session?.sector || 'MERCEARIA';
   const prodCorridor = product.corridor || 'Corredor 1';
-  let productPhoto = product.image || '';
+  let productPhoto = product.image || product.photo_url || '';
 
-  // 1. Consulta abrangente no banco de dados sobre conferências anteriores desta data
-  let lastRecord = null;
-  try {
-    lastRecord = await getComprehensiveConferenceRecordForProductAndDate(product, targetDateISO);
-  } catch (err) {
-    console.warn('Erro ao consultar histórico:', err);
+  // Se o produto ainda não tem foto em memória, consulta a tabela de fotos
+  if (!productPhoto) {
+    try {
+      const storedPhoto = await getProductPhotoFromDb(product.id, product.barcode);
+      if (storedPhoto) {
+        productPhoto = storedPhoto;
+        product.image = storedPhoto;
+        product.photo_url = storedPhoto;
+      }
+    } catch (_) {}
   }
 
-  const isFirstTime = !lastRecord;
-  const previousQuantity = lastRecord ? (Number(lastRecord.total) || 0) : 0;
-  const previousDateStr = lastRecord ? (formatDateBR(lastRecord.date) || 'Data anterior') : '';
+  // 1. PRIMEIRO: Consulta se o produto e validade já foram conferidos NESTA BLITZ ATUAL
+  let currentBlitzRecord = null;
+  try {
+    currentBlitzRecord = await getCurrentBlitzConferenceRecord({
+      currentBlitzId: session?.id,
+      barcode: product.barcode,
+      productId: product.id,
+      expirationDate: targetDateISO
+    });
+  } catch (err) {
+    console.warn('Erro ao consultar conferência na Blitz atual:', err);
+  }
+
+  // 2. SEGUNDO: Consulta se foi conferido em alguma BLITZ ANTERIOR FINALIZADA
+  let lastRecord = null;
+  try {
+    lastRecord = await getPreviousFinalizedBlitzConference({
+      currentBlitzId: session?.id,
+      barcode: product.barcode,
+      productId: product.id,
+      expirationDate: targetDateISO
+    });
+  } catch (err) {
+    console.warn('Erro ao consultar histórico de blitz anterior finalizada:', err);
+  }
+
+  const isAlreadyInCurrentBlitz = Boolean(currentBlitzRecord);
+  const currentQuantity = currentBlitzRecord ? (Number(currentBlitzRecord.quantity != null ? currentBlitzRecord.quantity : currentBlitzRecord.total) || 0) : 0;
+
+  const isFirstTime = !isAlreadyInCurrentBlitz && !lastRecord;
+  const previousQuantity = lastRecord ? (Number(lastRecord.quantity != null ? lastRecord.quantity : lastRecord.total) || 0) : 0;
+  const previousDateStr = lastRecord ? (lastRecord.blitzDate || (lastRecord.date ? formatDateBR(lastRecord.date) : 'Blitz anterior')) : '';
 
   const defaultLocs = ['DEPÓSITO', 'GELADEIRA', 'PRATELEIRA', 'PONTA DE GÔNDOLA', 'ORELHA', 'ILHA', 'CARRINHO NA FRENTE DE LOJA'];
+
+  // Função para resgatar a contagem já existente por local (caso o usuário esteja revisando a mesma blitz)
+  const getInitialQtyForLoc = (loc) => {
+    if (isAlreadyInCurrentBlitz && currentBlitzRecord?.locations && Array.isArray(currentBlitzRecord.locations)) {
+      const found = currentBlitzRecord.locations.find(l => String(l.location || '').trim().toUpperCase() === loc);
+      return found ? (Number(found.quantity) || 0) : 0;
+    }
+    return 0;
+  };
+
+  const spokenDate = formatDateForSpeech(targetDateISO);
+  let voiceSpeechText = '';
+  if (isAlreadyInCurrentBlitz) {
+    voiceSpeechText = `Produto já conferido nesta Blitz com ${formatQuantityForSpeech(currentQuantity)}. Deseja ajustar?`;
+  } else if (isFirstTime) {
+    voiceSpeechText = `Primeiro registro da validade ${spokenDate}. Quantas unidades tem na loja?`;
+  } else if (previousQuantity > 0) {
+    voiceSpeechText = `Na blitz anterior tinham ${formatQuantityForSpeech(previousQuantity)}. Quantas tem nesta blitz?`;
+  } else {
+    voiceSpeechText = `Na blitz anterior constava como não tem. Quantas unidades tem agora?`;
+  }
 
   modal.innerHTML = `
     <div class="modal-backdrop" id="modal-blitz-qty-backdrop"></div>
@@ -1785,36 +2569,66 @@ export async function promptBlitzQuantityAndHistoryStep(product, targetDateISO) 
         <h3 style="font-size: 1.05rem; font-weight: 900; color: #10b981; margin: 0; display: flex; align-items: center; gap: 6px;">
           <span>📋</span> <span>CONFERÊNCIA DA DATA</span>
         </h3>
-        <button type="button" id="btn-close-qty-step" class="btn-icon-control" style="font-size: 1.1rem; width: 34px; height: 34px;">✕</button>
+        <div style="display: flex; align-items: center; gap: 6px;">
+          <button type="button" id="btn-replay-speech-step" class="btn-icon-control" style="font-size: 1rem; width: 36px; height: 36px;" title="Repetir Fala da Blitz">🔊</button>
+          <button type="button" id="btn-close-qty-step" class="btn-icon-control" style="font-size: 1.1rem; width: 36px; height: 36px;">✕</button>
+        </div>
       </div>
 
-      <!-- Resumo do Produto e Validade -->
-      <div style="background: #18181c; border: 1px solid #27272a; border-radius: 8px; padding: 12px; margin-bottom: 12px;">
-        <div style="font-size: 0.96rem; font-weight: 900; color: #f4f4f5; line-height: 1.35;">
-          ${product.name || 'PRODUTO SEM NOME'}
+      <!-- Resumo do Produto e Validade com Thumbnail Neutro Robusto -->
+      <div style="background: #18181c; border: 1px solid #27272a; border-radius: 8px; padding: 12px; margin-bottom: 12px; display: flex; align-items: center; gap: 12px;">
+        <div style="flex-shrink: 0;">
+          ${renderProductPhotoHtml(productPhoto || product.image || product.photo_url, product.name, { size: 56, rounded: '8px' })}
         </div>
-        <div style="display: flex; flex-direction: column; gap: 3px; font-size: 0.78rem; color: #a1a1aa; margin-top: 6px;">
-          <div>》 Código: <strong style="color: #fbbf24; font-family: monospace;">${product.barcode}</strong></div>
-          <div>》 Setor: <strong style="color: #38bdf8;">${prodSector}</strong> | Corredor: <strong style="color: #10b981;">${prodCorridor}</strong></div>
-          <div style="margin-top: 4px; padding-top: 4px; border-top: 1px dashed #27272a; font-size: 0.88rem;">
-            》 Validade em conferência: <strong style="color: #fbbf24; font-size: 1.05rem;">${formatDateBR(targetDateISO)}</strong>
+        <div style="flex: 1; min-width: 0;">
+          <div style="font-size: 0.96rem; font-weight: 900; color: #f4f4f5; line-height: 1.35;">
+            ${product.name || 'PRODUTO SEM NOME'}
+          </div>
+          <div style="display: flex; flex-direction: column; gap: 3px; font-size: 0.78rem; color: #a1a1aa; margin-top: 6px;">
+            <div>》 Código: <strong style="color: #fbbf24; font-family: monospace;">${product.barcode}</strong></div>
+            <div style="display: flex; align-items: center; flex-wrap: wrap; gap: 4px;">
+              <span>》 Setor: <strong style="color: #38bdf8;">${prodSector}</strong> | Corredor: <strong style="color: #10b981;">${prodCorridor}</strong></span>
+              <button type="button" id="btn-step-edit-corridor" style="background: none; border: none; color: #38bdf8; font-size: 0.75rem; font-weight: 700; cursor: pointer; text-decoration: underline; padding: 0 4px;">✏️ Alterar</button>
+            </div>
+            <div style="margin-top: 4px; padding-top: 4px; border-top: 1px dashed #27272a; font-size: 0.88rem;">
+              》 Validade em conferência: <strong style="color: #fbbf24; font-size: 1.05rem;">${formatDateBR(targetDateISO)}</strong>
+            </div>
           </div>
         </div>
       </div>
 
       <!-- RESPOSTA DO SISTEMA SOBRE O HISTÓRICO DA DATA -->
-      ${isFirstTime ? `
+      ${isAlreadyInCurrentBlitz ? `
+        <!-- CENÁRIO 0: JÁ CONFERIDO NESTA BLITZ ATUAL -->
+        <div style="background: rgba(14, 165, 233, 0.14); border: 1.5px solid #0284c7; border-radius: 10px; padding: 12px; margin-bottom: 14px;">
+          <div style="font-size: 0.95rem; font-weight: 900; color: #38bdf8; margin-bottom: 4px; display: flex; align-items: center; justify-content: space-between;">
+            <span>🔄 JÁ CONFERIDO NESTA BLITZ</span>
+            <span style="font-size: 0.74rem; color: #bae6fd; font-weight: 700; background: rgba(2, 132, 199, 0.4); padding: 2px 6px; border-radius: 4px;">Sessão Atual</span>
+          </div>
+          <div style="font-size: 0.98rem; color: #f4f4f5; font-weight: 800; line-height: 1.4;">
+            Quantidade já registrada: <span style="font-size: 1.35rem; font-weight: 900; color: #38bdf8;">${currentQuantity}</span> unidades
+          </div>
+          ${currentBlitzRecord.locations && currentBlitzRecord.locations.length > 0 ? `
+            <div style="font-size: 0.76rem; color: #bae6fd; margin-top: 4px;">
+              Locais registrados: ${currentBlitzRecord.locations.map(l => `${l.location}: ${l.quantity}`).join(' | ')}
+            </div>
+          ` : ''}
+          <div style="font-size: 0.74rem; color: #94a3b8; margin-top: 4px;">
+            💡 Os campos abaixo foram preenchidos com os locais salvos. Ajuste as quantidades e clique em Gravar para atualizar.
+          </div>
+        </div>
+      ` : (isFirstTime ? `
         <!-- CENÁRIO 1: PRIMEIRO REGISTRO DESSA DATA -->
         <div style="background: rgba(16, 185, 129, 0.12); border: 1.5px solid #10b981; border-radius: 10px; padding: 12px; margin-bottom: 14px;">
           <div style="font-size: 0.95rem; font-weight: 900; color: #34d399; margin-bottom: 4px; display: flex; align-items: center; gap: 6px;">
             <span>🆕</span> <span>PRIMEIRO REGISTRO DESTA DATA</span>
           </div>
           <div style="font-size: 0.84rem; color: #e4e4e7; line-height: 1.4;">
-            Esta data de validade (<strong>${formatDateBR(targetDateISO)}</strong>) nunca foi verificada antes para este produto.
+            Esta data de validade (<strong>${formatDateBR(targetDateISO)}</strong>) nunca foi verificada antes em blitzes anteriores finalizadas.
           </div>
         </div>
       ` : `
-        <!-- CENÁRIO 2: JÁ VERIFICADA ANTERIORMENTE -->
+        <!-- CENÁRIO 2: JÁ VERIFICADA NA BLITZ ANTERIOR FINALIZADA -->
         <div style="background: rgba(245, 158, 11, 0.12); border: 1.5px solid #f59e0b; border-radius: 10px; padding: 12px; margin-bottom: 14px;">
           <div style="font-size: 0.92rem; font-weight: 900; color: #fbbf24; margin-bottom: 4px; display: flex; align-items: center; justify-content: space-between;">
             <span>📋 JÁ VERIFICADA NA BLITZ ANTERIOR</span>
@@ -1830,11 +2644,11 @@ export async function promptBlitzQuantityAndHistoryStep(product, targetDateISO) 
           ` : ''}
           ${lastRecord.result === 'NAO_TEM' ? `
             <div style="font-size: 0.78rem; color: #f87171; font-weight: 800; margin-top: 4px;">
-              ⚠️ Na conferência anterior constava como NÃO TEM (0 un).
+              ⚠️ Na blitz anterior constava como NÃO TEM (0 un).
             </div>
           ` : ''}
         </div>
-      `}
+      `)}
 
       <!-- PERGUNTA: QUANTAS TEM NESTA BLITZ? -->
       <form id="form-blitz-quantity-step" style="display: flex; flex-direction: column; gap: 14px;">
@@ -1861,37 +2675,40 @@ export async function promptBlitzQuantityAndHistoryStep(product, targetDateISO) 
           </div>
 
           <div style="display: flex; flex-direction: column; gap: 8px; max-height: 260px; overflow-y: auto; padding-right: 4px;">
-            ${defaultLocs.map(loc => `
-              <div style="display: flex; align-items: center; justify-content: space-between; background: #18181c; border: 1px solid #27272a; border-radius: 8px; padding: 8px 10px;">
-                <span style="font-size: 0.82rem; font-weight: 800; color: #e4e4e7;">${loc}</span>
-                <div style="display: flex; align-items: center; gap: 8px;">
-                  <button type="button" class="btn-step-qty btn-secondary" data-loc="${loc}" data-delta="-1" style="min-width: 44px; min-height: 44px; width: 44px; height: 44px; padding: 0; font-size: 1.25rem; font-weight: 900; justify-content: center; border-radius: 8px;">-</button>
-                  <input
-                    type="number"
-                    class="input-loc-qty form-input"
-                    data-loc="${loc}"
-                    min="0"
-                    step="1"
-                    value="0"
-                    style="width: 64px; height: 44px; text-align: center; font-size: 1.15rem; font-weight: 900; padding: 2px; border-radius: 8px;"
-                  />
-                  <button type="button" class="btn-step-qty btn-secondary" data-loc="${loc}" data-delta="1" style="min-width: 44px; min-height: 44px; width: 44px; height: 44px; padding: 0; font-size: 1.25rem; font-weight: 900; justify-content: center; border-radius: 8px;">+</button>
+            ${defaultLocs.map(loc => {
+              const initVal = getInitialQtyForLoc(loc);
+              return `
+                <div style="display: flex; align-items: center; justify-content: space-between; background: #18181c; border: 1px solid #27272a; border-radius: 8px; padding: 8px 10px;">
+                  <span style="font-size: 0.82rem; font-weight: 800; color: #e4e4e7;">${loc}</span>
+                  <div style="display: flex; align-items: center; gap: 8px;">
+                    <button type="button" class="btn-step-qty btn-secondary" data-loc="${loc}" data-delta="-1" style="min-width: 44px; min-height: 44px; width: 44px; height: 44px; padding: 0; font-size: 1.25rem; font-weight: 900; justify-content: center; border-radius: 8px;">-</button>
+                    <input
+                      type="number"
+                      class="input-loc-qty form-input"
+                      data-loc="${loc}"
+                      min="0"
+                      step="1"
+                      value="${initVal}"
+                      style="width: 64px; height: 44px; text-align: center; font-size: 1.15rem; font-weight: 900; padding: 2px; border-radius: 8px;"
+                    />
+                    <button type="button" class="btn-step-qty btn-secondary" data-loc="${loc}" data-delta="1" style="min-width: 44px; min-height: 44px; width: 44px; height: 44px; padding: 0; font-size: 1.25rem; font-weight: 900; justify-content: center; border-radius: 8px;">+</button>
+                  </div>
                 </div>
-              </div>
-            `).join('')}
+              `;
+            }).join('')}
           </div>
         </div>
 
         <!-- FOTO DO PRODUTO (OPCIONAL) -->
         <div style="background: rgba(255, 255, 255, 0.02); border: 1px solid #27272a; border-radius: 8px; padding: 10px;">
           <label style="font-size: 0.8rem; font-weight: 800; color: #fbbf24; text-transform: uppercase; margin-bottom: 6px; display: block;">
-            📸 Foto do Produto (Opcional):
+            📸 Foto do Produto (Gravada no Cadastro):
           </label>
           <div style="display: flex; align-items: center; gap: 10px;">
             <div id="step-photo-preview-box" style="width: 64px; height: 64px; border-radius: 8px; overflow: hidden; background: #09090b; border: 1px solid #3f3f46; display: flex; align-items: center; justify-content: center; flex-shrink: 0;">
               ${productPhoto
-                ? `<img src="${productPhoto}" alt="Foto" style="width: 100%; height: 100%; object-fit: cover;" />`
-                : `<span id="step-no-photo" style="font-size: 0.65rem; color: #71717a; font-weight: 700;">SEM FOTO</span>`
+                ? `<img src="${productPhoto}" alt="Foto" style="width: 100%; height: 100%; object-fit: cover;" referrerpolicy="no-referrer" onerror="this.style.display='none'; if (this.nextElementSibling) this.nextElementSibling.style.display='flex';" /><div class="photo-placeholder-neutral" style="display: none;"><span>📷 Sem foto</span></div>`
+                : `<div class="photo-placeholder-neutral"><span>📷 Sem foto</span></div>`
               }
             </div>
             <div style="display: flex; flex-direction: column; gap: 6px; flex: 1;">
@@ -1923,6 +2740,14 @@ export async function promptBlitzQuantityAndHistoryStep(product, targetDateISO) 
   modal.classList.add('open');
   const closeModal = () => modal.classList.remove('open');
 
+  // Fala o histórico da data para o conferente no celular
+  speakText(voiceSpeechText);
+
+  document.getElementById('btn-replay-speech-step')?.addEventListener('click', () => {
+    triggerHaptic(20);
+    speakText(voiceSpeechText, true);
+  });
+
   document.getElementById('modal-blitz-qty-backdrop')?.addEventListener('click', closeModal);
   document.getElementById('btn-close-qty-step')?.addEventListener('click', () => {
     closeModal();
@@ -1931,6 +2756,14 @@ export async function promptBlitzQuantityAndHistoryStep(product, targetDateISO) 
   document.getElementById('btn-cancel-qty-step')?.addEventListener('click', () => {
     closeModal();
     promptBlitzDateInputStep(product);
+  });
+
+  // Alterar corredor a partir da tela de conferência
+  document.getElementById('btn-step-edit-corridor')?.addEventListener('click', () => {
+    closeModal();
+    promptSetProductCorridor(product, (updatedProd) => {
+      promptBlitzQuantityAndHistoryStep(updatedProd, targetDateISO, blitzItem);
+    });
   });
 
   // Cálculo automático do total ao vivo
@@ -1951,8 +2784,12 @@ export async function promptBlitzQuantityAndHistoryStep(product, targetDateISO) 
     return tot;
   };
 
+  // Inicializa o total com eventuais valores pré-carregados
+  updateTotal();
+
   modal.querySelectorAll('.btn-step-qty').forEach(btn => {
     btn.addEventListener('click', () => {
+      triggerHaptic(25);
       const loc = btn.getAttribute('data-loc');
       const delta = parseInt(btn.getAttribute('data-delta'), 10) || 0;
       const inp = modal.querySelector(`.input-loc-qty[data-loc="${loc}"]`);
@@ -1989,9 +2826,25 @@ export async function promptBlitzQuantityAndHistoryStep(product, targetDateISO) 
       const compressed = await compressImage(file, 800, 0.7);
       productPhoto = compressed;
       if (photoBox) {
-        photoBox.innerHTML = `<img src="${compressed}" alt="Foto" style="width: 100%; height: 100%; object-fit: cover;" />`;
+        photoBox.innerHTML = `<img src="${compressed}" alt="Foto" style="width: 100%; height: 100%; object-fit: cover;" referrerpolicy="no-referrer" onerror="this.style.display='none'; if (this.nextElementSibling) this.nextElementSibling.style.display='flex';" /><div class="photo-placeholder-neutral" style="display: none;"><span>📷 Sem foto</span></div>`;
       }
       btnDel?.classList.remove('hidden');
+
+      // Salva imediatamente no produto e na base de fotos
+      try {
+        product.image = compressed;
+        product.photo_url = compressed;
+        await saveProduct(product);
+        await saveProductPhotoRecord({
+          productId: product.id,
+          barcode: product.barcode,
+          photoBase64: compressed,
+          expirationDate: targetDateISO,
+          type: 'PRODUTO'
+        });
+      } catch (saveErr) {
+        console.warn('Aviso ao salvar foto no produto:', saveErr);
+      }
     } catch (err) {
       showToast('Erro ao processar imagem', 'warning');
     }
@@ -2000,10 +2853,15 @@ export async function promptBlitzQuantityAndHistoryStep(product, targetDateISO) 
   fileCam?.addEventListener('change', handlePhotoFile);
   fileGal?.addEventListener('change', handlePhotoFile);
 
-  btnDel?.addEventListener('click', () => {
+  btnDel?.addEventListener('click', async () => {
     productPhoto = '';
+    product.image = '';
+    product.photo_url = '';
+    try {
+      await saveProduct(product);
+    } catch (_) {}
     if (photoBox) {
-      photoBox.innerHTML = `<span style="font-size: 0.65rem; color: #71717a; font-weight: 700;">SEM FOTO</span>`;
+      photoBox.innerHTML = `<div class="photo-placeholder-neutral"><span>📷 Sem foto</span></div>`;
     }
     btnDel?.classList.add('hidden');
     if (fileCam) fileCam.value = '';
@@ -2016,6 +2874,19 @@ export async function promptBlitzQuantityAndHistoryStep(product, targetDateISO) 
     showToast('Gravando NÃO TEM...', 'sync', 600);
 
     try {
+      if (productPhoto) {
+        product.image = productPhoto;
+        product.photo_url = productPhoto;
+        await saveProduct(product);
+        await saveProductPhotoRecord({
+          productId: product.id,
+          barcode: product.barcode,
+          photoBase64: productPhoto,
+          expirationDate: targetDateISO,
+          type: 'CONFERENCIA'
+        });
+      }
+
       await saveBlitzConferenceRecord({
         sessionId: session?.id,
         productId: product.id,
@@ -2023,12 +2894,13 @@ export async function promptBlitzQuantityAndHistoryStep(product, targetDateISO) 
         sector: prodSector,
         corridor: prodCorridor,
         requestedDate: targetDateISO,
-        previousQuantity: previousQuantity,
+        previousQuantity: isAlreadyInCurrentBlitz ? currentQuantity : previousQuantity,
         newQuantity: 0,
-        difference: 0 - previousQuantity,
+        difference: 0 - (isAlreadyInCurrentBlitz ? currentQuantity : previousQuantity),
         result: 'NAO_TEM',
         locations: [],
-        photo_proof: null,
+        photo_proof: productPhoto || null,
+        foto_url: productPhoto || null,
         userName: session?.user_name || 'Ana Luiza'
       });
 
@@ -2036,13 +2908,20 @@ export async function promptBlitzQuantityAndHistoryStep(product, targetDateISO) 
       product.status = 'VERIFICADO';
       triggerSyncNow().catch(err => console.warn('Sync error:', err));
 
-      const comparisonMsg = !isFirstTime
-        ? `<br><span style="font-size: 0.82rem; color: #cbd5e1;">Na blitz anterior: <strong style="color: #38bdf8;">${previousQuantity} un</strong> ➔ Nesta blitz: <strong style="color: #ef4444;">0 un</strong></span>`
-        : `<br><span style="font-size: 0.82rem; color: #a1a1aa;">Primeiro registro desta validade como NÃO TEM.</span>`;
+      speakText(`Validade ${spokenDate} gravada como não tem.`);
+      triggerHaptic(60);
+      playBeep('warning');
+
+      const comparisonMsg = isAlreadyInCurrentBlitz
+        ? `<br><span style="font-size: 0.82rem; color: #cbd5e1;">Registro da Blitz atual atualizado para: <strong style="color: #ef4444;">0 un</strong></span>`
+        : (!isFirstTime
+          ? `<br><span style="font-size: 0.82rem; color: #cbd5e1;">Na blitz anterior: <strong style="color: #38bdf8;">${previousQuantity} un</strong> ➔ Nesta blitz: <strong style="color: #ef4444;">0 un</strong></span>`
+          : `<br><span style="font-size: 0.82rem; color: #a1a1aa;">Primeiro registro desta validade como NÃO TEM.</span>`);
 
       showBlitzNextProductModal(
         product.name,
-        `Validade <strong>${formatDateBR(targetDateISO)}</strong> gravada como <strong style="color: #ef4444;">NÃO TEM</strong>.${comparisonMsg}`
+        `Validade <strong>${formatDateBR(targetDateISO)}</strong> gravada como <strong style="color: #ef4444;">NÃO TEM</strong>.${comparisonMsg}`,
+        productPhoto || product.image || product.photo_url
       );
     } catch (err) {
       console.error('Erro ao salvar NÃO TEM:', err);
@@ -2065,6 +2944,19 @@ export async function promptBlitzQuantityAndHistoryStep(product, targetDateISO) 
         onConfirm: async () => {
           closeModal();
           try {
+            if (productPhoto) {
+              product.image = productPhoto;
+              product.photo_url = productPhoto;
+              await saveProduct(product);
+              await saveProductPhotoRecord({
+                productId: product.id,
+                barcode: product.barcode,
+                photoBase64: productPhoto,
+                expirationDate: targetDateISO,
+                type: 'CONFERENCIA'
+              });
+            }
+
             await saveBlitzConferenceRecord({
               sessionId: session?.id,
               productId: product.id,
@@ -2072,18 +2964,23 @@ export async function promptBlitzQuantityAndHistoryStep(product, targetDateISO) 
               sector: prodSector,
               corridor: prodCorridor,
               requestedDate: targetDateISO,
-              previousQuantity: previousQuantity,
+              previousQuantity: isAlreadyInCurrentBlitz ? currentQuantity : previousQuantity,
               newQuantity: 0,
-              difference: 0 - previousQuantity,
+              difference: 0 - (isAlreadyInCurrentBlitz ? currentQuantity : previousQuantity),
               result: 'NAO_TEM',
               locations: [],
-              photo_proof: null,
+              photo_proof: productPhoto || null,
+              foto_url: productPhoto || null,
               userName: session?.user_name || 'Ana Luiza'
             });
             await updateProductStatus(product.id, 'VERIFICADO');
             product.status = 'VERIFICADO';
             triggerSyncNow().catch(err => console.warn('Sync error:', err));
-            showBlitzNextProductModal(product.name, `Validade <strong>${formatDateBR(targetDateISO)}</strong> gravada como <strong style="color: #ef4444;">NÃO TEM</strong>.`);
+            showBlitzNextProductModal(
+              product.name, 
+              `Validade <strong>${formatDateBR(targetDateISO)}</strong> gravada como <strong style="color: #ef4444;">NÃO TEM</strong>.`,
+              productPhoto || product.image || product.photo_url
+            );
           } catch (err) {
             showToast('Erro ao gravar conferência', 'warning');
             startBlitzScanning();
@@ -2108,9 +3005,17 @@ export async function promptBlitzQuantityAndHistoryStep(product, targetDateISO) 
         }
       });
 
-      // 1. Atualiza produto
+      // 1. Atualiza produto e grava foto
       if (productPhoto) {
         product.image = productPhoto;
+        product.photo_url = productPhoto;
+        await saveProductPhotoRecord({
+          productId: product.id,
+          barcode: product.barcode,
+          photoBase64: productPhoto,
+          expirationDate: targetDateISO,
+          type: 'PRODUTO'
+        });
       }
       product.total_quantity = totalQty;
       product.status = 'VERIFICADO';
@@ -2143,24 +3048,37 @@ export async function promptBlitzQuantityAndHistoryStep(product, targetDateISO) 
         sector: prodSector,
         corridor: prodCorridor,
         requestedDate: targetDateISO,
-        previousQuantity: previousQuantity,
+        previousQuantity: isAlreadyInCurrentBlitz ? currentQuantity : previousQuantity,
         newQuantity: totalQty,
-        difference: totalQty - previousQuantity,
+        difference: totalQty - (isAlreadyInCurrentBlitz ? currentQuantity : previousQuantity),
         result: 'TEM',
         locations: locations.length > 0 ? locations : [{ location: prodCorridor, quantity: totalQty }],
         photo_proof: productPhoto || null,
+        foto_url: productPhoto || null,
         userName: session?.user_name || 'Ana Luiza'
       });
 
       triggerSyncNow().catch(err => console.warn('Sync error:', err));
 
-      const comparisonMsg = !isFirstTime
-        ? `<br><span style="font-size: 0.84rem; color: #38bdf8;">Na blitz anterior: <strong>${previousQuantity} un</strong> ➔ Nesta blitz: <strong style="color: #10b981;">${totalQty} un</strong></span>`
-        : `<br><span style="font-size: 0.84rem; color: #34d399;">Primeiro registro desta validade gravado com sucesso!</span>`;
+      speakText(`Conferência gravada. ${formatQuantityForSpeech(totalQty)} registradas.`);
+      triggerHaptic(60);
+      playBeep('success');
+
+      let comparisonMsg = '';
+      if (isAlreadyInCurrentBlitz) {
+        comparisonMsg = `<br><span style="font-size: 0.82rem; color: #cbd5e1;">Contagem anterior nesta Blitz: <strong style="color: #94a3b8;">${currentQuantity} un</strong> ➔ Nova: <strong style="color: #10b981;">${totalQty} un</strong></span>`;
+      } else if (!isFirstTime) {
+        const diff = totalQty - previousQuantity;
+        const diffStr = diff > 0 ? `+${diff}` : `${diff}`;
+        comparisonMsg = `<br><span style="font-size: 0.82rem; color: #cbd5e1;">Na blitz anterior: <strong style="color: #38bdf8;">${previousQuantity} un</strong> ➔ Nesta blitz: <strong style="color: #10b981;">${totalQty} un</strong> (${diffStr})</span>`;
+      } else {
+        comparisonMsg = `<br><span style="font-size: 0.82rem; color: #34d399;">Primeiro registro desta validade: <strong style="color: #10b981;">${totalQty} un</strong></span>`;
+      }
 
       showBlitzNextProductModal(
         product.name,
-        `Validade <strong>${formatDateBR(targetDateISO)}</strong> gravada com <strong style="color: #10b981;">${totalQty} unidades</strong>.${comparisonMsg}`
+        `Validade <strong>${formatDateBR(targetDateISO)}</strong> gravada com sucesso!${comparisonMsg}`,
+        productPhoto || product.image || product.photo_url
       );
     } catch (err) {
       console.error('Erro ao salvar conferência completa:', err);
@@ -2175,7 +3093,7 @@ export const promptCompleteRegistrationBlitz = (prod, targetDateISO) => promptBl
 /**
  * MODAL DE SUCESSO E TRANSIÇÃO PARA O PRÓXIMO PRODUTO
  */
-export function showBlitzNextProductModal(productName, messageHtml) {
+export function showBlitzNextProductModal(productName, messageHtml, productPhoto = null) {
   let modal = document.getElementById('modal-blitz-next-product');
   if (!modal) {
     modal = document.createElement('div');
@@ -2187,7 +3105,12 @@ export function showBlitzNextProductModal(productName, messageHtml) {
   modal.innerHTML = `
     <div class="modal-backdrop" id="modal-next-prod-backdrop"></div>
     <div class="modal-card" style="padding: 24px; max-width: 400px; width: 100%; box-sizing: border-box; text-align: center;">
-      <div style="font-size: 2.8rem; margin-bottom: 8px;">✅</div>
+      <div style="display: flex; justify-content: center; margin-bottom: 10px;">
+        ${productPhoto 
+          ? renderProductPhotoHtml(productPhoto, productName, { size: 68, rounded: '10px' })
+          : '<div style="font-size: 2.8rem;">✅</div>'
+        }
+      </div>
       <h3 style="font-size: 1.15rem; font-weight: 900; color: #10b981; margin: 0 0 6px 0;">
         PRODUTO REGISTRADO!
       </h3>
@@ -2211,6 +3134,9 @@ export function showBlitzNextProductModal(productName, messageHtml) {
 
   modal.classList.add('open');
   const closeModal = () => modal.classList.remove('open');
+
+  triggerHaptic(40);
+  playBeep('success');
 
   document.getElementById('modal-next-prod-backdrop')?.addEventListener('click', closeModal);
   document.getElementById('btn-modal-bipar-proximo')?.addEventListener('click', () => {
@@ -4369,7 +5295,7 @@ function showConferenceSuccessModal({ product, requestedDate, result, totalQuant
 }
 
 // ----------------------------------------------------
-// 15. FINALIZAR BLITZ & RESUMO
+// 15. FINALIZAR BLITZ & RESUMO (AUTO-ZEROS E CONFIRMAÇÃO)
 // ----------------------------------------------------
 
 export async function finishActiveBlitzSession(sessionId = null) {
@@ -4377,33 +5303,115 @@ export async function finishActiveBlitzSession(sessionId = null) {
   if (!id) return;
 
   const session = await getBlitzSessionById(id) || currentActiveBlitzSession;
-  const periodLabel = session.period_label || `${formatDateBR(session.start_date)} → ${formatDateBR(session.end_date)}`;
+  const metrics = await calculateBlitzPaceMetrics(id);
 
-  const confirmed = await promptConfirmDialog(
-    '🏁 FINALIZAR BLITZ?',
-    `Deseja concluir a Blitz do período ${periodLabel}? Todos os registros serão salvos no histórico.`
-  );
+  if (metrics.pendentes > 0) {
+    promptConfirmFinishBlitzModal(session, metrics, async () => {
+      try {
+        showToast('Finalizando e zerando pendências...', 'sync', 1500);
+        const finalStats = await finalizeBlitzWithAutoZeros(id, session.user_name || 'Ana Luiza');
+        const updated = await getBlitzSessionById(id);
+        setActiveBlitz(null);
+        triggerSyncNow().catch(e => console.warn('Sync error:', e));
 
-  if (!confirmed) return;
+        showBlitzFinishedSummaryModal(updated || session, finalStats);
+      } catch (err) {
+        console.error('Erro ao finalizar blitz com auto-zeros:', err);
+        showToast('Erro ao finalizar sessão da Blitz', 'warning');
+      }
+    });
+  } else {
+    const confirmed = await promptConfirmDialog(
+      '🏁 FINALIZAR BLITZ?',
+      `Todos os ${metrics.total} itens foram conferidos! Deseja concluir a Blitz e arquivá-la no histórico oficial?`
+    );
+    if (!confirmed) return;
 
-  try {
-    showToast('Finalizando Blitz...', 'sync', 1000);
-    const updated = await finishBlitzSession(id);
-    const items = await getBlitzItemsBySessionId(id);
+    try {
+      showToast('Finalizando Blitz...', 'sync', 1000);
+      const updated = await finishBlitzSession(id);
+      const items = await getBlitzItemsBySessionId(id);
+      setActiveBlitz(null);
+      triggerSyncNow().catch(e => console.warn('Sync error:', e));
 
-    setActiveBlitz(null);
-    triggerSyncNow().catch(e => console.warn('Sync error:', e));
-
-    // Exibe o Resumo da Blitz Finalizada
-    showBlitzFinishedSummaryModal(updated || session, items);
-  } catch (err) {
-    console.error('Erro ao finalizar blitz:', err);
-    showToast('Erro ao finalizar sessão da Blitz', 'warning');
+      showBlitzFinishedSummaryModal(updated || session, {
+        total: items.length,
+        conferidos: items.length,
+        autoZerados: 0,
+        comQtd: items.filter(i => (Number(i.total_quantity) || 0) > 0).length,
+        zerados: items.filter(i => (Number(i.total_quantity) || 0) === 0).length
+      });
+    } catch (err) {
+      console.error('Erro ao finalizar blitz:', err);
+      showToast('Erro ao finalizar sessão da Blitz', 'warning');
+    }
   }
 }
 
+/**
+ * Modal de Confirmação de Finalização com Auto-Zeros (Item 13)
+ */
+export function promptConfirmFinishBlitzModal(session, metrics, onConfirm) {
+  let modal = document.getElementById('modal-confirm-finish-blitz');
+  if (!modal) {
+    modal = document.createElement('div');
+    modal.id = 'modal-confirm-finish-blitz';
+    modal.className = 'custom-modal';
+    document.body.appendChild(modal);
+  }
+
+  modal.innerHTML = `
+    <div class="modal-backdrop" id="modal-confirm-finish-backdrop"></div>
+    <div class="modal-card" style="padding: 22px; max-width: 440px; width: 100%; box-sizing: border-box; text-align: center;">
+      <div style="font-size: 2.2rem; margin-bottom: 4px;">⚠️</div>
+      <h3 style="font-size: 1.15rem; font-weight: 900; color: #fbbf24; margin: 0 0 6px 0;">
+        SÓ PARA CONFIRMAR:
+      </h3>
+      <div style="font-size: 0.86rem; color: #f4f4f5; margin-bottom: 14px; line-height: 1.4;">
+        Você está prestes a finalizar esta Blitz.
+      </div>
+
+      <div style="background: #18181c; border: 1px solid #27272a; border-radius: 10px; padding: 12px; margin-bottom: 14px; text-align: left; display: flex; flex-direction: column; gap: 6px;">
+        <div style="font-size: 0.88rem; color: #f4f4f5; font-weight: 800;">
+          📋 <strong>${metrics.total}</strong> itens na lista
+        </div>
+        <div style="font-size: 0.88rem; color: #34d399; font-weight: 800;">
+          ✅ <strong>${metrics.conferidos}</strong> conferidos
+        </div>
+        <div style="font-size: 0.88rem; color: #f87171; font-weight: 800;">
+          ⏳ <strong>${metrics.pendentes}</strong> ainda pendentes
+        </div>
+      </div>
+
+      <div style="background: rgba(239, 68, 68, 0.1); border: 1px dashed rgba(239, 68, 68, 0.35); border-radius: 8px; padding: 10px; font-size: 0.78rem; color: #fca5a5; margin-bottom: 16px; line-height: 1.4;">
+        Esses <strong>${metrics.pendentes}</strong> itens serão registrados automaticamente como <strong>0 unidades</strong> (não encontrados na Blitz oficial).
+        <div style="margin-top: 4px; font-weight: 800; color: #fef08a;">Quer finalizar?</div>
+      </div>
+
+      <div style="display: flex; gap: 8px;">
+        <button type="button" id="btn-cancel-confirm-finish" class="btn-secondary" style="flex: 1; height: 46px; justify-content: center; font-weight: 800;">
+          Cancelar
+        </button>
+        <button type="button" id="btn-do-confirm-finish" class="btn-primary" style="flex: 1.3; height: 46px; justify-content: center; background: #ef4444; color: #fff; font-weight: 900; font-size: 0.95rem;">
+          🏁 Finalizar Blitz
+        </button>
+      </div>
+    </div>
+  `;
+
+  modal.classList.add('open');
+  const closeModal = () => modal.classList.remove('open');
+
+  document.getElementById('modal-confirm-finish-backdrop')?.addEventListener('click', closeModal);
+  document.getElementById('btn-cancel-confirm-finish')?.addEventListener('click', closeModal);
+  document.getElementById('btn-do-confirm-finish')?.addEventListener('click', () => {
+    closeModal();
+    if (onConfirm) onConfirm();
+  });
+}
+
 // Modal com Resumo da Blitz Finalizada
-function showBlitzFinishedSummaryModal(session, items) {
+export function showBlitzFinishedSummaryModal(session, statsOrItems) {
   let modal = document.getElementById('modal-blitz-finished-summary');
   if (!modal) {
     modal = document.createElement('div');
@@ -4412,18 +5420,26 @@ function showBlitzFinishedSummaryModal(session, items) {
     document.body.appendChild(modal);
   }
 
-  let countTem = 0;
-  let countNaoTem = 0;
-  let totalUnits = 0;
+  let totalCount = 0;
+  let temCount = 0;
+  let zeroCount = 0;
+  let autoZeroCount = 0;
 
-  items.forEach(it => {
-    if (it.result === 'TEM') {
-      countTem++;
-      totalUnits += Number(it.total_quantity) || 0;
-    } else {
-      countNaoTem++;
-    }
-  });
+  if (Array.isArray(statsOrItems)) {
+    totalCount = statsOrItems.length;
+    statsOrItems.forEach(it => {
+      if (it.result === 'TEM' || (Number(it.total_quantity) || 0) > 0) {
+        temCount++;
+      } else {
+        zeroCount++;
+      }
+    });
+  } else if (statsOrItems && typeof statsOrItems === 'object') {
+    totalCount = statsOrItems.total || 0;
+    temCount = statsOrItems.comQtd || 0;
+    zeroCount = statsOrItems.zerados || 0;
+    autoZeroCount = statsOrItems.autoZerados || 0;
+  }
 
   const periodLabel = session.period_label || `${formatDateBR(session.start_date)} → ${formatDateBR(session.end_date)}`;
 
@@ -4433,32 +5449,40 @@ function showBlitzFinishedSummaryModal(session, items) {
       
       <div style="font-size: 2.2rem; margin-bottom: 4px;">🏁</div>
       <h3 style="font-size: 1.25rem; font-weight: 900; color: #f4f4f5; margin: 0 0 2px 0;">
-        BLITZ FINALIZADA
+        BLITZ FINALIZADA COM SUCESSO
       </h3>
       <div style="font-size: 0.88rem; font-weight: 800; color: #fbbf24; margin-bottom: 14px;">
         Período: ${periodLabel}
       </div>
 
       <!-- Resumo Numérico -->
-      <div style="display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 6px; margin-bottom: 16px;">
+      <div style="display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 6px; margin-bottom: 12px;">
         <div style="background: #18181c; border: 1px solid #27272a; border-radius: 8px; padding: 10px 6px;">
           <div style="font-size: 0.65rem; color: #a1a1aa; font-weight: 800;">TOTAL</div>
-          <div style="font-size: 1.35rem; font-weight: 900; color: #f4f4f5; margin-top: 2px;">${items.length}</div>
+          <div style="font-size: 1.35rem; font-weight: 900; color: #f4f4f5; margin-top: 2px;">${totalCount}</div>
         </div>
         <div style="background: rgba(16, 185, 129, 0.1); border: 1px solid rgba(16, 185, 129, 0.3); border-radius: 8px; padding: 10px 6px;">
-          <div style="font-size: 0.65rem; color: #10b981; font-weight: 800;">🟢 TEM</div>
-          <div style="font-size: 1.35rem; font-weight: 900; color: #10b981; margin-top: 2px;">${countTem}</div>
-          <div style="font-size: 0.62rem; color: #a7f3d0; font-weight: 700;">${formatNumber(totalUnits)} un</div>
+          <div style="font-size: 0.65rem; color: #10b981; font-weight: 800;">🟢 TEM (>0)</div>
+          <div style="font-size: 1.35rem; font-weight: 900; color: #10b981; margin-top: 2px;">${temCount}</div>
         </div>
         <div style="background: rgba(239, 68, 68, 0.1); border: 1px solid rgba(239, 68, 68, 0.3); border-radius: 8px; padding: 10px 6px;">
-          <div style="font-size: 0.65rem; color: #ef4444; font-weight: 800;">🔴 NÃO TEM</div>
-          <div style="font-size: 1.35rem; font-weight: 900; color: #ef4444; margin-top: 2px;">${countNaoTem}</div>
+          <div style="font-size: 0.65rem; color: #ef4444; font-weight: 800;">🔴 ZERO (=0)</div>
+          <div style="font-size: 1.35rem; font-weight: 900; color: #ef4444; margin-top: 2px;">${zeroCount}</div>
         </div>
       </div>
+
+      ${autoZeroCount > 0 ? `
+        <div style="background: rgba(245, 158, 11, 0.1); border: 1px dashed rgba(245, 158, 11, 0.3); border-radius: 6px; padding: 6px 10px; font-size: 0.74rem; color: #fef08a; margin-bottom: 14px;">
+          ℹ️ ${autoZeroCount} item(ns) pendente(s) foram zerados automaticamente pelo sistema.
+        </div>
+      ` : ''}
 
       <div style="display: flex; flex-direction: column; gap: 8px;">
         <button type="button" id="btn-summary-export-wa" class="btn-primary" style="height: 48px; font-weight: 900; justify-content: center; background: #25d366; color: #000; font-size: 0.95rem;">
           💬 EXPORTAR NO WHATSAPP
+        </button>
+        <button type="button" id="btn-summary-view-what-changed" class="btn-secondary" style="height: 44px; font-weight: 800; justify-content: center; font-size: 0.88rem; color: #fbbf24; border-color: rgba(245, 158, 11, 0.4);">
+          📊 O Que Mudou (Comparação)
         </button>
         <button type="button" id="btn-summary-close-all" class="btn-secondary" style="height: 44px; font-weight: 800; justify-content: center; font-size: 0.88rem;">
           ✓ Concluir e Voltar ao Início
@@ -4474,14 +5498,524 @@ function showBlitzFinishedSummaryModal(session, items) {
   document.getElementById('modal-blitz-summary-backdrop')?.addEventListener('click', closeModal);
 
   document.getElementById('btn-summary-export-wa')?.addEventListener('click', async () => {
+    const items = await getBlitzItemsBySessionId(session.id);
     const formatted = await formatBlitzSessionWhatsApp(session, items);
     openWhatsAppExportModal(formatted, `Blitz ${periodLabel}`);
+  });
+
+  document.getElementById('btn-summary-view-what-changed')?.addEventListener('click', () => {
+    closeModal();
+    openWhatChangedModal(session.id);
   });
 
   document.getElementById('btn-summary-close-all')?.addEventListener('click', () => {
     closeModal();
     showView('view-dashboard');
   });
+}
+
+/**
+ * Modal de Reabertura de Blitz com Justificativa Obrigatória (Item 13)
+ */
+export function promptReopenBlitzModal(session) {
+  let modal = document.getElementById('modal-reopen-blitz');
+  if (!modal) {
+    modal = document.createElement('div');
+    modal.id = 'modal-reopen-blitz';
+    modal.className = 'custom-modal';
+    document.body.appendChild(modal);
+  }
+
+  const periodLabel = session.period_label || `${formatDateBR(session.start_date)} → ${formatDateBR(session.end_date)}`;
+
+  modal.innerHTML = `
+    <div class="modal-backdrop" id="modal-reopen-backdrop"></div>
+    <div class="modal-card" style="padding: 20px; max-width: 420px; width: 100%; box-sizing: border-box;">
+      <h3 style="font-size: 1.05rem; font-weight: 900; color: #fbbf24; margin: 0 0 4px 0; display: flex; align-items: center; gap: 6px;">
+        🔓 REABRIR BLITZ
+      </h3>
+      <div style="font-size: 0.82rem; color: #a1a1aa; margin-bottom: 12px;">
+        ${periodLabel} (${session.sector || 'GERAL'})
+      </div>
+
+      <div style="background: rgba(245, 158, 11, 0.1); border: 1px dashed rgba(245, 158, 11, 0.35); border-radius: 8px; padding: 10px; font-size: 0.76rem; color: #fef08a; line-height: 1.4; margin-bottom: 12px;">
+        ⚠️ <strong>Atenção:</strong> A reabertura de uma Blitz oficial é auditada. A data, hora, responsável e o motivo serão registrados permanentemente.
+      </div>
+
+      <form id="form-reopen-blitz-action" style="display: flex; flex-direction: column; gap: 10px;">
+        <div>
+          <label style="font-size: 0.74rem; font-weight: 800; color: #a1a1aa; text-transform: uppercase; margin-bottom: 4px; display: block;">
+            Quem está reabrindo:
+          </label>
+          <input
+            type="text"
+            id="input-reopen-user"
+            class="form-input"
+            value="${session.user_name || 'Ana Luiza'}"
+            required
+            style="height: 42px; font-weight: 800; color: #f4f4f5;"
+          />
+        </div>
+
+        <div>
+          <label style="font-size: 0.74rem; font-weight: 800; color: #ef4444; text-transform: uppercase; margin-bottom: 4px; display: block;">
+            Motivo da reabertura (Obrigatório):
+          </label>
+          <textarea
+            id="textarea-reopen-reason"
+            class="form-input"
+            rows="3"
+            placeholder="Ex: Novos produtos chegaram na gôndola após o fechamento"
+            required
+            style="font-size: 0.84rem; resize: vertical;"
+          ></textarea>
+        </div>
+
+        <div style="display: flex; gap: 8px; margin-top: 6px;">
+          <button type="button" id="btn-cancel-reopen" class="btn-secondary" style="flex: 1; height: 44px; justify-content: center; font-weight: 800;">
+            Cancelar
+          </button>
+          <button type="submit" class="btn-primary" style="flex: 1.3; height: 44px; justify-content: center; background: #fbbf24; color: #000; font-weight: 900;">
+            🔓 Reabrir Blitz
+          </button>
+        </div>
+      </form>
+    </div>
+  `;
+
+  modal.classList.add('open');
+  const closeModal = () => modal.classList.remove('open');
+
+  document.getElementById('modal-reopen-backdrop')?.addEventListener('click', closeModal);
+  document.getElementById('btn-cancel-reopen')?.addEventListener('click', closeModal);
+
+  document.getElementById('form-reopen-blitz-action')?.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const userName = document.getElementById('input-reopen-user')?.value?.trim() || 'Ana Luiza';
+    const reason = document.getElementById('textarea-reopen-reason')?.value?.trim();
+
+    if (!reason || reason.length < 5) {
+      showToast('Por favor, informe uma justificativa válida para reabertura', 'warning');
+      return;
+    }
+
+    try {
+      showToast('Reabrindo Blitz...', 'sync', 1000);
+      const reopened = await reopenBlitzRecord(session.id, userName, reason);
+      closeModal();
+      setActiveBlitz(reopened || session);
+      triggerSyncNow().catch(err => console.warn('Sync error:', err));
+      showToast('✓ Blitz reaberta com sucesso!', 'success', 2000);
+      openBlitzDashboardView();
+    } catch (err) {
+      console.error('Erro ao reabrir blitz:', err);
+      showToast('Erro ao reabrir Blitz', 'warning');
+    }
+  });
+}
+
+/**
+ * Modal de Correção Auditada de Quantidade de Item (Item 12)
+ */
+export async function promptCorrectBlitzItemQuantity(item, session, onSaved) {
+  let modal = document.getElementById('modal-correct-blitz-item');
+  if (!modal) {
+    modal = document.createElement('div');
+    modal.id = 'modal-correct-blitz-item';
+    modal.className = 'custom-modal';
+    document.body.appendChild(modal);
+  }
+
+  const prod = item.product_id ? await getProductById(item.product_id) : await getProductByBarcode(item.barcode);
+  const prodName = prod?.name || `PRODUTO ${item.barcode}`;
+  const currentQty = Number(item.total_quantity || item.quantidade) || 0;
+  const targetDate = item.requested_expiration_date || item.data_validade;
+
+  modal.innerHTML = `
+    <div class="modal-backdrop" id="modal-correct-item-backdrop"></div>
+    <div class="modal-card" style="padding: 20px; max-width: 420px; width: 100%; box-sizing: border-box;">
+      <h3 style="font-size: 1.05rem; font-weight: 900; color: #f4f4f5; margin: 0 0 4px 0; display: flex; align-items: center; gap: 6px;">
+        ✏️ CORREÇÃO DE ITEM CONFERIDO
+      </h3>
+      <div style="font-size: 0.82rem; color: #a1a1aa; margin-bottom: 12px;">
+        Conferência oficial auditada
+      </div>
+
+      <div style="background: #18181c; border: 1px solid #27272a; border-radius: 8px; padding: 10px; margin-bottom: 12px;">
+        <div style="font-size: 0.88rem; font-weight: 800; color: #f4f4f5;">${prodName}</div>
+        <div style="font-size: 0.74rem; color: #fbbf24; font-weight: 800; margin-top: 2px;">
+          Validade: ${formatDateBR(targetDate)} • Cód: ${item.barcode}
+        </div>
+        <div style="font-size: 0.78rem; color: #a1a1aa; margin-top: 4px;">
+          Quantidade atual registrada: <strong style="color: ${currentQty > 0 ? '#34d399' : '#f87171'};">${currentQty} un</strong>
+        </div>
+      </div>
+
+      <form id="form-correct-blitz-item-action" style="display: flex; flex-direction: column; gap: 10px;">
+        <div>
+          <label style="font-size: 0.74rem; font-weight: 800; color: #a1a1aa; text-transform: uppercase; margin-bottom: 4px; display: block;">
+            Nova Quantidade Encontrada:
+          </label>
+          <input
+            type="number"
+            id="input-correct-qty-val"
+            class="form-input"
+            min="0"
+            step="1"
+            value="${currentQty}"
+            required
+            autofocus
+            style="height: 48px; font-size: 1.3rem; font-weight: 900; text-align: center; color: #10b981;"
+          />
+        </div>
+
+        <div>
+          <label style="font-size: 0.74rem; font-weight: 800; color: #a1a1aa; text-transform: uppercase; margin-bottom: 4px; display: block;">
+            Quem está corrigindo:
+          </label>
+          <input
+            type="text"
+            id="input-correct-user"
+            class="form-input"
+            value="${session?.user_name || 'Ana Luiza'}"
+            required
+            style="height: 40px; font-weight: 800;"
+          />
+        </div>
+
+        <div>
+          <label style="font-size: 0.74rem; font-weight: 800; color: #ef4444; text-transform: uppercase; margin-bottom: 4px; display: block;">
+            Motivo da alteração (Obrigatório):
+          </label>
+          <textarea
+            id="textarea-correct-reason"
+            class="form-input"
+            rows="2"
+            placeholder="Ex: Erro de digitação / Mais unidades encontradas no fundo da gôndola"
+            required
+            style="font-size: 0.84rem; resize: vertical;"
+          ></textarea>
+        </div>
+
+        <div style="display: flex; gap: 8px; margin-top: 6px;">
+          <button type="button" id="btn-cancel-correct-item" class="btn-secondary" style="flex: 1; height: 44px; justify-content: center; font-weight: 800;">
+            Cancelar
+          </button>
+          <button type="submit" class="btn-primary" style="flex: 1.3; height: 44px; justify-content: center; background: #10b981; color: #022c22; font-weight: 900;">
+            💾 Salvar Correção
+          </button>
+        </div>
+      </form>
+    </div>
+  `;
+
+  modal.classList.add('open');
+  const closeModal = () => modal.classList.remove('open');
+
+  document.getElementById('modal-correct-item-backdrop')?.addEventListener('click', closeModal);
+  document.getElementById('btn-cancel-correct-item')?.addEventListener('click', closeModal);
+
+  document.getElementById('form-correct-blitz-item-action')?.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const newQty = Number(document.getElementById('input-correct-qty-val')?.value) || 0;
+    const userName = document.getElementById('input-correct-user')?.value?.trim() || 'Ana Luiza';
+    const reason = document.getElementById('textarea-correct-reason')?.value?.trim();
+
+    if (!reason || reason.length < 3) {
+      showToast('Por favor, informe o motivo da correção', 'warning');
+      return;
+    }
+
+    try {
+      showToast('Gravando correção auditada...', 'sync', 1000);
+      const confId = item.conferencia_id || item.id;
+      await correctConferenceQuantity(confId, newQty, reason, userName);
+
+      closeModal();
+      triggerSyncNow().catch(err => console.warn('Sync error:', err));
+      showToast('✓ Quantidade corrigida com sucesso!', 'success', 2000);
+
+      if (onSaved) {
+        onSaved();
+      } else if (currentActiveBlitzSession) {
+        openBlitzDashboardView();
+      }
+    } catch (err) {
+      console.error('Erro ao corrigir quantidade:', err);
+      showToast('Erro ao salvar correção', 'warning');
+    }
+  });
+}
+
+/**
+ * Modal "O que Mudou?" - Comparação com a Blitz Anterior (Item 14)
+ */
+export async function openWhatChangedModal(sessionId) {
+  let modal = document.getElementById('modal-what-changed-blitz');
+  if (!modal) {
+    modal = document.createElement('div');
+    modal.id = 'modal-what-changed-blitz';
+    modal.className = 'custom-modal';
+    document.body.appendChild(modal);
+  }
+
+  modal.innerHTML = `
+    <div class="modal-backdrop" id="modal-what-changed-backdrop"></div>
+    <div class="modal-card" style="padding: 20px; max-width: 500px; width: 100%; box-sizing: border-box; max-height: 90vh; display: flex; flex-direction: column;">
+      <div style="display: flex; align-items: center; justify-content: space-between; border-bottom: 1px solid #27272a; padding-bottom: 8px; margin-bottom: 12px;">
+        <div>
+          <h3 style="font-size: 1.05rem; font-weight: 900; color: #fbbf24; margin: 0; display: flex; align-items: center; gap: 6px;">
+            📊 O QUE MUDOU?
+          </h3>
+          <span style="font-size: 0.72rem; color: #a1a1aa;">Comparação com a Blitz anterior</span>
+        </div>
+        <button type="button" id="btn-close-what-changed" class="btn-icon-control" style="font-size: 1rem; width: 32px; height: 32px;">✕</button>
+      </div>
+
+      <div id="what-changed-content-area" style="flex: 1; overflow-y: auto; display: flex; flex-direction: column; gap: 10px;">
+        <div style="text-align: center; padding: 30px; color: #71717a;">Carregando análise comparativa...</div>
+      </div>
+
+      <div style="margin-top: 12px;">
+        <button type="button" id="btn-dismiss-what-changed" class="btn-secondary" style="width: 100%; height: 44px; justify-content: center; font-weight: 800;">
+          Fechar
+        </button>
+      </div>
+    </div>
+  `;
+
+  modal.classList.add('open');
+  const closeModal = () => modal.classList.remove('open');
+
+  document.getElementById('modal-what-changed-backdrop')?.addEventListener('click', closeModal);
+  document.getElementById('btn-close-what-changed')?.addEventListener('click', closeModal);
+  document.getElementById('btn-dismiss-what-changed')?.addEventListener('click', closeModal);
+
+  try {
+    const analysis = await getWhatChangedAnalysis(sessionId);
+    const contentArea = document.getElementById('what-changed-content-area');
+    if (!contentArea) return;
+
+    if (!analysis.hasPrevious) {
+      contentArea.innerHTML = `
+        <div style="background: rgba(59, 130, 246, 0.1); border: 1px solid rgba(59, 130, 246, 0.3); border-radius: 8px; padding: 14px; text-align: center; color: #93c5fd; font-size: 0.86rem; line-height: 1.4;">
+          ✨ <strong>Primeira Blitz deste setor!</strong><br>
+          Não há conferência anterior para comparação. Todos os ${analysis.novos.length} itens conferidos estabeleceram o marco inicial.
+        </div>
+      `;
+      return;
+    }
+
+    const { aumentaram, diminuiram, zeraram, voltaram, novos } = analysis;
+
+    contentArea.innerHTML = `
+      <!-- Cards de Resumo -->
+      <div style="display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px;">
+        <div style="background: #18181c; border: 1px solid #27272a; border-radius: 6px; padding: 8px; text-align: center;">
+          <div style="font-size: 0.65rem; color: #34d399; font-weight: 800;">🔺 AUMENTARAM</div>
+          <div style="font-size: 1.2rem; font-weight: 900; color: #34d399;">${aumentaram.length}</div>
+        </div>
+        <div style="background: #18181c; border: 1px solid #27272a; border-radius: 6px; padding: 8px; text-align: center;">
+          <div style="font-size: 0.65rem; color: #fbbf24; font-weight: 800;">🔻 DIMINUÍRAM</div>
+          <div style="font-size: 1.2rem; font-weight: 900; color: #fbbf24;">${diminuiram.length}</div>
+        </div>
+        <div style="background: #18181c; border: 1px solid #27272a; border-radius: 6px; padding: 8px; text-align: center;">
+          <div style="font-size: 0.65rem; color: #ef4444; font-weight: 800;">0️⃣ ZERARAM</div>
+          <div style="font-size: 1.2rem; font-weight: 900; color: #ef4444;">${zeraram.length}</div>
+        </div>
+        <div style="background: #18181c; border: 1px solid #27272a; border-radius: 6px; padding: 8px; text-align: center; grid-column: span 1.5;">
+          <div style="font-size: 0.65rem; color: #38bdf8; font-weight: 800;">🟢 VOLTARAM A TER</div>
+          <div style="font-size: 1.2rem; font-weight: 900; color: #38bdf8;">${voltaram.length}</div>
+        </div>
+        <div style="background: #18181c; border: 1px solid #27272a; border-radius: 6px; padding: 8px; text-align: center; grid-column: span 1.5;">
+          <div style="font-size: 0.65rem; color: #c084fc; font-weight: 800;">🆕 PRODUTOS NOVOS</div>
+          <div style="font-size: 1.2rem; font-weight: 900; color: #c084fc;">${novos.length}</div>
+        </div>
+      </div>
+
+      <!-- Seção: Voltaram a Ter -->
+      ${voltaram.length > 0 ? `
+        <div style="background: rgba(56, 189, 248, 0.08); border: 1px solid rgba(56, 189, 248, 0.3); border-radius: 8px; padding: 10px;">
+          <div style="font-size: 0.74rem; font-weight: 900; color: #38bdf8; text-transform: uppercase; margin-bottom: 6px;">
+            ⚠️ VOLTARAM A TER (Tinham 0 na anterior)
+          </div>
+          <div style="display: flex; flex-direction: column; gap: 4px;">
+            ${voltaram.map(it => `
+              <div style="background: #18181c; padding: 6px 8px; border-radius: 4px; font-size: 0.78rem; display: flex; justify-content: space-between; align-items: center;">
+                <span style="color: #f4f4f5; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 65%;">${it.name}</span>
+                <span style="color: #38bdf8; font-weight: 800;">0 ➔ <strong>${it.currentQty} un</strong></span>
+              </div>
+            `).join('')}
+          </div>
+        </div>
+      ` : ''}
+
+      <!-- Seção: Zeraram -->
+      ${zeraram.length > 0 ? `
+        <div style="background: rgba(239, 68, 68, 0.08); border: 1px solid rgba(239, 68, 68, 0.3); border-radius: 8px; padding: 10px;">
+          <div style="font-size: 0.74rem; font-weight: 900; color: #ef4444; text-transform: uppercase; margin-bottom: 6px;">
+            🔴 ZERARAM (Tinham estoque e agora estão zerados)
+          </div>
+          <div style="display: flex; flex-direction: column; gap: 4px;">
+            ${zeraram.map(it => `
+              <div style="background: #18181c; padding: 6px 8px; border-radius: 4px; font-size: 0.78rem; display: flex; justify-content: space-between; align-items: center;">
+                <span style="color: #f4f4f5; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 65%;">${it.name}</span>
+                <span style="color: #ef4444; font-weight: 800;">${it.prevQty} un ➔ <strong>0 un</strong></span>
+              </div>
+            `).join('')}
+          </div>
+        </div>
+      ` : ''}
+
+      <!-- Seção: Aumentaram -->
+      ${aumentaram.length > 0 ? `
+        <div style="background: rgba(16, 185, 129, 0.08); border: 1px solid rgba(16, 185, 129, 0.3); border-radius: 8px; padding: 10px;">
+          <div style="font-size: 0.74rem; font-weight: 900; color: #10b981; text-transform: uppercase; margin-bottom: 6px;">
+            🔺 AUMENTARAM DE QUANTIDADE
+          </div>
+          <div style="display: flex; flex-direction: column; gap: 4px;">
+            ${aumentaram.map(it => `
+              <div style="background: #18181c; padding: 6px 8px; border-radius: 4px; font-size: 0.78rem; display: flex; justify-content: space-between; align-items: center;">
+                <span style="color: #f4f4f5; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 65%;">${it.name}</span>
+                <span style="color: #10b981; font-weight: 800;">${it.prevQty} ➔ <strong>${it.currentQty} un</strong> (+${it.diff})</span>
+              </div>
+            `).join('')}
+          </div>
+        </div>
+      ` : ''}
+
+      <!-- Seção: Diminuíram -->
+      ${diminuiram.length > 0 ? `
+        <div style="background: rgba(245, 158, 11, 0.08); border: 1px solid rgba(245, 158, 11, 0.3); border-radius: 8px; padding: 10px;">
+          <div style="font-size: 0.74rem; font-weight: 900; color: #fbbf24; text-transform: uppercase; margin-bottom: 6px;">
+            🔻 DIMINUÍRAM DE QUANTIDADE
+          </div>
+          <div style="display: flex; flex-direction: column; gap: 4px;">
+            ${diminuiram.map(it => `
+              <div style="background: #18181c; padding: 6px 8px; border-radius: 4px; font-size: 0.78rem; display: flex; justify-content: space-between; align-items: center;">
+                <span style="color: #f4f4f5; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 65%;">${it.name}</span>
+                <span style="color: #fbbf24; font-weight: 800;">${it.prevQty} ➔ <strong>${it.currentQty} un</strong> (${it.diff})</span>
+              </div>
+            `).join('')}
+          </div>
+        </div>
+      ` : ''}
+    `;
+  } catch (err) {
+    console.error('Erro ao carregar análise de mudanças:', err);
+    showToast('Erro ao analisar mudanças', 'warning');
+  }
+}
+
+/**
+ * Modal "Produtos Exportados da Blitz" (Item 16)
+ * Produtos que vieram da Blitz sem corredor, sem foto, etc.
+ */
+export async function openExportedBlitzProductsModal(sessionId) {
+  let modal = document.getElementById('modal-exported-blitz-products');
+  if (!modal) {
+    modal = document.createElement('div');
+    modal.id = 'modal-exported-blitz-products';
+    modal.className = 'custom-modal';
+    document.body.appendChild(modal);
+  }
+
+  modal.innerHTML = `
+    <div class="modal-backdrop" id="modal-exported-prods-backdrop"></div>
+    <div class="modal-card" style="padding: 20px; max-width: 480px; width: 100%; box-sizing: border-box; max-height: 90vh; display: flex; flex-direction: column;">
+      <div style="display: flex; align-items: center; justify-content: space-between; border-bottom: 1px solid #27272a; padding-bottom: 8px; margin-bottom: 12px;">
+        <div>
+          <h3 style="font-size: 1.05rem; font-weight: 900; color: #f4f4f5; margin: 0; display: flex; align-items: center; gap: 6px;">
+            📋 PRODUTOS EXPORTADOS DA BLITZ
+          </h3>
+          <span style="font-size: 0.72rem; color: #fbbf24;">Cadastro complementar (corredor, fotos)</span>
+        </div>
+        <button type="button" id="btn-close-exported-prods" class="btn-icon-control" style="font-size: 1rem; width: 32px; height: 32px;">✕</button>
+      </div>
+
+      <div style="background: rgba(245, 158, 11, 0.1); border: 1px dashed rgba(245, 158, 11, 0.35); border-radius: 8px; padding: 10px; font-size: 0.76rem; color: #fef08a; line-height: 1.4; margin-bottom: 12px;">
+        💡 Produtos que foram importados pela Blitz e ainda precisam ter seu corredor definitivo ou foto complementados.
+      </div>
+
+      <div id="exported-prods-list-container" style="flex: 1; overflow-y: auto; display: flex; flex-direction: column; gap: 8px;">
+        <div style="text-align: center; padding: 30px; color: #71717a;">Carregando produtos...</div>
+      </div>
+
+      <div style="margin-top: 12px;">
+        <button type="button" id="btn-dismiss-exported-prods" class="btn-secondary" style="width: 100%; height: 44px; justify-content: center; font-weight: 800;">
+          Fechar
+        </button>
+      </div>
+    </div>
+  `;
+
+  modal.classList.add('open');
+  const closeModal = () => modal.classList.remove('open');
+
+  document.getElementById('modal-exported-prods-backdrop')?.addEventListener('click', closeModal);
+  document.getElementById('btn-close-exported-prods')?.addEventListener('click', closeModal);
+  document.getElementById('btn-dismiss-exported-prods')?.addEventListener('click', closeModal);
+
+  try {
+    const sessionItems = await getSessionBlitzItems(sessionId);
+    const container = document.getElementById('exported-prods-list-container');
+    if (!container) return;
+
+    if (sessionItems.length === 0) {
+      container.innerHTML = '<div style="text-align: center; color: #71717a; padding: 30px;">Nenhum produto nesta Blitz.</div>';
+      return;
+    }
+
+    const cards = await Promise.all(sessionItems.map(async (it) => {
+      const prod = it.product_id ? await getProductById(it.product_id) : await getProductByBarcode(it.barcode);
+      const prodName = prod?.name || `PRODUTO ${it.barcode}`;
+      const hasCorridor = Boolean(prod?.corridor && prod.corridor.trim() !== '');
+      const hasPhoto = Boolean(prod?.image && prod.image.trim() !== '');
+
+      return `
+        <div style="background: #18181c; border: 1px solid #27272a; border-radius: 8px; padding: 10px; display: flex; justify-content: space-between; align-items: center; gap: 8px;">
+          <div style="flex: 1; min-width: 0;">
+            <div style="font-size: 0.84rem; font-weight: 800; color: #f4f4f5; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">
+              ${prodName}
+            </div>
+            <div style="font-size: 0.72rem; color: #a1a1aa; margin-top: 2px;">
+              Cód: ${it.barcode} • Validade: ${formatDateBR(it.data_validade)}
+            </div>
+            <div style="display: flex; gap: 6px; margin-top: 4px;">
+              <span style="font-size: 0.65rem; font-weight: 800; padding: 1px 6px; border-radius: 4px; background: ${hasCorridor ? 'rgba(16, 185, 129, 0.2)' : 'rgba(239, 68, 68, 0.2)'}; color: ${hasCorridor ? '#34d399' : '#f87171'};">
+                ${hasCorridor ? `📍 ${prod.corridor}` : '📍 Sem corredor'}
+              </span>
+              <span style="font-size: 0.65rem; font-weight: 800; padding: 1px 6px; border-radius: 4px; background: ${hasPhoto ? 'rgba(16, 185, 129, 0.2)' : 'rgba(239, 68, 68, 0.2)'}; color: ${hasPhoto ? '#34d399' : '#f87171'};">
+                ${hasPhoto ? '📷 Com foto' : '📷 Sem foto'}
+              </span>
+            </div>
+          </div>
+          ${!hasCorridor && prod ? `
+            <button type="button" class="btn-set-corridor-fast btn-secondary" data-prod-id="${prod.id}" style="height: 34px; font-size: 0.74rem; font-weight: 800; padding: 0 8px; white-space: nowrap; color: #fbbf24; border-color: rgba(245, 158, 11, 0.4);">
+              + Corredor
+            </button>
+          ` : ''}
+        </div>
+      `;
+    }));
+
+    container.innerHTML = cards.join('');
+
+    container.querySelectorAll('.btn-set-corridor-fast').forEach(btn => {
+      btn.addEventListener('click', async () => {
+        const pId = btn.getAttribute('data-prod-id');
+        const p = await getProductById(pId);
+        if (p) {
+          promptSetProductCorridor(p, () => {
+            openExportedBlitzProductsModal(sessionId);
+          });
+        }
+      });
+    });
+  } catch (err) {
+    console.error('Erro ao carregar produtos exportados:', err);
+    showToast('Erro ao carregar produtos', 'warning');
+  }
 }
 
 // Cancela a sessão da Blitz

@@ -39,6 +39,8 @@ CREATE TABLE IF NOT EXISTS public.products (
 
 -- Migração rápida para coluna is_verified_only caso a tabela já exista:
 ALTER TABLE public.products ADD COLUMN IF NOT EXISTS is_verified_only BOOLEAN DEFAULT FALSE;
+ALTER TABLE public.products ADD COLUMN IF NOT EXISTS photo_url TEXT;
+ALTER TABLE public.products ADD COLUMN IF NOT EXISTS status TEXT DEFAULT 'PENDENTE';
 
 -- 2. Tabela de Validades (com suporte a Triagem)
 CREATE TABLE IF NOT EXISTS public.product_expirations (
@@ -68,7 +70,19 @@ CREATE TABLE IF NOT EXISTS public.inventory_counts (
   updated_at TIMESTAMPTZ DEFAULT NOW()
 );
 
--- 4. Tabela de Sessões de Blitz Semanal / por Período
+-- 4. Tabela de Sessões de Contagem de Estoque
+CREATE TABLE IF NOT EXISTS public.count_sessions (
+  id TEXT PRIMARY KEY,
+  date TEXT NOT NULL,
+  sector TEXT,
+  corridor TEXT,
+  location_type TEXT DEFAULT 'PRATELEIRA',
+  status TEXT DEFAULT 'IN_PROGRESS',
+  created_at TIMESTAMPTZ DEFAULT NOW(),
+  updated_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+-- 5. Tabela de Sessões de Blitz Semanal / por Período
 CREATE TABLE IF NOT EXISTS public.blitz_sessions (
   id TEXT PRIMARY KEY,
   blitz_type TEXT NOT NULL,
@@ -143,14 +157,147 @@ UPDATE public.products SET corridor = 'Corredor 14' WHERE corridor IN ('CORREDOR
 UPDATE public.products SET corridor = 'Adega' WHERE UPPER(corridor) LIKE '%ADEGA%';
 UPDATE public.products SET corridor = 'Área do Alho' WHERE UPPER(corridor) LIKE '%ALHO%' OR UPPER(corridor) LIKE '%ZONA DO ALHO%';
 
+-- 6. Tabela Oficial de Blitz (Registro mestre permanente da Blitz)
+CREATE TABLE IF NOT EXISTS public.blitz (
+  id TEXT PRIMARY KEY,
+  data_inicio TEXT,
+  data_fim TEXT,
+  setor TEXT DEFAULT 'MERCEARIA',
+  responsavel TEXT DEFAULT 'Ana Luiza',
+  status TEXT DEFAULT 'EM_ANDAMENTO',
+  observacao TEXT,
+  created_at TIMESTAMPTZ DEFAULT NOW(),
+  updated_at TIMESTAMPTZ DEFAULT NOW(),
+  finalized_at TIMESTAMPTZ
+);
+
+-- 7. Tabela de Itens da Blitz (Identificação por EAN + Data de Validade)
+CREATE TABLE IF NOT EXISTS public.blitz_itens (
+  id TEXT PRIMARY KEY,
+  blitz_id TEXT NOT NULL,
+  produto_id TEXT,
+  ean TEXT NOT NULL,
+  nome_produto TEXT NOT NULL,
+  data_validade TEXT NOT NULL,
+  data_validade_br TEXT,
+  status TEXT DEFAULT 'PENDENTE',
+  is_new_product BOOLEAN DEFAULT FALSE,
+  previous_quantity NUMERIC DEFAULT 0,
+  had_quantity_previously BOOLEAN DEFAULT FALSE,
+  had_zero_previously BOOLEAN DEFAULT FALSE,
+  previous_history JSONB DEFAULT '[]'::jsonb,
+  corredor TEXT,
+  foto_url TEXT,
+  created_at TIMESTAMPTZ DEFAULT NOW(),
+  updated_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+ALTER TABLE public.blitz_itens ADD COLUMN IF NOT EXISTS quantidade NUMERIC DEFAULT 0;
+ALTER TABLE public.blitz_itens ADD COLUMN IF NOT EXISTS locations JSONB DEFAULT '[]'::jsonb;
+ALTER TABLE public.blitz_itens ADD COLUMN IF NOT EXISTS conferido_em TIMESTAMPTZ;
+ALTER TABLE public.blitz_itens ADD COLUMN IF NOT EXISTS corredor TEXT;
+ALTER TABLE public.blitz_itens ADD COLUMN IF NOT EXISTS foto_url TEXT;
+
+-- 8. Tabela de Conferências da Blitz (Cada bip e conferência realizada)
+CREATE TABLE IF NOT EXISTS public.conferencias_blitz (
+  id TEXT PRIMARY KEY,
+  blitz_id TEXT NOT NULL,
+  item_id TEXT,
+  blitz_item_id TEXT,
+  produto_id TEXT,
+  ean TEXT NOT NULL,
+  data_validade TEXT NOT NULL,
+  quantidade NUMERIC DEFAULT 0,
+  quantidade_anterior NUMERIC DEFAULT 0,
+  diferenca NUMERIC DEFAULT 0,
+  tipo_conferencia TEXT DEFAULT 'MANUAL',
+  locations JSONB DEFAULT '[]'::jsonb,
+  corredor TEXT,
+  foto_url TEXT,
+  foto_conferencia TEXT,
+  foto_produto TEXT,
+  usuario TEXT DEFAULT 'Ana Luiza',
+  observacao TEXT,
+  conferido_em TIMESTAMPTZ DEFAULT NOW(),
+  created_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+ALTER TABLE public.conferencias_blitz ADD COLUMN IF NOT EXISTS item_id TEXT;
+ALTER TABLE public.conferencias_blitz ADD COLUMN IF NOT EXISTS blitz_item_id TEXT;
+ALTER TABLE public.conferencias_blitz ADD COLUMN IF NOT EXISTS produto_id TEXT;
+ALTER TABLE public.conferencias_blitz ADD COLUMN IF NOT EXISTS quantidade_anterior NUMERIC DEFAULT 0;
+ALTER TABLE public.conferencias_blitz ADD COLUMN IF NOT EXISTS diferenca NUMERIC DEFAULT 0;
+ALTER TABLE public.conferencias_blitz ADD COLUMN IF NOT EXISTS tipo_conferencia TEXT DEFAULT 'MANUAL';
+ALTER TABLE public.conferencias_blitz ADD COLUMN IF NOT EXISTS foto_url TEXT;
+ALTER TABLE public.conferencias_blitz ADD COLUMN IF NOT EXISTS foto_conferencia TEXT;
+ALTER TABLE public.conferencias_blitz ADD COLUMN IF NOT EXISTS foto_produto TEXT;
+ALTER TABLE public.conferencias_blitz ADD COLUMN IF NOT EXISTS locations JSONB DEFAULT '[]'::jsonb;
+ALTER TABLE public.conferencias_blitz ADD COLUMN IF NOT EXISTS corredor TEXT;
+
+-- 9. Tabela de Histórico de Alterações e Auditoria (Permanente e Inviolável)
+CREATE TABLE IF NOT EXISTS public.historico_alteracoes (
+  id TEXT PRIMARY KEY,
+  entidade TEXT DEFAULT 'conferencia',
+  entidade_id TEXT DEFAULT '',
+  blitz_id TEXT,
+  ean TEXT,
+  campo_alterado TEXT DEFAULT '',
+  valor_anterior TEXT,
+  valor_novo TEXT,
+  motivo TEXT,
+  usuario TEXT DEFAULT 'Ana Luiza',
+  created_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+-- Migração para tabelas existentes que possuam colunas antigas ou incompletas
+ALTER TABLE public.historico_alteracoes ADD COLUMN IF NOT EXISTS entidade TEXT DEFAULT 'conferencia';
+ALTER TABLE public.historico_alteracoes ADD COLUMN IF NOT EXISTS entidade_id TEXT DEFAULT '';
+ALTER TABLE public.historico_alteracoes ADD COLUMN IF NOT EXISTS blitz_id TEXT;
+ALTER TABLE public.historico_alteracoes ADD COLUMN IF NOT EXISTS ean TEXT;
+ALTER TABLE public.historico_alteracoes ADD COLUMN IF NOT EXISTS campo_alterado TEXT DEFAULT '';
+ALTER TABLE public.historico_alteracoes ADD COLUMN IF NOT EXISTS valor_anterior TEXT;
+ALTER TABLE public.historico_alteracoes ADD COLUMN IF NOT EXISTS valor_novo TEXT;
+ALTER TABLE public.historico_alteracoes ADD COLUMN IF NOT EXISTS motivo TEXT;
+ALTER TABLE public.historico_alteracoes ADD COLUMN IF NOT EXISTS usuario TEXT DEFAULT 'Ana Luiza';
+ALTER TABLE public.historico_alteracoes ADD COLUMN IF NOT EXISTS registro_id TEXT;
+ALTER TABLE public.historico_alteracoes ADD COLUMN IF NOT EXISTS tabela TEXT;
+ALTER TABLE public.historico_alteracoes ADD COLUMN IF NOT EXISTS acao TEXT;
+ALTER TABLE public.historico_alteracoes ADD COLUMN IF NOT EXISTS novo_valor TEXT;
+ALTER TABLE public.historico_alteracoes ADD COLUMN IF NOT EXISTS descricao TEXT;
+ALTER TABLE public.historico_alteracoes ADD COLUMN IF NOT EXISTS created_at TIMESTAMPTZ DEFAULT NOW();
+
+-- 10. Tabela de Fotos de Produtos
+CREATE TABLE IF NOT EXISTS public.fotos_produtos (
+  id TEXT PRIMARY KEY,
+  produto_id TEXT,
+  ean TEXT NOT NULL,
+  tipo TEXT DEFAULT 'PRODUTO',
+  url_ou_base64 TEXT,
+  data_validade TEXT,
+  criado_em TIMESTAMPTZ DEFAULT NOW()
+);
+
+ALTER TABLE public.fotos_produtos ADD COLUMN IF NOT EXISTS produto_id TEXT;
+ALTER TABLE public.fotos_produtos ADD COLUMN IF NOT EXISTS ean TEXT;
+ALTER TABLE public.fotos_produtos ADD COLUMN IF NOT EXISTS tipo TEXT DEFAULT 'PRODUTO';
+ALTER TABLE public.fotos_produtos ADD COLUMN IF NOT EXISTS url_ou_base64 TEXT;
+ALTER TABLE public.fotos_produtos ADD COLUMN IF NOT EXISTS data_validade TEXT;
+ALTER TABLE public.fotos_produtos ADD COLUMN IF NOT EXISTS criado_em TIMESTAMPTZ DEFAULT NOW();
+
 -- Permissões e Segurança
 GRANT USAGE ON SCHEMA public TO anon, authenticated, service_role;
 GRANT ALL ON ALL TABLES IN SCHEMA public TO anon, authenticated, service_role;
 ALTER TABLE public.products DISABLE ROW LEVEL SECURITY;
 ALTER TABLE public.product_expirations DISABLE ROW LEVEL SECURITY;
 ALTER TABLE public.inventory_counts DISABLE ROW LEVEL SECURITY;
+ALTER TABLE public.count_sessions DISABLE ROW LEVEL SECURITY;
 ALTER TABLE public.blitz_sessions DISABLE ROW LEVEL SECURITY;
 ALTER TABLE public.blitz_items DISABLE ROW LEVEL SECURITY;
+ALTER TABLE public.blitz DISABLE ROW LEVEL SECURITY;
+ALTER TABLE public.blitz_itens DISABLE ROW LEVEL SECURITY;
+ALTER TABLE public.conferencias_blitz DISABLE ROW LEVEL SECURITY;
+ALTER TABLE public.historico_alteracoes DISABLE ROW LEVEL SECURITY;
+ALTER TABLE public.fotos_produtos DISABLE ROW LEVEL SECURITY;
 `;
 
 export function registerSyncStatusListener(callback) {
@@ -291,7 +438,9 @@ function cleanPayloadForSupabase(tableName, payload) {
       name: String(payload.name || '').toUpperCase(),
       sector: String(payload.sector || 'MERCEARIA'),
       corridor: String(payload.corridor || 'CORREDOR 01'),
-      image: payload.image || null,
+      image: payload.image || payload.photo_url || null,
+      photo_url: payload.photo_url || payload.image || null,
+      status: payload.status || 'PENDENTE',
       total_quantity: Number(payload.total_quantity) || 0,
       deposit_qty: Number(payload.deposit_qty) || 0,
       fridge_qty: Number(payload.fridge_qty) || 0,
@@ -374,6 +523,105 @@ function cleanPayloadForSupabase(tableName, payload) {
       checked_at: payload.checked_at || new Date().toISOString(),
       created_at: payload.created_at || new Date().toISOString(),
       updated_at: new Date().toISOString()
+    };
+  }
+
+  if (tableName === 'blitz') {
+    return {
+      id: String(payload.id),
+      data_inicio: payload.data_inicio || null,
+      data_fim: payload.data_fim || null,
+      setor: String(payload.setor || 'MERCEARIA'),
+      responsavel: String(payload.responsavel || 'Ana Luiza'),
+      status: String(payload.status || 'EM_ANDAMENTO'),
+      observacao: payload.observacao || '',
+      created_at: payload.created_at || new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+      finalized_at: payload.finalized_at || null
+    };
+  }
+
+  if (tableName === 'blitz_itens') {
+    return {
+      id: String(payload.id),
+      blitz_id: String(payload.blitz_id),
+      produto_id: payload.produto_id ? String(payload.produto_id) : null,
+      ean: String(payload.ean || ''),
+      nome_produto: String(payload.nome_produto || ''),
+      data_validade: String(payload.data_validade || ''),
+      data_validade_br: payload.data_validade_br || '',
+      status: String(payload.status || 'PENDENTE'),
+      quantidade: Number(payload.quantidade) || 0,
+      locations: Array.isArray(payload.locations) ? payload.locations : [],
+      conferido_em: payload.conferido_em || null,
+      is_new_product: Boolean(payload.is_new_product),
+      previous_quantity: Number(payload.previous_quantity) || 0,
+      had_quantity_previously: Boolean(payload.had_quantity_previously),
+      had_zero_previously: Boolean(payload.had_zero_previously),
+      previous_history: Array.isArray(payload.previous_history) ? payload.previous_history : [],
+      corredor: payload.corredor || '',
+      foto_url: payload.foto_url || '',
+      created_at: payload.created_at || new Date().toISOString(),
+      updated_at: new Date().toISOString()
+    };
+  }
+
+  if (tableName === 'conferencias_blitz') {
+    return {
+      id: String(payload.id),
+      blitz_id: String(payload.blitz_id),
+      item_id: payload.item_id || payload.blitz_item_id ? String(payload.item_id || payload.blitz_item_id) : null,
+      blitz_item_id: payload.blitz_item_id || payload.item_id ? String(payload.blitz_item_id || payload.item_id) : null,
+      produto_id: payload.produto_id ? String(payload.produto_id) : null,
+      ean: String(payload.ean || ''),
+      data_validade: String(payload.data_validade || ''),
+      quantidade: Number(payload.quantidade) || 0,
+      quantidade_anterior: Number(payload.quantidade_anterior) || 0,
+      diferenca: Number(payload.diferenca) || 0,
+      tipo_conferencia: String(payload.tipo_conferencia || 'MANUAL'),
+      locations: Array.isArray(payload.locations) ? payload.locations : [],
+      corredor: payload.corredor || '',
+      foto_url: payload.foto_url || payload.foto_conferencia || payload.foto_produto || null,
+      foto_conferencia: payload.foto_conferencia || payload.foto_url || null,
+      foto_produto: payload.foto_produto || null,
+      usuario: String(payload.usuario || 'Ana Luiza'),
+      observacao: payload.observacao || '',
+      conferido_em: payload.conferido_em || new Date().toISOString(),
+      created_at: payload.created_at || new Date().toISOString()
+    };
+  }
+
+  if (tableName === 'historico_alteracoes') {
+    const entidade = payload.entidade || payload.tabela || 'conferencia';
+    const entidade_id = payload.entidade_id || payload.registro_id || '';
+    const campo_alterado = payload.campo_alterado || payload.acao || 'alteracao';
+    const valor_anterior = payload.valor_anterior != null ? String(payload.valor_anterior) : '';
+    const valor_novo = payload.valor_novo != null ? String(payload.valor_novo) : (payload.novo_valor != null ? String(payload.novo_valor) : '');
+    const motivo = payload.motivo || payload.descricao || '';
+    return {
+      id: String(payload.id),
+      entidade: String(entidade),
+      entidade_id: String(entidade_id),
+      blitz_id: payload.blitz_id ? String(payload.blitz_id) : null,
+      ean: payload.ean ? String(payload.ean) : null,
+      campo_alterado: String(campo_alterado),
+      valor_anterior: valor_anterior,
+      valor_novo: valor_novo,
+      motivo: String(motivo),
+      usuario: String(payload.usuario || 'Ana Luiza'),
+      created_at: payload.created_at || new Date().toISOString()
+    };
+  }
+
+  if (tableName === 'fotos_produtos') {
+    return {
+      id: String(payload.id),
+      produto_id: payload.produto_id ? String(payload.produto_id) : null,
+      ean: String(payload.ean || ''),
+      tipo: String(payload.tipo || 'PRODUTO'),
+      url_ou_base64: payload.url_ou_base64 || '',
+      data_validade: payload.data_validade || null,
+      criado_em: payload.criado_em || new Date().toISOString()
     };
   }
 
@@ -546,7 +794,12 @@ export async function processSyncQueue() {
         'count_sessions': 3,
         'inventory_counts': 4,
         'blitz_sessions': 5,
-        'blitz_items': 6
+        'blitz_items': 6,
+        'blitz': 7,
+        'blitz_itens': 8,
+        'conferencias_blitz': 9,
+        'historico_alteracoes': 10,
+        'fotos_produtos': 11
       };
 
       const sortedQueue = [...queue].sort((a, b) => {

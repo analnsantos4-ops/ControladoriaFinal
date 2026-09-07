@@ -188,10 +188,42 @@ export async function startCameraScanner(containerElementOrId, onDetectedCallbac
   } catch (html5Error) {
     console.error('[Scanner] Erro ao iniciar câmera:', html5Error);
     isScanning = false;
+    const isDenied = html5Error.name === 'NotAllowedError' || String(html5Error).includes('NotAllowedError');
+    if (containerEl) {
+      containerEl.innerHTML = `
+        <div style="padding: 24px 16px; text-align: center; color: #f4f4f5; display: flex; flex-direction: column; align-items: center; justify-content: center; min-height: 240px; height: 100%; box-sizing: border-box; background: #121215; border-radius: 12px;">
+          <div style="font-size: 2.2rem; margin-bottom: 8px;">📷🚫</div>
+          <div style="font-size: 1rem; font-weight: 800; color: #f87171; margin-bottom: 6px;">
+            ${isDenied ? 'Acesso à câmera bloqueado' : 'Câmera indisponível no momento'}
+          </div>
+          <div style="font-size: 0.82rem; color: #d4d4d8; line-height: 1.4; max-width: 320px; margin-bottom: 14px;">
+            ${isDenied 
+              ? 'O navegador bloqueou a permissão da câmera. Toque no ícone do cadeado 🔒 na barra de endereços acima e permita o acesso à Câmera.' 
+              : 'Não foi possível acessar a câmera. Você pode digitar o código de barras abaixo ou bipar com leitor bluetooth.'}
+          </div>
+          <div style="display: flex; gap: 8px; flex-wrap: wrap; justify-content: center;">
+            <button type="button" id="btn-retry-camera-perm" class="btn-primary" style="background: #3b82f6; font-size: 0.85rem; font-weight: 800; padding: 8px 16px; border-radius: 8px; cursor: pointer;">
+              🔄 Tentar Ligar Câmera
+            </button>
+            <button type="button" id="btn-focus-manual-barcode" class="btn-secondary" style="font-size: 0.85rem; font-weight: 800; padding: 8px 16px; border-radius: 8px; cursor: pointer;">
+              ⌨️ Digitar Código
+            </button>
+          </div>
+        </div>
+      `;
+      document.getElementById('btn-retry-camera-perm')?.addEventListener('click', () => {
+        startCameraScanner(containerId, onDetectedCallbackRef);
+      });
+      document.getElementById('btn-focus-manual-barcode')?.addEventListener('click', () => {
+        const inp = document.getElementById('input-scanner-barcode') || document.getElementById('input-manual-barcode');
+        inp?.focus();
+        inp?.select?.();
+      });
+    }
     return {
       success: false,
-      error: html5Error.name === 'NotAllowedError'
-        ? 'Permissão da câmera foi negada. Permita o acesso nas configurações do navegador.'
+      error: isDenied
+        ? 'Permissão da câmera bloqueada. Toque no cadeado do navegador para permitir ou use o campo de digitação.'
         : 'Câmera indisponível. Você pode digitar o código ou enviar uma foto.'
     };
   }
