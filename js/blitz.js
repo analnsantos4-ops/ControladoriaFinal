@@ -55,15 +55,7 @@ import {
   formatDateWithWeekday,
   compressImage,
   generateId,
-  speakText,
-  stopSpeaking,
-  isVoiceEnabled,
-  toggleVoiceEnabled,
-  formatDateForSpeech,
-  formatQuantityForSpeech,
-  triggerHaptic,
-  playBeep,
-  unlockAudioOnMobile
+  triggerHaptic
 } from './utils.js';
 
 import {
@@ -225,9 +217,6 @@ export function updateBlitzTopBarIndicator() {
         </div>
       </div>
       <div style="display: flex; gap: 6px; flex-shrink: 0; align-items: center;">
-        <button type="button" id="btn-dash-blitz-voice" style="background: ${isVoiceEnabled() ? 'rgba(16, 185, 129, 0.2)' : 'rgba(239, 68, 68, 0.2)'}; border: 1px solid ${isVoiceEnabled() ? '#10b981' : '#ef4444'}; color: ${isVoiceEnabled() ? '#34d399' : '#fca5a5'}; padding: 5px 8px; border-radius: 6px; font-size: 0.74rem; font-weight: 800; cursor: pointer; white-space: nowrap;" title="Ativar/Desativar Voz">
-          ${isVoiceEnabled() ? '🔊 Voz' : '🔇 Mudo'}
-        </button>
         <button type="button" id="btn-dash-resume-blitz" class="btn-primary" style="padding: 6px 12px; font-size: 0.78rem; font-weight: 900; background: #f59e0b; color: #000; border-radius: 6px; white-space: nowrap;">
           🔎 Continuar
         </button>
@@ -241,10 +230,6 @@ export function updateBlitzTopBarIndicator() {
   if (dashBanner) {
     dashBanner.innerHTML = bannerHtml;
     dashBanner.classList.remove('hidden');
-    document.getElementById('btn-dash-blitz-voice')?.addEventListener('click', () => {
-      toggleVoiceEnabled();
-      updateBlitzTopBarIndicator();
-    });
     document.getElementById('btn-dash-resume-blitz')?.addEventListener('click', () => {
       openBlitzDashboardView();
     });
@@ -262,9 +247,6 @@ export function updateBlitzTopBarIndicator() {
         </span>
       </div>
       <div style="display: flex; gap: 6px; align-items: center; flex-shrink: 0;">
-        <button type="button" id="btn-scanner-voice-toggle" style="background: ${isVoiceEnabled() ? 'rgba(16, 185, 129, 0.25)' : 'rgba(239, 68, 68, 0.25)'}; border: 1px solid ${isVoiceEnabled() ? '#10b981' : '#ef4444'}; color: ${isVoiceEnabled() ? '#86efac' : '#fca5a5'}; padding: 3px 8px; border-radius: 4px; font-size: 0.7rem; font-weight: 800; cursor: pointer;" title="Ativar/Desativar Voz">
-          ${isVoiceEnabled() ? '🔊' : '🔇'}
-        </button>
         <button type="button" id="btn-scanner-blitz-dash" style="background: rgba(245, 158, 11, 0.2); border: 1px solid rgba(245, 158, 11, 0.4); color: #fef08a; padding: 3px 8px; border-radius: 4px; font-size: 0.7rem; font-weight: 800; cursor: pointer;">
           📋 Painel
         </button>
@@ -274,10 +256,6 @@ export function updateBlitzTopBarIndicator() {
       </div>
     `;
     scannerBar.classList.remove('hidden');
-    document.getElementById('btn-scanner-voice-toggle')?.addEventListener('click', () => {
-      toggleVoiceEnabled();
-      updateBlitzTopBarIndicator();
-    });
     document.getElementById('btn-scanner-blitz-dash')?.addEventListener('click', () => {
       stopCameraScanner();
       openBlitzDashboardView();
@@ -1947,8 +1925,6 @@ function routeProductCorridorAndConference(product, targetDateISO, blitzItem = n
 
   if (!hasCorridor) {
     // Não tem corredor cadastrado: solicita os corredores
-    const cleanProdName = (product.name || '').replace(/PRODUTO\s+/i, 'Produto ').slice(0, 35);
-    speakText(`Produto ${cleanProdName}. Informe o corredor.`);
     promptSetProductCorridor(product, (updatedProd) => {
       promptBlitzQuantityAndHistoryStep(updatedProd, targetDateISO, blitzItem);
     });
@@ -1971,7 +1947,6 @@ export function promptConfirmCorridor(product, targetDateISO, blitzItem = null) 
   }
 
   const corridorName = product.corridor || 'Corredor 1';
-  speakText(`Já tenho esse produto no ${corridorName}. Está certo?`);
 
   modal.innerHTML = `
     <div class="modal-backdrop" id="modal-confirm-corridor-backdrop"></div>
@@ -2033,8 +2008,6 @@ export function promptBlitzSelectMultipleDates(product, blitzItems) {
     modal.className = 'custom-modal';
     document.body.appendChild(modal);
   }
-
-  speakText(`Existem ${blitzItems.length} datas para este produto nesta Blitz. Qual validade você está conferindo agora?`);
 
   modal.innerHTML = `
     <div class="modal-backdrop" id="modal-select-mult-dates-backdrop"></div>
@@ -2124,8 +2097,6 @@ export function promptBlitzProductNotInList(product, cleanBarcode) {
     modal.className = 'custom-modal';
     document.body.appendChild(modal);
   }
-
-  speakText('Este produto não está na lista desta Blitz. Deseja incluir agora?');
 
   modal.innerHTML = `
     <div class="modal-backdrop" id="modal-not-in-list-backdrop"></div>
@@ -2306,7 +2277,6 @@ export function promptSetProductCorridor(product, onComplete) {
       product.corridor = corridorVal;
       await saveProduct(product);
       showToast(`✓ Corredor salvo: ${corridorVal}`, 'success', 1000);
-      speakText(`Corredor ${corridorVal} salvo.`);
       triggerSyncNow().catch(err => console.warn('Sync error:', err));
     } catch (err) {
       console.warn('Erro ao salvar corredor:', err);
@@ -2432,7 +2402,6 @@ export function promptBlitzDateInputStep(product) {
       if (dateInput && d) {
         dateInput.value = d;
         triggerHaptic(20);
-        speakText(`Validade ${formatDateForSpeech(d)}.`);
         modal.querySelectorAll('.btn-quick-target-date').forEach(b => {
           b.style.background = '';
           b.style.borderColor = '';
@@ -2462,7 +2431,6 @@ export function promptBlitzDateInputStep(product) {
   // AO DAR OK: Consulta o histórico da data e avisa se é a 1ª vez ou quantas tinham na anterior!
   document.getElementById('form-blitz-date-step')?.addEventListener('submit', async (e) => {
     e.preventDefault();
-    unlockAudioOnMobile();
     const chosenDateISO = dateInput?.value || defaultDateISO;
     closeModal();
     showToast('Consultando histórico da data...', 'sync', 500);
@@ -2549,18 +2517,6 @@ export async function promptBlitzQuantityAndHistoryStep(product, targetDateISO) 
     return 0;
   };
 
-  const spokenDate = formatDateForSpeech(targetDateISO);
-  let voiceSpeechText = '';
-  if (isAlreadyInCurrentBlitz) {
-    voiceSpeechText = `Produto já conferido nesta Blitz com ${formatQuantityForSpeech(currentQuantity)}. Deseja ajustar?`;
-  } else if (isFirstTime) {
-    voiceSpeechText = `Primeiro registro da validade ${spokenDate}. Quantas unidades tem na loja?`;
-  } else if (previousQuantity > 0) {
-    voiceSpeechText = `Na blitz anterior tinham ${formatQuantityForSpeech(previousQuantity)}. Quantas tem nesta blitz?`;
-  } else {
-    voiceSpeechText = `Na blitz anterior constava como não tem. Quantas unidades tem agora?`;
-  }
-
   modal.innerHTML = `
     <div class="modal-backdrop" id="modal-blitz-qty-backdrop"></div>
     <div class="modal-card" style="padding: 18px; max-width: 450px; width: 100%; box-sizing: border-box; max-height: 92vh; overflow-y: auto;">
@@ -2570,7 +2526,6 @@ export async function promptBlitzQuantityAndHistoryStep(product, targetDateISO) 
           <span>📋</span> <span>CONFERÊNCIA DA DATA</span>
         </h3>
         <div style="display: flex; align-items: center; gap: 6px;">
-          <button type="button" id="btn-replay-speech-step" class="btn-icon-control" style="font-size: 1rem; width: 36px; height: 36px;" title="Repetir Fala da Blitz">🔊</button>
           <button type="button" id="btn-close-qty-step" class="btn-icon-control" style="font-size: 1.1rem; width: 36px; height: 36px;">✕</button>
         </div>
       </div>
@@ -2740,14 +2695,6 @@ export async function promptBlitzQuantityAndHistoryStep(product, targetDateISO) 
   modal.classList.add('open');
   const closeModal = () => modal.classList.remove('open');
 
-  // Fala o histórico da data para o conferente no celular
-  speakText(voiceSpeechText);
-
-  document.getElementById('btn-replay-speech-step')?.addEventListener('click', () => {
-    triggerHaptic(20);
-    speakText(voiceSpeechText, true);
-  });
-
   document.getElementById('modal-blitz-qty-backdrop')?.addEventListener('click', closeModal);
   document.getElementById('btn-close-qty-step')?.addEventListener('click', () => {
     closeModal();
@@ -2908,9 +2855,7 @@ export async function promptBlitzQuantityAndHistoryStep(product, targetDateISO) 
       product.status = 'VERIFICADO';
       triggerSyncNow().catch(err => console.warn('Sync error:', err));
 
-      speakText(`Validade ${spokenDate} gravada como não tem.`);
       triggerHaptic(60);
-      playBeep('warning');
 
       const comparisonMsg = isAlreadyInCurrentBlitz
         ? `<br><span style="font-size: 0.82rem; color: #cbd5e1;">Registro da Blitz atual atualizado para: <strong style="color: #ef4444;">0 un</strong></span>`
@@ -3060,9 +3005,7 @@ export async function promptBlitzQuantityAndHistoryStep(product, targetDateISO) 
 
       triggerSyncNow().catch(err => console.warn('Sync error:', err));
 
-      speakText(`Conferência gravada. ${formatQuantityForSpeech(totalQty)} registradas.`);
       triggerHaptic(60);
-      playBeep('success');
 
       let comparisonMsg = '';
       if (isAlreadyInCurrentBlitz) {
@@ -3136,7 +3079,6 @@ export function showBlitzNextProductModal(productName, messageHtml, productPhoto
   const closeModal = () => modal.classList.remove('open');
 
   triggerHaptic(40);
-  playBeep('success');
 
   document.getElementById('modal-next-prod-backdrop')?.addEventListener('click', closeModal);
   document.getElementById('btn-modal-bipar-proximo')?.addEventListener('click', () => {
@@ -4560,7 +4502,6 @@ export async function promptRequestedExpirationDate(product) {
       const prevQty = Number(conf.total) || 0;
       const prodName = product.name || conf.productName || `PRODUTO ${product.barcode}`;
       const qtyText = prevQty > 0 ? `${formatNumber(prevQty)} unidades` : '0 unidades (NÃO TEM)';
-      const speechPhrase = `O produto ${prodName} foi conferido para essa data no dia ${confDateBR} e tinha ${prevQty > 0 ? `${prevQty} unidades` : 'zero unidades'}.`;
 
       feedbackEl.innerHTML = `
         <div style="background: rgba(30, 58, 138, 0.4); border: 2px solid #3b82f6; border-radius: 10px; padding: 12px; margin-top: 4px; text-align: left; box-shadow: 0 4px 14px rgba(59, 130, 246, 0.2);">
@@ -4780,7 +4721,6 @@ async function showHasOrNotDecisionModal({ product, requestedDate, existingItem 
   );
 
   let historyBannerHtml = '';
-  let speechPhrase = '';
 
   if (confRecord) {
     const confDate = confRecord.date ? formatDateBR(confRecord.date.split('T')[0]) : '';
@@ -4792,8 +4732,6 @@ async function showHasOrNotDecisionModal({ product, requestedDate, existingItem 
     const prodName = product.name || confRecord.productName || `PRODUTO ${product.barcode}`;
     const dateFormatted = formatDateBR(requestedDate);
     const qtyText = prevQty > 0 ? `${formatNumber(prevQty)} unidades` : '0 unidades (NÃO TEM)';
-
-    speechPhrase = `O produto ${prodName} foi conferido para essa data no dia ${confDate} e tinha ${prevQty > 0 ? `${prevQty} unidades` : 'zero unidades'}.`;
 
     let locsSummary = '';
     if (confRecord.locations && confRecord.locations.length > 0) {

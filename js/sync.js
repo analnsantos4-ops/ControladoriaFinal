@@ -298,6 +298,14 @@ ALTER TABLE public.blitz_itens DISABLE ROW LEVEL SECURITY;
 ALTER TABLE public.conferencias_blitz DISABLE ROW LEVEL SECURITY;
 ALTER TABLE public.historico_alteracoes DISABLE ROW LEVEL SECURITY;
 ALTER TABLE public.fotos_produtos DISABLE ROW LEVEL SECURITY;
+
+-- Índices de integridade estritos para conferência (blitz_id + ean/produto_id + data_validade)
+CREATE UNIQUE INDEX IF NOT EXISTS idx_conf_unique_blitz_prod_data
+  ON public.conferencias_blitz (blitz_id, produto_id, data_validade)
+  WHERE produto_id IS NOT NULL;
+
+CREATE UNIQUE INDEX IF NOT EXISTS idx_conf_unique_blitz_ean_data
+  ON public.conferencias_blitz (blitz_id, ean, data_validade);
 `;
 
 export function registerSyncStatusListener(callback) {
@@ -855,15 +863,18 @@ export async function pullFromSupabase() {
       }
     };
 
-    const [products, expirations, counts, blitzSessions, blitzItems] = await Promise.all([
+    const [products, expirations, counts, blitzSessions, blitzItems, blitzList, blitzItensList, confList] = await Promise.all([
       fetchTable('products'),
       fetchTable('product_expirations'),
       fetchTable('inventory_counts'),
       fetchTable('blitz_sessions'),
-      fetchTable('blitz_items')
+      fetchTable('blitz_items'),
+      fetchTable('blitz'),
+      fetchTable('blitz_itens'),
+      fetchTable('conferencias_blitz')
     ]);
 
-    if (!products && !expirations && !counts && !blitzSessions && !blitzItems) {
+    if (!products && !expirations && !counts && !blitzSessions && !blitzItems && !blitzList && !blitzItensList && !confList) {
       return false;
     }
 
@@ -886,7 +897,7 @@ export async function pullFromSupabase() {
     const localExpMap = new Map(localExps.map((e) => [e.id, e]));
     const localBlitzMap = new Map(localBlitzSessions.map((s) => [s.id, s]));
 
-    const { db, tx } = await getSafeTransaction(['products', 'product_expirations', 'inventory_counts', 'blitz_sessions', 'blitz_items'], 'readwrite');
+    const { db, tx } = await getSafeTransaction(['products', 'product_expirations', 'inventory_counts', 'blitz_sessions', 'blitz_items', 'blitz', 'blitz_itens', 'conferencias_blitz'], 'readwrite');
     const prodStore = tx.objectStore('products');
     const expStore = tx.objectStore('product_expirations');
     const countStore = tx.objectStore('inventory_counts');
@@ -949,6 +960,21 @@ export async function pullFromSupabase() {
     if (Array.isArray(blitzItems) && blitzItems.length > 0 && db.objectStoreNames.contains('blitz_items')) {
       const blitzItemStore = tx.objectStore('blitz_items');
       blitzItems.forEach((it) => blitzItemStore.put(it));
+    }
+
+    if (Array.isArray(blitzList) && blitzList.length > 0 && db.objectStoreNames.contains('blitz')) {
+      const blitzStore = tx.objectStore('blitz');
+      blitzList.forEach((b) => blitzStore.put(b));
+    }
+
+    if (Array.isArray(blitzItensList) && blitzItensList.length > 0 && db.objectStoreNames.contains('blitz_itens')) {
+      const blitzItensStore = tx.objectStore('blitz_itens');
+      blitzItensList.forEach((bi) => blitzItensStore.put(bi));
+    }
+
+    if (Array.isArray(confList) && confList.length > 0 && db.objectStoreNames.contains('conferencias_blitz')) {
+      const confStore = tx.objectStore('conferencias_blitz');
+      confList.forEach((c) => confStore.put(c));
     }
 
     lastSyncError = null;

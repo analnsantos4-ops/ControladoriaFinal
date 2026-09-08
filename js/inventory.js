@@ -1,5 +1,5 @@
 // Mecanismo de Conferência de Estoque, Validades e Auditoria por Corredor
-import { LOCATIONS, SETORS, CORRIDORS, formatDateBR, parseDateBRtoISO, formatNumber, triggerHaptic, playBeep, getTodayISO, getDaysUntilExpiration, speakText, formatQuantityForSpeech } from './utils.js';
+import { LOCATIONS, SETORS, CORRIDORS, formatDateBR, parseDateBRtoISO, formatNumber, triggerHaptic, getTodayISO, getDaysUntilExpiration } from './utils.js';
 import { getProductExpirations, getLatestCountsForExpiration, saveInventoryCounts, saveProductExpiration, saveSession, getActiveSession, clearActiveSession, getAllProducts, getProductById, saveBlitzItem, deleteProductExpiration } from './db.js';
 import { triggerSyncNow } from './sync.js';
 import { showToast, showView, openPhotoModal } from './ui.js';
@@ -60,9 +60,6 @@ export async function openConferenceForProduct(product, preselectedExpirationId 
   // Carrega validades cadastradas para este produto
   await renderExpirationSelector(product.id, preselectedExpirationId);
   showView('view-conference');
-  const shortName = (product.name || '').replace(/PRODUTO\s+/i, 'Produto ').slice(0, 35);
-  const corridorText = product.corridor ? product.corridor : 'Sem corredor';
-  speakText(`${shortName}. ${corridorText}.`);
 }
 
 /**
@@ -400,9 +397,7 @@ export async function confirmConference() {
     }
 
     triggerHaptic(100);
-    playBeep('success');
     showToast('✓ Conferência salva!', 'success');
-    speakText(`Conferência salva. ${formatQuantityForSpeech(result.total)} registradas.`);
 
     // REGRA: Se foi conferido 0 unidades e a data de validade já passou há 1 dia ou mais (days <= -1):
     // Vai diretamente para a triagem e é removida do banco de dados para não sobrecarregar

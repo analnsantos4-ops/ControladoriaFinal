@@ -2,7 +2,7 @@
 import { generateId, getTodayISO, getDaysUntilExpiration, LOCATIONS, formatDateBR, parseDateBRtoISO } from './utils.js';
 
 const DB_NAME = 'ControladoriaAnaLuizaDB';
-const DB_VERSION = 3;
+const DB_VERSION = 4;
 
 let dbInstance = null;
 let dbInitPromise = null;
@@ -119,9 +119,23 @@ export function initDB(force = false) {
           const confStore = db.createObjectStore('conferencias_blitz', { keyPath: 'id' });
           confStore.createIndex('blitz_id', 'blitz_id', { unique: false });
           confStore.createIndex('blitz_item_id', 'blitz_item_id', { unique: false });
+          confStore.createIndex('produto_id', 'produto_id', { unique: false });
           confStore.createIndex('ean', 'ean', { unique: false });
+          confStore.createIndex('blitz_produto', ['blitz_id', 'produto_id'], { unique: false });
+          confStore.createIndex('blitz_ean', ['blitz_id', 'ean'], { unique: false });
           confStore.createIndex('conferido_em', 'conferido_em', { unique: false });
+          confStore.createIndex('sync_status', 'sync_status', { unique: false });
           confStore.createIndex('tipo_conferencia', 'tipo_conferencia', { unique: false });
+        } else {
+          try {
+            const confStore = event.target.transaction.objectStore('conferencias_blitz');
+            if (confStore) {
+              if (!confStore.indexNames.contains('produto_id')) confStore.createIndex('produto_id', 'produto_id', { unique: false });
+              if (!confStore.indexNames.contains('blitz_produto')) confStore.createIndex('blitz_produto', ['blitz_id', 'produto_id'], { unique: false });
+              if (!confStore.indexNames.contains('blitz_ean')) confStore.createIndex('blitz_ean', ['blitz_id', 'ean'], { unique: false });
+              if (!confStore.indexNames.contains('sync_status')) confStore.createIndex('sync_status', 'sync_status', { unique: false });
+            }
+          } catch (_) {}
         }
 
         // 11. Tabela oficial historico_alteracoes (Auditoria Completa e Permanente)
@@ -2954,38 +2968,52 @@ export async function saveBlitzConferenceRecord({
       }
     };
 
-    // 2. Atualiza conferencias_blitz mantendo apenas A ÚLTIMA conferência oficial da Blitz atual
+    // 2. Atualiza conferencias_blitz mantendo ESTRITAMENTE A ÚLTIMA conferência oficial da Blitz atual
+    // Regra Crítica: UNIQUE(blitz_id, product_id)
     const confReq = confStore.getAll();
     confReq.onsuccess = () => {
       const allConfs = confReq.result || [];
-      const matchingConfs = allConfs.filter(c => 
-        c.blitz_id === sessionId &&
-        String(c.ean || '').trim() === cleanBar &&
-        String(c.data_validade || '').split('T')[0] === cleanReqDate
-      );
+      const matchingConfs = allConfs.filter(c => {
+        if (c.blitz_id !== sessionId) return false;
+        const eanMatch = cleanBar && String(c.ean || '').trim() === cleanBar;
+        const pMatch = effectiveProductId && c.produto_id === effectiveProductId;
+        if (!cleanReqDate) return eanMatch || pMatch;
+        const dMatch = String(c.data_validade || '').split('T')[0] === cleanReqDate || formatDateBR(c.data_validade) === cleanReqDateBR;
+        return (eanMatch || pMatch) && dMatch;
+      });
+
+      const nowIso = new Date().toISOString();
+      let savedConfRecord = null;
 
       if (matchingConfs.length > 0) {
         const primary = matchingConfs[0];
         primary.quantidade = Number(newQuantity) || 0;
+        primary.quantidade_anterior = Number(previousQuantity) || 0;
+        primary.diferenca = diff;
         primary.locations = locations;
         primary.tipo_conferencia = 'MANUAL';
+        primary.data_validade = cleanReqDate;
+        primary.sync_status = 'pending';
+        if (effectiveProductId && !primary.produto_id) primary.produto_id = effectiveProductId;
         if (photoData) {
           primary.foto_url = photoData;
           primary.foto_conferencia = photoData;
         }
         if (corridor) primary.corredor = corridor;
-        primary.conferido_em = new Date().toISOString();
+        primary.conferido_em = nowIso;
+        primary.updated_at = nowIso;
         confStore.put(primary);
+        savedConfRecord = primary;
 
-        // Remove duplicatas excedentes
+        // Remove duplicatas excedentes para manter apenas um único registro na mesma Blitz
         for (let i = 1; i < matchingConfs.length; i++) {
           confStore.delete(matchingConfs[i].id);
         }
       } else {
-        confStore.add({
-          id: generateId('conf_'),
+        const newConf = {
+          id: generateId(),
           blitz_id: sessionId,
-          blitz_item_id: blitzItem.id,
+          blitz_item_id: blitzItem ? blitzItem.id : generateId(),
           produto_id: effectiveProductId || null,
           ean: cleanBar,
           data_validade: cleanReqDate,
@@ -2998,8 +3026,29 @@ export async function saveBlitzConferenceRecord({
           foto_url: photoData || null,
           foto_conferencia: photoData || null,
           usuario: userName || 'Ana Luiza',
-          conferido_em: new Date().toISOString()
-        });
+          sync_status: 'pending',
+          conferido_em: nowIso,
+          created_at: nowIso,
+          updated_at: nowIso
+        };
+        confStore.add(newConf);
+        savedConfRecord = newConf;
+      }
+
+      // Enfileira para sincronização segura com o Supabase
+      if (savedConfRecord) {
+        try {
+          getSafeTransaction('sync_queue', 'readwrite').then(({ tx: sTx }) => {
+            sTx.objectStore('sync_queue').add({
+              id: generateId(),
+              table_name: 'conferencias_blitz',
+              operation: 'UPSERT',
+              record_id: savedConfRecord.id,
+              payload: savedConfRecord,
+              created_at: nowIso
+            });
+          }).catch(() => {});
+        } catch (_) {}
       }
     };
   } catch (err) {
@@ -3063,20 +3112,19 @@ export async function saveBlitzConferenceRecord({
 }
 
 /**
- * REGRA DE OURO: Busca conferência exclusivamente de uma Blitz anterior que esteja FINALIZADA.
- * Retorna { blitzId, blitzDate, date, quantity, total, locations } ou null se for o primeiro registro do produto/validade.
+ * REGRA CRÍTICA: Busca conferência exclusivamente de uma Blitz anterior (id !== currentBlitzId).
+ * Retorna { blitzId, blitzLabel, blitzDate, date, quantity, total, locations, shelfQty, depositQty, fridgeQty, otherLocations, expirationDate }
+ * ou null se for o primeiro registro do produto/validade.
  * NUNCA retorna conferência da Blitz atual nem inventa histórico de 0 un.
  */
-export async function getPreviousFinalizedBlitzConference({ currentBlitzId, barcode, productId, expirationDate }) {
+export async function getPreviousFinalizedBlitzConference({ currentBlitzId, barcode, productId, expirationDate = null }) {
   if (!barcode && !productId) return null;
-  if (!expirationDate) return null;
 
   try {
     const cleanBar = barcode ? String(barcode).trim() : null;
-    const cleanExp = String(expirationDate).trim().split('T')[0];
-    const cleanExpBR = formatDateBR(cleanExp);
+    const cleanExp = expirationDate ? String(expirationDate).trim().split('T')[0] : null;
+    const cleanExpBR = cleanExp ? formatDateBR(cleanExp) : null;
 
-    // 1. Busca todas as sessões / blitzes finalizadas (exceto a atual)
     const { tx } = await getSafeTransaction(['blitz_sessions', 'blitz', 'blitz_items', 'blitz_itens', 'conferencias_blitz'], 'readonly');
     const sessionStore = tx.objectStore('blitz_sessions');
     const blitzStore = tx.objectStore('blitz');
@@ -3092,111 +3140,321 @@ export async function getPreviousFinalizedBlitzConference({ currentBlitzId, barc
       new Promise(r => { const req = confStore.getAll(); req.onsuccess = () => r(req.result || []); req.onerror = () => r([]); })
     ]);
 
-    // Mapeia blitzes FINALIZADAS distintas (excluindo estritamente a Blitz atual)
-    const finalizedBlitzMap = new Map();
+    // Mapeia todas as blitzes anteriores distintas (excluindo estritamente a Blitz atual)
+    const priorBlitzMap = new Map();
 
     allSessions.forEach(s => {
-      if (s.id !== currentBlitzId && (s.status === 'finalizada' || s.status === 'finished' || Boolean(s.finished_at))) {
-        finalizedBlitzMap.set(s.id, {
+      if (s.id && s.id !== currentBlitzId) {
+        priorBlitzMap.set(s.id, {
           id: s.id,
           date: s.finished_at || s.started_at || s.start_date || s.created_at,
-          label: s.period_label || ''
+          label: s.period_label || s.sector || `Blitz ${String(s.id).slice(0, 8)}`,
+          isFinalized: s.status === 'finalizada' || s.status === 'finished' || Boolean(s.finished_at)
         });
       }
     });
 
     allBlitzes.forEach(b => {
-      if (b.id !== currentBlitzId && (b.status === 'FINALIZADA' || b.status === 'finalizada' || Boolean(b.finalized_at))) {
-        if (!finalizedBlitzMap.has(b.id)) {
-          finalizedBlitzMap.set(b.id, {
+      if (b.id && b.id !== currentBlitzId) {
+        if (!priorBlitzMap.has(b.id)) {
+          priorBlitzMap.set(b.id, {
             id: b.id,
             date: b.finalized_at || b.data_fim || b.data_inicio || b.created_at,
-            label: b.setor || ''
+            label: b.setor || `Blitz ${String(b.id).slice(0, 8)}`,
+            isFinalized: b.status === 'FINALIZADA' || b.status === 'finalizada' || Boolean(b.finalized_at)
           });
         }
       }
     });
 
-    if (finalizedBlitzMap.size === 0) {
+    if (priorBlitzMap.size === 0) {
       return null;
     }
 
-    // Ordena as blitzes finalizadas da mais recente para a mais antiga
-    const sortedFinalized = Array.from(finalizedBlitzMap.values()).sort((a, b) => new Date(b.date || 0) - new Date(a.date || 0));
+    // Ordena as blitzes anteriores da mais recente para a mais antiga
+    const sortedPrior = Array.from(priorBlitzMap.values()).sort((a, b) => new Date(b.date || 0) - new Date(a.date || 0));
 
-    // Procura conferência deste produto e data na blitz finalizada mais recente
-    for (const b of sortedFinalized) {
+    // Função auxiliar para destrinchar contagem por localização (Prateleira, Depósito, Geladeira, etc.)
+    const parseLocations = (locs = []) => {
+      let shelfQty = 0;
+      let depositQty = 0;
+      let fridgeQty = 0;
+      const others = [];
+
+      if (Array.isArray(locs)) {
+        locs.forEach(l => {
+          const name = String(l.location || '').trim().toUpperCase();
+          const q = Number(l.quantity) || 0;
+          if (name === 'PRATELEIRA') shelfQty += q;
+          else if (name === 'DEPÓSITO' || name === 'DEPOSITO') depositQty += q;
+          else if (name === 'GELADEIRA') fridgeQty += q;
+          else if (q > 0) others.push(`${l.location}: ${q}`);
+        });
+      }
+
+      return {
+        locations: locs,
+        shelfQty,
+        depositQty,
+        fridgeQty,
+        otherLocations: others
+      };
+    };
+
+    // Procura conferência deste produto na blitz anterior mais recente
+    for (const b of sortedPrior) {
       const formattedDateStr = b.date ? (formatDateBR(b.date) || String(b.date).split('T')[0]) : 'Blitz anterior';
 
-      // Prioridade 1: tabela oficial conferencias_blitz
-      const matchConf = allConfs.find(c => {
+      // 1. Prioridade: conferencias_blitz
+      const priorConfs = allConfs.filter(c => {
         if (c.blitz_id !== b.id) return false;
         const eanMatch = cleanBar && String(c.ean || '').trim() === cleanBar;
         const idMatch = productId && c.produto_id === productId;
-        const dateMatch = String(c.data_validade || '').split('T')[0] === cleanExp || formatDateBR(c.data_validade) === cleanExpBR;
-        return (eanMatch || idMatch) && dateMatch;
+        return eanMatch || idMatch;
       });
 
-      if (matchConf) {
-        const qty = Number(matchConf.quantidade) || 0;
-        return {
-          blitzId: b.id,
-          blitzDate: formattedDateStr,
-          date: b.date,
-          quantity: qty,
-          total: qty,
-          locations: matchConf.locations || []
-        };
+      if (priorConfs.length > 0) {
+        let matchConf = null;
+        if (cleanExp) {
+          matchConf = priorConfs.find(c => {
+            const d = String(c.data_validade || '').split('T')[0];
+            return d === cleanExp || formatDateBR(c.data_validade) === cleanExpBR;
+          });
+        } else {
+          matchConf = priorConfs[0];
+        }
+
+        if (matchConf) {
+          const qty = Number(matchConf.quantidade) || 0;
+          const locDetails = parseLocations(matchConf.locations || []);
+          return {
+            blitzId: b.id,
+            blitzLabel: b.label || 'Blitz anterior',
+            blitzDate: formattedDateStr,
+            date: b.date,
+            quantity: qty,
+            total: qty,
+            expirationDate: matchConf.data_validade || cleanExp,
+            locations: locDetails.locations,
+            shelfQty: locDetails.shelfQty,
+            depositQty: locDetails.depositQty,
+            fridgeQty: locDetails.fridgeQty,
+            otherLocations: locDetails.otherLocations,
+            result: qty > 0 ? 'TEM' : 'NAO_TEM'
+          };
+        }
       }
 
-      // Prioridade 2: tabela blitz_itens
-      const matchBItem = allBItens.find(it => {
+      // 2. Prioridade: blitz_itens
+      const priorBItens = allBItens.filter(it => {
         if (it.blitz_id !== b.id) return false;
         const eanMatch = cleanBar && String(it.ean || '').trim() === cleanBar;
-        const dateMatch = String(it.data_validade || '').split('T')[0] === cleanExp || formatDateBR(it.data_validade) === cleanExpBR;
-        return eanMatch && dateMatch;
+        const idMatch = productId && it.produto_id === productId;
+        return (eanMatch || idMatch) && (it.status === 'CONFERIDO' || Boolean(it.conferido_em) || Number(it.quantidade) > 0);
       });
 
-      if (matchBItem) {
-        const qty = Number(matchBItem.quantidade != null ? matchBItem.quantidade : matchBItem.total_quantity) || 0;
-        return {
-          blitzId: b.id,
-          blitzDate: formattedDateStr,
-          date: b.date,
-          quantity: qty,
-          total: qty,
-          locations: matchBItem.locations || []
-        };
+      if (priorBItens.length > 0) {
+        let matchBItem = null;
+        if (cleanExp) {
+          matchBItem = priorBItens.find(it => {
+            const d = String(it.data_validade || '').split('T')[0];
+            return d === cleanExp || formatDateBR(it.data_validade) === cleanExpBR;
+          });
+        } else {
+          matchBItem = priorBItens[0];
+        }
+
+        if (matchBItem) {
+          const qty = Number(matchBItem.quantidade != null ? matchBItem.quantidade : matchBItem.total_quantity) || 0;
+          const locDetails = parseLocations(matchBItem.locations || []);
+          return {
+            blitzId: b.id,
+            blitzLabel: b.label || 'Blitz anterior',
+            blitzDate: formattedDateStr,
+            date: b.date,
+            quantity: qty,
+            total: qty,
+            expirationDate: matchBItem.data_validade || cleanExp,
+            locations: locDetails.locations,
+            shelfQty: locDetails.shelfQty,
+            depositQty: locDetails.depositQty,
+            fridgeQty: locDetails.fridgeQty,
+            otherLocations: locDetails.otherLocations,
+            result: qty > 0 ? 'TEM' : 'NAO_TEM'
+          };
+        }
       }
 
-      // Prioridade 3: blitz_items
-      const matchItem = allItems.find(it => {
+      // 3. Prioridade: blitz_items
+      const priorItems = allItems.filter(it => {
         if (it.blitz_session_id !== b.id) return false;
         const barMatch = cleanBar && String(it.barcode || '').trim() === cleanBar;
         const idMatch = productId && it.product_id === productId;
-        const itExp = String(it.requested_expiration_date || '').trim().split('T')[0];
-        const itExpBR = formatDateBR(itExp);
-        const dateMatch = itExp === cleanExp || itExpBR === cleanExpBR;
-        return (barMatch || idMatch) && dateMatch;
+        const isChecked = Boolean(it.checked_at) || it.result === 'TEM' || it.result === 'NAO_TEM';
+        return (barMatch || idMatch) && isChecked;
       });
 
-      if (matchItem) {
-        const qty = Number(matchItem.total_quantity != null ? matchItem.total_quantity : matchItem.quantity) || 0;
-        return {
-          blitzId: b.id,
-          blitzDate: formattedDateStr,
-          date: b.date,
-          quantity: qty,
-          total: qty,
-          locations: matchItem.locations || []
-        };
+      if (priorItems.length > 0) {
+        let matchItem = null;
+        if (cleanExp) {
+          matchItem = priorItems.find(it => {
+            const itExp = String(it.requested_expiration_date || '').trim().split('T')[0];
+            return itExp === cleanExp || formatDateBR(itExp) === cleanExpBR;
+          });
+        } else {
+          matchItem = priorItems[0];
+        }
+
+        if (matchItem) {
+          const qty = Number(matchItem.total_quantity != null ? matchItem.total_quantity : matchItem.quantity) || 0;
+          const locDetails = parseLocations(matchItem.locations || []);
+          return {
+            blitzId: b.id,
+            blitzLabel: b.label || 'Blitz anterior',
+            blitzDate: formattedDateStr,
+            date: b.date,
+            quantity: qty,
+            total: qty,
+            expirationDate: matchItem.requested_expiration_date || cleanExp,
+            locations: locDetails.locations,
+            shelfQty: locDetails.shelfQty,
+            depositQty: locDetails.depositQty,
+            fridgeQty: locDetails.fridgeQty,
+            otherLocations: locDetails.otherLocations,
+            result: matchItem.result || (qty > 0 ? 'TEM' : 'NAO_TEM')
+          };
+        }
       }
     }
 
-    // Não existe conferência em nenhuma Blitz finalizada anterior
     return null;
   } catch (err) {
-    console.warn('Erro ao consultar blitz anterior finalizada:', err);
+    console.warn('Erro ao consultar conferência em blitz anterior:', err);
+    return null;
+  }
+}
+
+export const getPreviousBlitzConferenceForProduct = getPreviousFinalizedBlitzConference;
+
+/**
+ * Consulta a conferência oficial de um produto dentro de uma Blitz específica.
+ * Garante que a busca seja estritamente escopada pelo blitz_id.
+ */
+export async function getBlitzConferenceByProductAndBlitz(blitzId, productId, barcode, targetDate = null) {
+  if (!blitzId || (!productId && !barcode)) return null;
+  const cleanBar = barcode ? String(barcode).trim() : null;
+  const cleanExp = targetDate ? String(targetDate).trim().split('T')[0] : null;
+  const cleanExpBR = cleanExp ? formatDateBR(cleanExp) : null;
+
+  try {
+    const { tx } = await getSafeTransaction(['conferencias_blitz', 'blitz_itens', 'blitz_items'], 'readonly');
+    const confStore = tx.objectStore('conferencias_blitz');
+    const bItensStore = tx.objectStore('blitz_itens');
+    const bItemsStore = tx.objectStore('blitz_items');
+
+    const [allConfs, allBItens, allItems] = await Promise.all([
+      new Promise(r => { const req = confStore.getAll(); req.onsuccess = () => r(req.result || []); req.onerror = () => r([]); }),
+      new Promise(r => { const req = bItensStore.getAll(); req.onsuccess = () => r(req.result || []); req.onerror = () => r([]); }),
+      new Promise(r => { const req = bItemsStore.getAll(); req.onsuccess = () => r(req.result || []); req.onerror = () => r([]); })
+    ]);
+
+    const matchConf = allConfs.find(c => {
+      if (c.blitz_id !== blitzId) return false;
+      const eanMatch = cleanBar && String(c.ean || '').trim() === cleanBar;
+      const pMatch = productId && c.produto_id === productId;
+      if (!cleanExp) return eanMatch || pMatch;
+      const cDate = String(c.data_validade || '').split('T')[0];
+      const dMatch = cDate === cleanExp || formatDateBR(cDate) === cleanExpBR;
+      return (eanMatch || pMatch) && dMatch;
+    });
+
+    if (matchConf) {
+      const qty = Number(matchConf.quantidade) || 0;
+      return {
+        id: matchConf.id,
+        blitzId: matchConf.blitz_id,
+        productId: matchConf.produto_id,
+        barcode: matchConf.ean,
+        expirationDate: matchConf.data_validade,
+        quantity: qty,
+        total: qty,
+        previousQuantity: Number(matchConf.quantidade_anterior) || 0,
+        difference: Number(matchConf.diferenca) || 0,
+        locations: matchConf.locations || [],
+        corredor: matchConf.corredor || '',
+        photo: matchConf.foto_url || matchConf.foto_conferencia || null,
+        conferidoEm: matchConf.conferido_em || matchConf.created_at || null,
+        raw: matchConf
+      };
+    }
+
+    const matchBItem = allBItens.find(it => {
+      if (it.blitz_id !== blitzId) return false;
+      const eanMatch = cleanBar && String(it.ean || '').trim() === cleanBar;
+      const pMatch = productId && it.produto_id === productId;
+      const isConferred = it.status === 'CONFERIDO' || Boolean(it.conferido_em) || Number(it.quantidade) > 0;
+      if (!isConferred) return false;
+      if (!cleanExp) return eanMatch || pMatch;
+      const itDate = String(it.data_validade || '').split('T')[0];
+      const dMatch = itDate === cleanExp || formatDateBR(itDate) === cleanExpBR;
+      return (eanMatch || pMatch) && dMatch;
+    });
+
+    if (matchBItem) {
+      const qty = Number(matchBItem.quantidade != null ? matchBItem.quantidade : matchBItem.total_quantity) || 0;
+      return {
+        id: matchBItem.id,
+        blitzId: matchBItem.blitz_id,
+        productId: matchBItem.produto_id,
+        barcode: matchBItem.ean,
+        expirationDate: matchBItem.data_validade,
+        quantity: qty,
+        total: qty,
+        previousQuantity: Number(matchBItem.previous_quantity) || 0,
+        difference: Number(matchBItem.difference) || 0,
+        locations: matchBItem.locations || [],
+        corredor: matchBItem.corredor || '',
+        photo: matchBItem.foto_url || null,
+        conferidoEm: matchBItem.conferido_em || matchBItem.updated_at || null,
+        raw: matchBItem
+      };
+    }
+
+    const matchItem = allItems.find(it => {
+      if (it.blitz_session_id !== blitzId) return false;
+      const barMatch = cleanBar && String(it.barcode || '').trim() === cleanBar;
+      const idMatch = productId && it.product_id === productId;
+      const isConferred = Boolean(it.checked_at) || it.result === 'TEM' || it.result === 'NAO_TEM';
+      if (!isConferred) return false;
+      if (!cleanExp) return barMatch || idMatch;
+      const itExp = String(it.requested_expiration_date || '').trim().split('T')[0];
+      const dMatch = itExp === cleanExp || formatDateBR(itExp) === cleanExpBR;
+      return (barMatch || idMatch) && dMatch;
+    });
+
+    if (matchItem) {
+      const qty = Number(matchItem.total_quantity != null ? matchItem.total_quantity : matchItem.quantity) || 0;
+      return {
+        id: matchItem.id,
+        blitzId: matchItem.blitz_session_id,
+        productId: matchItem.product_id,
+        barcode: matchItem.barcode,
+        expirationDate: matchItem.requested_expiration_date,
+        quantity: qty,
+        total: qty,
+        previousQuantity: Number(matchItem.previous_quantity) || 0,
+        difference: Number(matchItem.difference) || 0,
+        locations: matchItem.locations || [],
+        corredor: matchItem.corridor || '',
+        photo: matchItem.photo_proof || null,
+        conferidoEm: matchItem.checked_at || matchItem.created_at || null,
+        raw: matchItem
+      };
+    }
+
+    return null;
+  } catch (err) {
+    console.warn('Erro em getBlitzConferenceByProductAndBlitz:', err);
     return null;
   }
 }
@@ -3205,13 +3463,13 @@ export async function getPreviousFinalizedBlitzConference({ currentBlitzId, barc
  * Busca se o produto e validade já foram conferidos NESTA MESMA BLITZ ATUAL (em andamento).
  * Evita que ao re-bipar o mesmo produto informe falsamente 'PRIMEIRO REGISTRO'.
  */
-export async function getCurrentBlitzConferenceRecord({ currentBlitzId, barcode, productId, expirationDate }) {
-  if (!currentBlitzId || (!barcode && !productId) || !expirationDate) return null;
+export async function getCurrentBlitzConferenceRecord({ currentBlitzId, barcode, productId, expirationDate = null }) {
+  if (!currentBlitzId || (!barcode && !productId)) return null;
 
   try {
     const cleanBar = barcode ? String(barcode).trim() : null;
-    const cleanExp = String(expirationDate).trim().split('T')[0];
-    const cleanExpBR = formatDateBR(cleanExp);
+    const cleanExp = expirationDate ? String(expirationDate).trim().split('T')[0] : null;
+    const cleanExpBR = cleanExp ? formatDateBR(cleanExp) : null;
 
     const { tx } = await getSafeTransaction(['conferencias_blitz', 'blitz_itens', 'blitz_items'], 'readonly');
     const confStore = tx.objectStore('conferencias_blitz');
@@ -3229,6 +3487,7 @@ export async function getCurrentBlitzConferenceRecord({ currentBlitzId, barcode,
       if (c.blitz_id !== currentBlitzId) return false;
       const eanMatch = cleanBar && String(c.ean || '').trim() === cleanBar;
       const idMatch = productId && c.produto_id === productId;
+      if (!cleanExp) return eanMatch || idMatch;
       const dMatch = String(c.data_validade || '').split('T')[0] === cleanExp || formatDateBR(c.data_validade) === cleanExpBR;
       return (eanMatch || idMatch) && dMatch;
     });
@@ -3242,7 +3501,8 @@ export async function getCurrentBlitzConferenceRecord({ currentBlitzId, barcode,
         locations: matchConf.locations || [],
         conferidoEm: matchConf.conferido_em || matchConf.created_at || null,
         result: qty > 0 ? 'TEM' : 'NAO_TEM',
-        photo: matchConf.foto_url || matchConf.foto_conferencia || null
+        photo: matchConf.foto_url || matchConf.foto_conferencia || null,
+        expirationDate: matchConf.data_validade
       };
     }
 
@@ -3250,8 +3510,10 @@ export async function getCurrentBlitzConferenceRecord({ currentBlitzId, barcode,
     const matchBItem = allBItens.find(it => {
       if (it.blitz_id !== currentBlitzId) return false;
       const eanMatch = cleanBar && String(it.ean || '').trim() === cleanBar;
+      const idMatch = productId && it.produto_id === productId;
+      if (!cleanExp) return (eanMatch || idMatch) && (it.status === 'CONFERIDO' || Boolean(it.conferido_em) || Number(it.quantidade) > 0);
       const dMatch = String(it.data_validade || '').split('T')[0] === cleanExp || formatDateBR(it.data_validade) === cleanExpBR;
-      return eanMatch && dMatch && (it.status === 'CONFERIDO' || Boolean(it.conferido_em) || Number(it.quantidade) > 0);
+      return (eanMatch || idMatch) && dMatch && (it.status === 'CONFERIDO' || Boolean(it.conferido_em) || Number(it.quantidade) > 0);
     });
 
     if (matchBItem) {
@@ -3263,7 +3525,8 @@ export async function getCurrentBlitzConferenceRecord({ currentBlitzId, barcode,
         locations: matchBItem.locations || [],
         conferidoEm: matchBItem.conferido_em || matchBItem.updated_at || null,
         result: qty > 0 ? 'TEM' : 'NAO_TEM',
-        photo: matchBItem.foto_url || null
+        photo: matchBItem.foto_url || null,
+        expirationDate: matchBItem.data_validade
       };
     }
 
@@ -3272,6 +3535,9 @@ export async function getCurrentBlitzConferenceRecord({ currentBlitzId, barcode,
       if (it.blitz_session_id !== currentBlitzId) return false;
       const barMatch = cleanBar && String(it.barcode || '').trim() === cleanBar;
       const idMatch = productId && it.product_id === productId;
+      const isChecked = Boolean(it.checked_at) || it.result === 'TEM' || it.result === 'NAO_TEM';
+      if (!isChecked) return false;
+      if (!cleanExp) return barMatch || idMatch;
       const itExp = String(it.requested_expiration_date || '').trim().split('T')[0];
       const dMatch = itExp === cleanExp || formatDateBR(itExp) === cleanExpBR;
       return (barMatch || idMatch) && dMatch;
@@ -3286,7 +3552,8 @@ export async function getCurrentBlitzConferenceRecord({ currentBlitzId, barcode,
         locations: matchItem.locations || [],
         conferidoEm: matchItem.updated_at || matchItem.created_at || null,
         result: matchItem.result || (qty > 0 ? 'TEM' : 'NAO_TEM'),
-        photo: matchItem.photo_proof || null
+        photo: matchItem.photo_proof || null,
+        expirationDate: matchItem.requested_expiration_date
       };
     }
 

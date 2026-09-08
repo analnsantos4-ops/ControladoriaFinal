@@ -1,5 +1,5 @@
 // Sistema de Autenticação e Códigos de Segurança
-import { triggerHaptic, playBeep } from './utils.js';
+import { triggerHaptic } from './utils.js';
 
 export const ACCESS_CODE = '2002'; // Senha de Acesso Rápido
 export const MASTER_SECURITY_PIN = '200902'; // Senha Mestre para exclusões críticas e zerar banco
@@ -15,11 +15,9 @@ export function verifyCode(code) {
   const cleanCode = code.toString().trim();
   if (cleanCode === ACCESS_CODE || cleanCode === MASTER_SECURITY_PIN) {
     sessionStorage.setItem(SESSION_KEY, 'authenticated_session_2002');
-    playBeep('success');
     triggerHaptic(50);
     return true;
   } else {
-    playBeep('warning');
     triggerHaptic(120);
     return false;
   }

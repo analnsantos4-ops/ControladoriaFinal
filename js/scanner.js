@@ -3,7 +3,7 @@
 import Quagga from '@ericblade/quagga2';
 import { Html5Qrcode, Html5QrcodeSupportedFormats } from 'html5-qrcode';
 import { BrowserMultiFormatReader } from '@zxing/library';
-import { triggerHaptic, playBeep } from './utils.js';
+import { triggerHaptic } from './utils.js';
 import { showToast } from './ui.js';
 
 let isScanning = false;
@@ -509,7 +509,6 @@ async function handleCodeDetected(barcode, callback) {
   isScanning = false;
   await stopCameraScanner();
   triggerHaptic(90);
-  playBeep('success');
   if (typeof callback === 'function') {
     callback(barcode);
   }

@@ -1,5 +1,5 @@
 // Gerenciador de Interface, Telas, Modais e Toasts
-import { playBeep, triggerHaptic } from './utils.js';
+import { triggerHaptic } from './utils.js';
 import { startCameraScanner, stopCameraScanner, toggleTorch, switchCamera, toggleCameraZoom } from './scanner.js';
 import { verifyMasterSecurityPin } from './auth.js';
 
@@ -396,13 +396,11 @@ export function promptTriageBarcodeConfirmation({ product, expiration, onConfirm
       await stopActiveCamera();
       modal.classList.remove('open');
       triggerHaptic(60);
-      playBeep('success');
       if (typeof onConfirmed === 'function') {
         onConfirmed();
       }
     } else {
       triggerHaptic(120);
-      playBeep('warning');
       if (errorMsg) {
         errorMsg.innerHTML = `❌ <strong>Código incorreto!</strong><br>O código lido (<code>${cleanEntered}</code>) não corresponde ao produto selecionado (<strong>${product.name}</strong>).`;
         errorMsg.classList.remove('hidden');

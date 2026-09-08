@@ -295,41 +295,70 @@ export function getFormattedFullDate() {
   return str.charAt(0).toUpperCase() + str.slice(1);
 }
 
-// Compressão de imagem do produto no cliente
-export async function compressImage(fileOrDataUrl, maxWidth = 600, maxHeight = 600, quality = 0.7) {
+// Compressão de imagem do produto no cliente com suporte a fotos grandes (5MB, 10MB, 20MB)
+export async function compressImage(fileOrDataUrl, maxWidth = 800, maxHeight = 800, quality = 0.7) {
   return new Promise((resolve, reject) => {
+    let objectUrlToRevoke = null;
     const img = new Image();
+
     img.onload = () => {
-      let { width, height } = img;
-      if (width > height) {
-        if (width > maxWidth) {
-          height = Math.round((height * maxWidth) / width);
-          width = maxWidth;
+      try {
+        if (objectUrlToRevoke) {
+          URL.revokeObjectURL(objectUrlToRevoke);
+          objectUrlToRevoke = null;
         }
-      } else {
-        if (height > maxHeight) {
-          width = Math.round((width * maxHeight) / height);
-          height = maxHeight;
+        let { width, height } = img;
+        if (width > height) {
+          if (width > maxWidth) {
+            height = Math.round((height * maxWidth) / width);
+            width = maxWidth;
+          }
+        } else {
+          if (height > maxHeight) {
+            width = Math.round((width * maxHeight) / height);
+            height = maxHeight;
+          }
         }
+        const canvas = document.createElement('canvas');
+        canvas.width = Math.max(1, width);
+        canvas.height = Math.max(1, height);
+        const ctx = canvas.getContext('2d');
+        if (!ctx) {
+          reject(new Error('Canvas 2D context não disponível'));
+          return;
+        }
+        ctx.drawImage(img, 0, 0, width, height);
+        const resultDataUrl = canvas.toDataURL('image/jpeg', quality);
+        resolve(resultDataUrl);
+      } catch (err) {
+        reject(err);
       }
-      const canvas = document.createElement('canvas');
-      canvas.width = width;
-      canvas.height = height;
-      const ctx = canvas.getContext('2d');
-      ctx.drawImage(img, 0, 0, width, height);
-      resolve(canvas.toDataURL('image/jpeg', quality));
     };
-    img.onerror = (err) => reject(err);
+
+    img.onerror = (err) => {
+      if (objectUrlToRevoke) {
+        URL.revokeObjectURL(objectUrlToRevoke);
+        objectUrlToRevoke = null;
+      }
+      reject(err);
+    };
 
     if (typeof fileOrDataUrl === 'string') {
       img.src = fileOrDataUrl;
+    } else if (fileOrDataUrl instanceof Blob || fileOrDataUrl instanceof File) {
+      try {
+        objectUrlToRevoke = URL.createObjectURL(fileOrDataUrl);
+        img.src = objectUrlToRevoke;
+      } catch (_) {
+        const reader = new FileReader();
+        reader.onload = (e) => {
+          img.src = e.target.result;
+        };
+        reader.onerror = (err) => reject(err);
+        reader.readAsDataURL(fileOrDataUrl);
+      }
     } else {
-      const reader = new FileReader();
-      reader.onload = (e) => {
-        img.src = e.target.result;
-      };
-      reader.onerror = (err) => reject(err);
-      reader.readAsDataURL(fileOrDataUrl);
+      reject(new Error('Formato de imagem inválido para compressão'));
     }
   });
 }
@@ -339,51 +368,12 @@ export async function createThumbnail(fileOrDataUrl) {
   return compressImage(fileOrDataUrl, 120, 120, 0.65);
 }
 
-// Feedback tátil (Vibração)
+// Feedback tátil (Vibração no celular)
 export function triggerHaptic(duration = 80) {
   if (typeof navigator !== 'undefined' && navigator.vibrate) {
     try {
       navigator.vibrate(duration);
-    } catch (e) {
-      // Ignorar erros de vibração caso navegador bloqueie
-    }
-  }
-}
-
-// Feedback sonoro sintetizado (Bip do leitor)
-let audioCtx = null;
-export function playBeep(type = 'success') {
-  try {
-    const AudioContext = window.AudioContext || window.webkitAudioContext;
-    if (!AudioContext) return;
-    if (!audioCtx) {
-      audioCtx = new AudioContext();
-    }
-    if (audioCtx.state === 'suspended') {
-      audioCtx.resume();
-    }
-
-    const osc = audioCtx.createOscillator();
-    const gain = audioCtx.createGain();
-
-    osc.connect(gain);
-    gain.connect(audioCtx.destination);
-
-    if (type === 'success') {
-      osc.frequency.setValueAtTime(1200, audioCtx.currentTime);
-      gain.gain.setValueAtTime(0.15, audioCtx.currentTime);
-      gain.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + 0.12);
-      osc.start(audioCtx.currentTime);
-      osc.stop(audioCtx.currentTime + 0.12);
-    } else if (type === 'warning') {
-      osc.frequency.setValueAtTime(400, audioCtx.currentTime);
-      gain.gain.setValueAtTime(0.2, audioCtx.currentTime);
-      gain.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + 0.2);
-      osc.start(audioCtx.currentTime);
-      osc.stop(audioCtx.currentTime + 0.2);
-    }
-  } catch (e) {
-    // Ignora se áudio não estiver inicializado
+    } catch (_) {}
   }
 }
 
@@ -393,90 +383,4 @@ export function formatNumber(num) {
   return Number(num).toLocaleString('pt-BR');
 }
 
-// -------------------------------------------------------------------
-// SISTEMA DE VOZ E SÍNTESE DE FALA DESATIVADO
-// A pedido do usuário, toda emissão de voz do app foi permanentemente silenciada.
-// -------------------------------------------------------------------
-
-let appVoiceEnabled = false;
-try {
-  localStorage.setItem('app_voice_enabled', 'false');
-} catch (_) {}
-
-let cachedPtVoice = null;
-let isAudioUnlocked = false;
-
-export function getBestPortugueseVoice() {
-  return null;
-}
-
-// Desbloqueia o canal de áudio
-export function unlockAudioOnMobile() {
-  if (isAudioUnlocked) return;
-  try {
-    stopSpeaking();
-    const AudioContext = window.AudioContext || window.webkitAudioContext;
-    if (AudioContext && !audioCtx) {
-      audioCtx = new AudioContext();
-    }
-    if (audioCtx && audioCtx.state === 'suspended') {
-      audioCtx.resume();
-    }
-    isAudioUnlocked = true;
-  } catch (_) {}
-}
-
-if (typeof window !== 'undefined') {
-  ['touchstart', 'touchend', 'click', 'keydown'].forEach(evt => {
-    window.addEventListener(evt, unlockAudioOnMobile, { passive: true, once: false });
-  });
-}
-
-export function isVoiceEnabled() {
-  return false;
-}
-
-export function toggleVoiceEnabled(forceState) {
-  appVoiceEnabled = false;
-  try {
-    localStorage.setItem('app_voice_enabled', 'false');
-  } catch (_) {}
-  stopSpeaking();
-  return false;
-}
-
-/**
- * Converte data ISO ou BR para texto amigável
- */
-export function formatDateForSpeech(dateStr) {
-  if (!dateStr || typeof dateStr !== 'string') return '';
-  return formatDateBR(dateStr);
-}
-
-/**
- * Converte quantidade numérica para texto
- */
-export function formatQuantityForSpeech(qty) {
-  const n = Math.max(0, parseInt(qty, 10) || 0);
-  return `${n} unidades`;
-}
-
-/**
- * Fala o texto em voz alta: DESATIVADO
- */
-export function speakText(text, options = {}) {
-  // Desativado: usuário solicitou a remoção de voz
-  stopSpeaking();
-}
-
-/**
- * Para imediatamente qualquer fala em andamento
- */
-export function stopSpeaking() {
-  if (typeof window !== 'undefined' && 'speechSynthesis' in window) {
-    try {
-      window.speechSynthesis.cancel();
-    } catch (_) {}
-  }
-}
 

@@ -167,6 +167,10 @@ ALTER TABLE public.conferencias_blitz ADD COLUMN IF NOT EXISTS corredor TEXT;
 
 CREATE INDEX IF NOT EXISTS idx_conf_blitz_id ON public.conferencias_blitz (blitz_id);
 CREATE INDEX IF NOT EXISTS idx_conf_ean ON public.conferencias_blitz (ean);
+CREATE INDEX IF NOT EXISTS idx_conf_produto ON public.conferencias_blitz (produto_id);
+ALTER TABLE public.conferencias_blitz ADD COLUMN IF NOT EXISTS sync_status TEXT DEFAULT 'synced';
+CREATE UNIQUE INDEX IF NOT EXISTS idx_conf_unique_blitz_prod_data ON public.conferencias_blitz (blitz_id, produto_id, data_validade) WHERE produto_id IS NOT NULL;
+CREATE UNIQUE INDEX IF NOT EXISTS idx_conf_unique_blitz_ean_data ON public.conferencias_blitz (blitz_id, ean, data_validade) WHERE ean IS NOT NULL AND (produto_id IS NULL OR produto_id = '');
 
 -- 8. AUDITORIA E HISTÓRICO DE ALTERAÇÕES
 CREATE TABLE IF NOT EXISTS public.historico_alteracoes (

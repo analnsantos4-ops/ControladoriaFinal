@@ -10,7 +10,7 @@ import { startCameraScanner, stopCameraScanner, toggleTorch, switchCamera, toggl
 import { renderDashboard } from './dashboard.js';
 import { openNewProductView, saveNewProduct, handleProductImageFile, openProductDetailView, updateNewProductTotalCalculation, populateSectorAndCorridorSelects, openEditProductModal } from './products.js';
 import { openConferenceForProduct, confirmConference, openCorridorAuditView, loadCorridorAuditProducts, exportCurrentCorridorWhatsApp, setBlitzConferenceContext, getBlitzConferenceContext } from './inventory.js';
-import { SETORS, CORRIDORS, formatDateBR, formatNumber, getDaysUntilExpiration, isVoiceEnabled, toggleVoiceEnabled, speakText, triggerHaptic } from './utils.js';
+import { SETORS, CORRIDORS, formatDateBR, formatNumber, getDaysUntilExpiration, triggerHaptic } from './utils.js';
 import { openWhatsAppImportModal, formatMultipleProductsWhatsApp, openWhatsAppExportModal } from './whatsapp.js';
 import { initBlitzModule, getActiveBlitz, promptStartBlitz, handleBlitzBarcodeScanned, openBlitzDashboardView, renderBlitzDashboard, openBlitzHistoryView, updateBlitzTopBarIndicator, promptVerifiedProductLocationModal, openBlitzQuickRegisterModal, promptRequestedExpirationDate } from './blitz.js';
 
