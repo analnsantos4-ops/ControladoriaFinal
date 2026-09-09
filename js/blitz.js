@@ -2447,7 +2447,7 @@ export const promptBlitzDateAndStatus = promptBlitzDateInputStep;
  * - Pergunta: "Quantas tem nesta blitz?"
  * - Grava os dados para que na próxima verificação informe quantas tinham na anterior sucessivamente!
  */
-export async function promptBlitzQuantityAndHistoryStep(product, targetDateISO) {
+export async function promptBlitzQuantityAndHistoryStep(product, targetDateISO, blitzItem = null) {
   let modal = document.getElementById('modal-blitz-quantity-step');
   if (!modal) {
     modal = document.createElement('div');
@@ -2458,8 +2458,19 @@ export async function promptBlitzQuantityAndHistoryStep(product, targetDateISO) 
 
   const session = currentActiveBlitzSession;
   const prodSector = product.sector || session?.sector || 'MERCEARIA';
-  const prodCorridor = product.corridor || 'Corredor 1';
-  let productPhoto = product.image || product.photo_url || '';
+  const prodCorridor = product.corridor || (blitzItem?.corredor || blitzItem?.corridor) || 'Corredor 1';
+  let productPhoto = product.image || product.photo_url || (blitzItem?.foto_url || '');
+
+  // Se blitzItem não veio explicitamente, busca da sessão ativa para integridade total
+  if (!blitzItem && session?.id && product?.barcode && targetDateISO) {
+    try {
+      const allItems = await getBlitzItens(session.id);
+      blitzItem = allItems.find(it => 
+        (String(it.ean).trim() === String(product.barcode).trim() || String(it.barcode || '').trim() === String(product.barcode).trim()) &&
+        (it.data_validade === targetDateISO || it.requested_expiration_date === targetDateISO)
+      ) || null;
+    } catch (_) {}
+  }
 
   // Se o produto ainda não tem foto em memória, consulta a tabela de fotos
   if (!productPhoto) {
@@ -2672,8 +2683,8 @@ export async function promptBlitzQuantityAndHistoryStep(product, targetDateISO) 
                 <button type="button" id="btn-step-gal" class="btn-secondary" style="flex: 1; height: 40px; font-size: 0.8rem; font-weight: 800; justify-content: center; border-radius: 6px;">🖼️ Galeria</button>
               </div>
               <button type="button" id="btn-step-del-photo" class="btn-secondary ${productPhoto ? '' : 'hidden'}" style="height: 32px; font-size: 0.74rem; color: #ef4444; border-color: rgba(239, 68, 68, 0.3); justify-content: center; border-radius: 6px;">🗑️ Remover Foto</button>
-              <input type="file" id="file-step-cam" accept="image/*" capture="environment" class="hidden" />
-              <input type="file" id="file-step-gal" accept="image/*" class="hidden" />
+              <input type="file" id="file-step-cam" accept="image/*,image/jpeg,image/png,image/webp,image/heic,image/heif" capture="environment" class="hidden" />
+              <input type="file" id="file-step-gal" accept="image/*,image/jpeg,image/png,image/webp,image/heic,image/heif" class="hidden" />
             </div>
           </div>
         </div>
@@ -2768,12 +2779,23 @@ export async function promptBlitzQuantityAndHistoryStep(product, targetDateISO) 
   const handlePhotoFile = async (e) => {
     const file = e.target.files?.[0];
     if (!file) return;
-    showToast('Processando foto...', 'sync', 800);
+    showToast('Processando e compactando foto...', 'sync', 1000);
     try {
-      const compressed = await compressImage(file, 800, 0.7);
+      const compressed = await compressImage(file, 800, 800, 0.75);
+      if (!compressed || typeof compressed !== 'string' || compressed.length < 50) {
+        throw new Error('Falha ao gerar imagem compactada');
+      }
       productPhoto = compressed;
       if (photoBox) {
         photoBox.innerHTML = `<img src="${compressed}" alt="Foto" style="width: 100%; height: 100%; object-fit: cover;" referrerpolicy="no-referrer" onerror="this.style.display='none'; if (this.nextElementSibling) this.nextElementSibling.style.display='flex';" /><div class="photo-placeholder-neutral" style="display: none;"><span>📷 Sem foto</span></div>`;
+      }
+      // Atualiza também o thumbnail do cabeçalho do modal
+      const headerThumbImg = modal.querySelector('.blitz-prod-thumb-img');
+      if (headerThumbImg) {
+        headerThumbImg.src = compressed;
+        headerThumbImg.style.display = 'block';
+        const placeholder = headerThumbImg.nextElementSibling;
+        if (placeholder) placeholder.style.display = 'none';
       }
       btnDel?.classList.remove('hidden');
 
@@ -2789,11 +2811,13 @@ export async function promptBlitzQuantityAndHistoryStep(product, targetDateISO) 
           expirationDate: targetDateISO,
           type: 'PRODUTO'
         });
+        showToast('Foto do produto compactada e salva!', 'success', 900);
       } catch (saveErr) {
         console.warn('Aviso ao salvar foto no produto:', saveErr);
       }
     } catch (err) {
-      showToast('Erro ao processar imagem', 'warning');
+      console.error('Erro ao processar imagem:', err);
+      showToast('Erro ao processar imagem da foto', 'warning');
     }
   };
 
@@ -2809,6 +2833,12 @@ export async function promptBlitzQuantityAndHistoryStep(product, targetDateISO) 
     } catch (_) {}
     if (photoBox) {
       photoBox.innerHTML = `<div class="photo-placeholder-neutral"><span>📷 Sem foto</span></div>`;
+    }
+    const headerThumbImg = modal.querySelector('.blitz-prod-thumb-img');
+    if (headerThumbImg) {
+      headerThumbImg.style.display = 'none';
+      const placeholder = headerThumbImg.nextElementSibling;
+      if (placeholder) placeholder.style.display = 'flex';
     }
     btnDel?.classList.add('hidden');
     if (fileCam) fileCam.value = '';
@@ -3688,8 +3718,8 @@ function promptRegisterBlitzTemDetails(product, targetDateISO, onSave) {
                 <button type="button" id="btn-tem-photo-gal" class="btn-secondary-mini" style="flex: 1; height: 32px; font-size: 0.75rem; font-weight: 800;">🖼️ Galeria</button>
               </div>
               <button type="button" id="btn-tem-photo-del" class="btn-secondary-mini hidden" style="height: 24px; font-size: 0.7rem; color: #ef4444; border-color: rgba(239, 68, 68, 0.3);">🗑️ Remover Foto</button>
-              <input type="file" id="file-tem-cam" accept="image/*" capture="environment" class="hidden" />
-              <input type="file" id="file-tem-gal" accept="image/*" class="hidden" />
+              <input type="file" id="file-tem-cam" accept="image/*,image/jpeg,image/png,image/webp,image/heic,image/heif" capture="environment" class="hidden" />
+              <input type="file" id="file-tem-gal" accept="image/*,image/jpeg,image/png,image/webp,image/heic,image/heif" class="hidden" />
             </div>
           </div>
         </div>
@@ -3957,8 +3987,8 @@ export function promptVerifiedProductLocationModal({
                 <button type="button" id="btn-verified-photo-gallery" class="btn-secondary-mini" style="flex: 1; height: 32px; font-size: 0.75rem; font-weight: 800;">🖼️ Galeria</button>
               </div>
               <button type="button" id="btn-verified-photo-remove" class="btn-secondary-mini ${verifiedProdImage ? '' : 'hidden'}" style="height: 26px; font-size: 0.7rem; color: #ef4444; border-color: rgba(239, 68, 68, 0.3); font-weight: 700;">🗑️ Remover Foto</button>
-              <input type="file" id="file-camera-verified" accept="image/*" capture="environment" class="hidden" />
-              <input type="file" id="file-gallery-verified" accept="image/*" class="hidden" />
+              <input type="file" id="file-camera-verified" accept="image/*,image/jpeg,image/png,image/webp,image/heic,image/heif" capture="environment" class="hidden" />
+              <input type="file" id="file-gallery-verified" accept="image/*,image/jpeg,image/png,image/webp,image/heic,image/heif" class="hidden" />
             </div>
           </div>
         </div>
@@ -4135,8 +4165,8 @@ export function openBlitzQuickRegisterModal(barcode, options = {}) {
               <button type="button" id="btn-quick-photo-remove" class="btn-secondary-mini hidden" style="height: 26px; font-size: 0.7rem; color: #ef4444; border-color: rgba(239, 68, 68, 0.3); font-weight: 700;">
                 🗑️ Remover Foto
               </button>
-              <input type="file" id="file-camera-quick" accept="image/*" capture="environment" class="hidden" />
-              <input type="file" id="file-gallery-quick" accept="image/*" class="hidden" />
+              <input type="file" id="file-camera-quick" accept="image/*,image/jpeg,image/png,image/webp,image/heic,image/heif" capture="environment" class="hidden" />
+              <input type="file" id="file-gallery-quick" accept="image/*,image/jpeg,image/png,image/webp,image/heic,image/heif" class="hidden" />
             </div>
           </div>
         </div>

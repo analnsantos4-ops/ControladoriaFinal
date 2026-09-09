@@ -295,11 +295,62 @@ export function getFormattedFullDate() {
   return str.charAt(0).toUpperCase() + str.slice(1);
 }
 
-// Compressão de imagem do produto no cliente com suporte a fotos grandes (5MB, 10MB, 20MB)
-export async function compressImage(fileOrDataUrl, maxWidth = 800, maxHeight = 800, quality = 0.7) {
+// Compressão universal de imagem do produto no cliente com suporte a fotos de qualquer tamanho (5MB, 10MB, 50MB, alta resolução de câmeras)
+// Garante fundo opaco branco (nunca fica preto) e gera JPEG leve e nítido (~30KB a 60KB) para não sobrecarregar o banco
+export async function compressImage(fileOrDataUrl, maxWidth = 800, maxHeight = 800, quality = 0.75) {
+  // Correção de assinatura: se o 3º argumento for passado como qualidade (ex: compressImage(file, 800, 0.7))
+  if (typeof maxHeight === 'number' && maxHeight > 0 && maxHeight <= 1.0 && quality === 0.75) {
+    quality = maxHeight;
+    maxHeight = maxWidth;
+  }
+  if (typeof quality !== 'number' || quality <= 0 || quality > 1) {
+    quality = 0.75;
+  }
+  maxWidth = Math.max(100, Number(maxWidth) || 800);
+  maxHeight = Math.max(100, Number(maxHeight) || 800);
+
+  // ESTRATÉGIA 1: createImageBitmap nativo com orientação EXIF correta da câmera
+  if (typeof createImageBitmap === 'function' && (fileOrDataUrl instanceof Blob || fileOrDataUrl instanceof File)) {
+    try {
+      let bitmap;
+      try {
+        bitmap = await createImageBitmap(fileOrDataUrl, { imageOrientation: 'from-image' });
+      } catch (_) {
+        bitmap = await createImageBitmap(fileOrDataUrl);
+      }
+
+      if (bitmap && bitmap.width > 0 && bitmap.height > 0) {
+        const origW = bitmap.width;
+        const origH = bitmap.height;
+        const ratio = Math.min(maxWidth / origW, maxHeight / origH, 1.0);
+        const targetW = Math.max(1, Math.round(origW * ratio));
+        const targetH = Math.max(1, Math.round(origH * ratio));
+
+        const canvas = document.createElement('canvas');
+        canvas.width = targetW;
+        canvas.height = targetH;
+        const ctx = canvas.getContext('2d');
+        if (ctx) {
+          // Garante fundo branco para imagens transparentes ou bordas (evita tela preta no JPEG)
+          ctx.fillStyle = '#ffffff';
+          ctx.fillRect(0, 0, targetW, targetH);
+          ctx.imageSmoothingEnabled = true;
+          ctx.imageSmoothingQuality = 'high';
+          ctx.drawImage(bitmap, 0, 0, targetW, targetH);
+          bitmap.close();
+          return canvas.toDataURL('image/jpeg', quality);
+        }
+      }
+    } catch (bitmapErr) {
+      console.warn('[compressImage] createImageBitmap falhou, usando fallback HTMLImageElement:', bitmapErr);
+    }
+  }
+
+  // ESTRATÉGIA 2: Fallback padrão com HTMLImageElement e FileReader
   return new Promise((resolve, reject) => {
     let objectUrlToRevoke = null;
     const img = new Image();
+    img.crossOrigin = 'anonymous';
 
     img.onload = () => {
       try {
@@ -307,27 +358,28 @@ export async function compressImage(fileOrDataUrl, maxWidth = 800, maxHeight = 8
           URL.revokeObjectURL(objectUrlToRevoke);
           objectUrlToRevoke = null;
         }
-        let { width, height } = img;
-        if (width > height) {
-          if (width > maxWidth) {
-            height = Math.round((height * maxWidth) / width);
-            width = maxWidth;
-          }
-        } else {
-          if (height > maxHeight) {
-            width = Math.round((width * maxHeight) / height);
-            height = maxHeight;
-          }
-        }
+        const origW = img.naturalWidth || img.width || 800;
+        const origH = img.naturalHeight || img.height || 800;
+
+        const ratio = Math.min(maxWidth / origW, maxHeight / origH, 1.0);
+        const targetW = Math.max(1, Math.round(origW * ratio));
+        const targetH = Math.max(1, Math.round(origH * ratio));
+
         const canvas = document.createElement('canvas');
-        canvas.width = Math.max(1, width);
-        canvas.height = Math.max(1, height);
+        canvas.width = targetW;
+        canvas.height = targetH;
         const ctx = canvas.getContext('2d');
         if (!ctx) {
           reject(new Error('Canvas 2D context não disponível'));
           return;
         }
-        ctx.drawImage(img, 0, 0, width, height);
+        // Sempre preenche com fundo branco para NUNCA ficar preto caso a imagem original tenha transparência
+        ctx.fillStyle = '#ffffff';
+        ctx.fillRect(0, 0, targetW, targetH);
+        ctx.imageSmoothingEnabled = true;
+        ctx.imageSmoothingQuality = 'high';
+        ctx.drawImage(img, 0, 0, targetW, targetH);
+
         const resultDataUrl = canvas.toDataURL('image/jpeg', quality);
         resolve(resultDataUrl);
       } catch (err) {
@@ -340,7 +392,7 @@ export async function compressImage(fileOrDataUrl, maxWidth = 800, maxHeight = 8
         URL.revokeObjectURL(objectUrlToRevoke);
         objectUrlToRevoke = null;
       }
-      reject(err);
+      reject(new Error('Não foi possível carregar a imagem para compressão'));
     };
 
     if (typeof fileOrDataUrl === 'string') {

@@ -699,8 +699,8 @@ export async function openEditProductModal(product) {
               <button type="button" id="btn-edit-photo-remove" class="btn-secondary-mini" style="height: 28px; font-size: 0.72rem; color: #ef4444; border-color: rgba(239, 68, 68, 0.3);">
                 🗑️ Remover Foto
               </button>
-              <input type="file" id="file-camera-edit" accept="image/*" capture="environment" class="hidden" />
-              <input type="file" id="file-gallery-edit" accept="image/*" class="hidden" />
+              <input type="file" id="file-camera-edit" accept="image/*,image/jpeg,image/png,image/webp,image/heic,image/heif" capture="environment" class="hidden" />
+              <input type="file" id="file-gallery-edit" accept="image/*,image/jpeg,image/png,image/webp,image/heic,image/heif" class="hidden" />
             </div>
           </div>
         </div>
