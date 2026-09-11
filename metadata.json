@@ -1,6 +1,6 @@
 {
   "name": "Ana Luiza - Controladoria",
-  "description": "Aplicativo PWA offline-first de conferência de estoque, validades e auditoria com suporte a múltiplas usuárias (Ana Luiza e Angélica) e identificação de Blitz.",
+  "description": "Aplicativo profissional PWA offline-first de Controladoria e Blitz de Validade com gestão de estoque, validades múltiplas, scanner de código de barras, fotos comprimidas e sincronização com Supabase.",
   "requestFramePermissions": ["camera"],
   "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
 }

@@ -269,12 +269,75 @@ export function getTodayISO() {
   return `${year}-${month}-${day}`;
 }
 
+// Validação estrita de data de calendário (com suporte a anos bissextos e rejeição de 31/02, 31/09 etc.)
+export function isValidCalendarDate(day, month, year) {
+  const d = parseInt(day, 10);
+  const m = parseInt(month, 10);
+  const y = parseInt(year, 10);
+  if (isNaN(d) || isNaN(m) || isNaN(y)) return false;
+  if (m < 1 || m > 12) return false;
+  if (d < 1 || d > 31) return false;
+  if (y < 2020 || y > 2040) return false; // Faixa válida para produtos ativos no varejo
+
+  const isLeapYear = (y % 4 === 0 && y % 100 !== 0) || (y % 400 === 0);
+  const daysInMonth = [0, 31, isLeapYear ? 29 : 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31];
+  return d <= daysInMonth[m];
+}
+
+// Analisa e valida estritamente datas no formato brasileiro DD/MM/AAAA, DD/MM/AA ou separadores - ou .
+export function parseStrictDateBR(dateStr) {
+  if (!dateStr) return null;
+  const clean = String(dateStr).trim().replace(/[^\d\/\-.]/g, '');
+  if (!clean) return null;
+
+  // Caso 1: Formato ISO YYYY-MM-DD
+  if (/^\d{4}[\/\-.]\d{1,2}[\/\-.]\d{1,2}$/.test(clean)) {
+    const parts = clean.split(/[\/\-.]/);
+    const y = parseInt(parts[0], 10);
+    const m = parseInt(parts[1], 10);
+    const d = parseInt(parts[2], 10);
+    if (isValidCalendarDate(d, m, y)) {
+      const dStr = String(d).padStart(2, '0');
+      const mStr = String(m).padStart(2, '0');
+      const yStr = String(y);
+      return { day: d, month: m, year: y, iso: `${yStr}-${mStr}-${dStr}`, br: `${dStr}/${mStr}/${yStr}` };
+    }
+    return null;
+  }
+
+  // Caso 2: Formato DD/MM/AAAA ou DD/MM/AA
+  const parts = clean.split(/[\/\-.]/);
+  if (parts.length === 3) {
+    const d = parseInt(parts[0], 10);
+    const m = parseInt(parts[1], 10);
+    let rawYear = parts[2].trim();
+    let y = parseInt(rawYear, 10);
+    if (rawYear.length === 2) {
+      y = y < 50 ? (2000 + y) : (1900 + y);
+    }
+    if (isValidCalendarDate(d, m, y)) {
+      const dStr = String(d).padStart(2, '0');
+      const mStr = String(m).padStart(2, '0');
+      const yStr = String(y);
+      return { day: d, month: m, year: y, iso: `${yStr}-${mStr}-${dStr}`, br: `${dStr}/${mStr}/${yStr}` };
+    }
+  }
+
+  return null;
+}
+
 // Data formatada para visualização DD/MM/AAAA
 export function formatDateBR(dateString) {
   if (!dateString) return '--/--/----';
   const clean = String(dateString).trim().split('T')[0];
   if (!clean) return '--/--/----';
-  // If ISO YYYY-MM-DD
+
+  const strict = parseStrictDateBR(clean);
+  if (strict) {
+    return strict.br;
+  }
+
+  // Se ISO YYYY-MM-DD padrão
   if (clean.includes('-')) {
     const parts = clean.split('-');
     if (parts.length === 3 && parts[0].length === 4) {
@@ -284,20 +347,15 @@ export function formatDateBR(dateString) {
   return clean;
 }
 
-// Converte DD/MM/AAAA para ISO YYYY-MM-DD
+// Converte DD/MM/AAAA ou DD/MM/AA para ISO YYYY-MM-DD com validação estrita
 export function parseDateBRtoISO(dateStringBR) {
   if (!dateStringBR) return '';
   const clean = String(dateStringBR).trim().split('T')[0];
-  if (clean.includes('/')) {
-    const parts = clean.split('/');
-    if (parts.length === 3) {
-      const day = parts[0].padStart(2, '0');
-      const month = parts[1].padStart(2, '0');
-      const year = parts[2].length === 2 ? `20${parts[2]}` : parts[2];
-      return `${year}-${month}-${day}`;
-    }
+  const strict = parseStrictDateBR(clean);
+  if (strict) {
+    return strict.iso;
   }
-  return clean;
+  return '';
 }
 
 // Retorna diferença de dias até a validade

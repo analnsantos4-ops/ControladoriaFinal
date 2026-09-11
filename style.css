@@ -78,7 +78,9 @@ button {
 .app-view {
   display: none;
   min-height: 100vh;
-  padding-bottom: 40px;
+  padding-bottom: max(60px, calc(40px + env(safe-area-inset-bottom, 0px)));
+  padding-left: env(safe-area-inset-left, 0px);
+  padding-right: env(safe-area-inset-right, 0px);
   animation: fadeIn 0.2s ease-out;
 }
 

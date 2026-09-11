@@ -14,11 +14,13 @@ import { SETORS, CORRIDORS, formatDateBR, formatNumber, getDaysUntilExpiration, 
 import { openWhatsAppImportModal, formatMultipleProductsWhatsApp, openWhatsAppExportModal } from './whatsapp.js';
 import { initBlitzModule, getActiveBlitz, promptStartBlitz, handleBlitzBarcodeScanned, openBlitzDashboardView, renderBlitzDashboard, openBlitzHistoryView, updateBlitzTopBarIndicator, promptVerifiedProductLocationModal, openBlitzQuickRegisterModal, promptRequestedExpirationDate } from './blitz.js';
 import { openDatabaseModal } from './database-modal.js';
+import { initPWAInstallFlow, promptInstallApp } from './pwa.js';
 
 if (typeof window !== 'undefined') {
   window.renderBlitzDashboard = openBlitzDashboardView;
   window.openBlitzDashboardView = openBlitzDashboardView;
   window.openDatabaseModal = openDatabaseModal;
+  window.promptInstallApp = promptInstallApp;
 }
 
 let torchState = false;
@@ -27,6 +29,15 @@ let currentProductTypeFilter = 'REGISTERED'; // 'REGISTERED' | 'VERIFIED'
 // Inicialização da Aplicação
 async function initApp() {
   setupButtonFeedbacks();
+  initPWAInstallFlow();
+
+  // Listeners de instalação PWA (Android / iPhone)
+  document.getElementById('btn-header-install-app')?.addEventListener('click', () => {
+    promptInstallApp();
+  });
+  document.getElementById('btn-login-install-app')?.addEventListener('click', () => {
+    promptInstallApp();
+  });
 
   // Botão rápido para acesso/backup do banco de dados no cabeçalho
   document.getElementById('btn-header-database')?.addEventListener('click', () => {

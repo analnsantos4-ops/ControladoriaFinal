@@ -1,6 +1,6 @@
 // Módulo de Integração, Importação e Exportação do WhatsApp
 // Controladoria - Ana Luiza
-import { SETORS, CORRIDORS, LOCATIONS, formatDateBR, parseDateBRtoISO, formatNumber, compressImage, getTodayISO } from './utils.js';
+import { SETORS, CORRIDORS, LOCATIONS, formatDateBR, parseDateBRtoISO, parseStrictDateBR, isValidCalendarDate, formatNumber, compressImage, getTodayISO } from './utils.js';
 import { getProductByBarcode, saveProduct, saveProductExpiration, saveInventoryCounts, getProductExpirations, getLatestCountsForExpiration } from './db.js';
 import { showToast, showView } from './ui.js';
 import { openConferenceForProduct } from './inventory.js';
@@ -104,7 +104,7 @@ export function formatMultipleProductsWhatsApp(items, headerTitle = '') {
 // ----------------------------------------------------
 
 /**
- * Converte data curta (ex: "26/08" ou "04/10") ou longa ("02/09/2026") para ISO YYYY-MM-DD
+ * Converte data curta (ex: "26/08" ou "04/10") ou longa ("02/09/2026") para ISO YYYY-MM-DD com validação estrita
  */
 function resolveDateStringToISO(rawDateStr) {
   if (!rawDateStr) return '';
@@ -130,9 +130,11 @@ function resolveDateStringToISO(rawDateStr) {
       year = currentYear + 1;
     }
 
-    const dStr = String(day).padStart(2, '0');
-    const mStr = String(month).padStart(2, '0');
-    return `${year}-${mStr}-${dStr}`;
+    if (isValidCalendarDate(day, month, year)) {
+      const dStr = String(day).padStart(2, '0');
+      const mStr = String(month).padStart(2, '0');
+      return `${year}-${mStr}-${dStr}`;
+    }
   }
 
   return '';
@@ -201,7 +203,8 @@ export function resolveSectorString(rawStr) {
 }
 
 /**
- * Lê um texto colado do WhatsApp (com 1 ou vários produtos) e extrai os campos estruturados
+ * Lê um texto colado do WhatsApp (com 1 ou vários produtos em qualquer variação de formato)
+ * e extrai os campos estruturados de forma tolerante e inteligente
  */
 export function parseWhatsAppText(rawText) {
   if (!rawText || typeof rawText !== 'string') return [];
@@ -215,30 +218,122 @@ export function parseWhatsAppText(rawText) {
     const splitByArrow = text.split(/➡️/g);
     splitByArrow.forEach((chunk) => {
       const trimmed = chunk.trim();
-      if (trimmed.length > 5) {
+      if (trimmed.length > 3) {
         rawBlocks.push(trimmed);
       }
     });
   } else {
-    const splitByDoubleLine = text.split(/\n\s*\n+/g);
-    splitByDoubleLine.forEach((chunk) => {
-      const trimmed = chunk.trim();
-      if (trimmed.length > 5) {
-        rawBlocks.push(trimmed);
-      }
+    // Verifica se há múltiplas linhas com delimitadores (ex: "7898357410015 - BISCOITO MAIZENA - 16/10/2026 - 12 UN")
+    const individualLines = text.split(/\r?\n/).map(l => l.trim()).filter(Boolean);
+    const hasInlineSeparators = individualLines.length > 1 && individualLines.every(l => {
+      return (l.includes('-') || l.includes(';') || l.includes('|')) && /\d{7,14}/.test(l);
     });
+
+    if (hasInlineSeparators) {
+      individualLines.forEach(line => rawBlocks.push(line));
+    } else {
+      const splitByDoubleLine = text.split(/\n\s*\n+/g);
+      splitByDoubleLine.forEach((chunk) => {
+        const trimmed = chunk.trim();
+        if (trimmed.length > 3) {
+          rawBlocks.push(trimmed);
+        }
+      });
+    }
   }
 
-  if (rawBlocks.length === 0 && text.length > 5) {
+  if (rawBlocks.length === 0 && text.length > 3) {
     rawBlocks.push(text);
   }
 
   const parsedItems = [];
 
   rawBlocks.forEach((block) => {
-    const lines = block.split('\n').map((l) => l.trim()).filter(Boolean);
-    if (lines.length === 0) return;
+    const rawLines = block.split('\n').map((l) => l.trim()).filter(Boolean);
+    if (rawLines.length === 0) return;
 
+    // Variação 2: Linha única com delimitadores (ex: "7898357410015 - BISCOITO MAIZENA - 16/10/2026 - 12 UN")
+    if (rawLines.length === 1 && (rawLines[0].includes('-') || rawLines[0].includes(';') || rawLines[0].includes('|'))) {
+      const line = rawLines[0];
+      const sep = line.includes(';') ? ';' : (line.includes('|') ? '|' : '-');
+      const parts = line.split(sep).map(p => p.trim()).filter(Boolean);
+
+      let ean = '';
+      let prodName = '';
+      let dateIso = '';
+      let dateBr = '';
+      let qty = 0;
+      let corridor = '';
+      let sector = '';
+
+      parts.forEach(part => {
+        const cleanP = part.replace(/[*_~`]/g, '').trim();
+        // EAN?
+        if (/^\d{7,14}$/.test(cleanP) && !ean) {
+          ean = cleanP;
+          return;
+        }
+        // Data?
+        const dMatch = cleanP.match(/\b\d{1,2}[\/\-.]\d{1,2}(?:[\/\-.]\d{2,4})?\b/);
+        if (dMatch && !dateIso) {
+          const res = resolveDateStringToISO(dMatch[0]);
+          if (res) {
+            dateIso = res;
+            dateBr = formatDateBR(res);
+            return;
+          }
+        }
+        // Quantidade? (ex: "12 UN", "12", "12 unidades")
+        const qMatch = cleanP.match(/^(\d+(?:[.,]\d+)?)\s*(?:unidades?|unids?|un|cx|pct)?$/i) ||
+                       cleanP.match(/(?:qtd|quantidade|quant)\s*[:=]?\s*(\d+(?:[.,]\d+)?)/i);
+        if (qMatch && qty === 0) {
+          qty = parseQuantityString(qMatch[1]);
+          return;
+        }
+        // Corredor?
+        const corrRes = resolveCorridorString(cleanP);
+        if (corrRes && !corridor) {
+          corridor = corrRes;
+          return;
+        }
+        // Setor?
+        const secRes = resolveSectorString(cleanP);
+        if (secRes && !sector) {
+          sector = secRes;
+          return;
+        }
+        // Se tem letras e não é nenhum dos anteriores: nome
+        if (/[a-zA-ZÀ-ÿ]/.test(cleanP) && !prodName) {
+          prodName = cleanP.toUpperCase();
+        }
+      });
+
+      if (ean || prodName) {
+        const finalIso = dateIso || getTodayISO();
+        parsedItems.push({
+          id: `temp_${Date.now()}_${Math.random().toString(36).substr(2, 6)}`,
+          name: prodName || `PRODUTO ${ean}`,
+          barcode: ean || '',
+          sector: sector || 'MERCEARIA',
+          corridor: corridor || 'CORREDOR 01',
+          hasExplicitSector: !!sector,
+          hasExplicitCorridor: !!corridor,
+          image: '',
+          expirations: [{
+            id: `exp_${Date.now()}_${Math.random().toString(36).substr(2, 6)}`,
+            rawDate: dateBr || formatDateBR(finalIso),
+            isoDate: finalIso,
+            quantity: qty
+          }],
+          totalQuantity: qty,
+          isExisting: false,
+          existingProduct: null
+        });
+        return;
+      }
+    }
+
+    // Processamento de Bloco Multilinhas tolerante a ordem dos campos
     let name = '';
     let barcode = '';
     let corridorFound = '';
@@ -246,53 +341,43 @@ export function parseWhatsAppText(rawText) {
     const expirations = [];
     let singleDateFound = '';
     let singleQtyFound = 0;
+    const nameCandidateLines = [];
 
-    // 1. Nome da primeira linha
-    const firstLine = lines[0];
-    const nameMatch = firstLine.match(/^[➡️\s*]*(.*?)(?:\*|$)/);
-    if (nameMatch && nameMatch[1]) {
-      name = nameMatch[1].replace(/[*_~`]/g, '').trim();
-    } else {
-      name = firstLine.replace(/[*_~`]/g, '').trim();
-    }
-
-    // 2. Itera nas linhas do bloco
-    lines.forEach((line) => {
+    rawLines.forEach((line) => {
       const cleanLine = line.replace(/[*_~`]/g, '').trim();
+      let matchedSpecial = false;
 
-      // Código de barras
-      const barcodeMatch = cleanLine.match(/(?:c[óo]digo(?:\s+de\s+barras)?|ean|barras?|cod)\s*[:*》>\-\s]+([0-9]{6,14})/i);
-      if (barcodeMatch) {
-        barcode = barcodeMatch[1].trim();
-        return;
-      } else {
-        const genericBarcodeMatch = cleanLine.match(/\b([0-9]{7,14})\b/);
-        if (genericBarcodeMatch && !barcode && !cleanLine.match(/(?:validade|vencimento|unidades?|corredor|setor)/i)) {
-          barcode = genericBarcodeMatch[1].trim();
-        }
+      // 1. Código de barras (com label ou puramente numérico 7 a 14 dígitos)
+      const barcodeLabelMatch = cleanLine.match(/(?:c[óo]digo(?:\s+de\s+barras)?|ean|barras?|cod)\s*[:*》>\-\s]+([0-9]{6,14})/i);
+      if (barcodeLabelMatch) {
+        barcode = barcodeLabelMatch[1].trim();
+        matchedSpecial = true;
+      } else if (!barcode && /^[0-9]{7,14}$/.test(cleanLine)) {
+        barcode = cleanLine;
+        matchedSpecial = true;
       }
 
-      // Corredor (ex: "》Corredor: 04", "Corredor 2", "Corredor: Adega", "C04", "Gôndola 05")
+      // 2. Corredor (ex: "》Corredor: 04", "Corredor 2", "Corredor: Adega")
       const corridorMatch = cleanLine.match(/(?:corredor|g[ôo]ndola|local|corr|gondola)\s*[:*》>\-\s]+([a-z0-9\s]+)/i);
       if (corridorMatch && !corridorFound) {
         const resolved = resolveCorridorString(corridorMatch[1]);
         if (resolved) {
           corridorFound = resolved;
-          return;
+          matchedSpecial = true;
         }
       }
 
-      // Setor (ex: "》Setor: Bazar", "Setor: Mercearia", "Categoria: Perfumaria")
+      // 3. Setor (ex: "》Setor: Bazar", "Setor: Mercearia", "Categoria: Perfumaria")
       const sectorMatch = cleanLine.match(/(?:setor|categoria|departamento|cat|dep)\s*[:*》>\-\s]+([a-zà-ú\s]+)/i);
       if (sectorMatch && !sectorFound) {
         const resolved = resolveSectorString(sectorMatch[1]);
         if (resolved) {
           sectorFound = resolved;
-          return;
+          matchedSpecial = true;
         }
       }
 
-      // FORMATO 1: Linhas de data com quantidade (ex: "🔴 26/08: 3 unidades", "🟡 04/10: 1.200 unidades", "02/09/2026 - 1.344 un")
+      // 4. Linhas de data com quantidade (ex: "🔴 16/10/2026: 12 un", "26/08: 3 unidades", "02/09/2026 - 1.344 un")
       const multiDateMatch = cleanLine.match(/(?:[🔴🟡🟢🟠⚪\-\s>》]*)\b([0-9]{1,2}[\/\-.][0-9]{1,2}(?:[\/\-.][0-9]{2,4})?)\b\s*[:=\-\s]+\s*([0-9.,]+)\s*(?:unidades?|unids?|un|cx|pct)?/i);
       if (multiDateMatch) {
         const rawDate = multiDateMatch[1].trim();
@@ -305,26 +390,52 @@ export function parseWhatsAppText(rawText) {
             isoDate,
             quantity: qty
           });
-          return;
+          matchedSpecial = true;
         }
       }
 
-      // FORMATO 2: Data de validade em linha própria (ex: "》Data de validade: 02/09/2026")
-      const singleDateMatch = cleanLine.match(/(?:validade|vencimento|venc|data)\s*[:*》>\-\s]+([0-9]{1,2}[\/\-.][0-9]{1,2}(?:[\/\-.][0-9]{2,4})?)/i);
+      // 5. Data de validade em linha própria (com label ou linha que é só a data)
+      const singleDateMatch = cleanLine.match(/(?:validade|vencimento|venc|val|data)\s*[:*》>\-\s]+([0-9]{1,2}[\/\-.][0-9]{1,2}(?:[\/\-.][0-9]{2,4})?)/i);
       if (singleDateMatch) {
         singleDateFound = singleDateMatch[1].trim();
-        return;
+        matchedSpecial = true;
+      } else if (!singleDateFound && /^[🔴🟡🟢🟠⚪\s*]*([0-9]{1,2}[\/\-.][0-9]{1,2}(?:[\/\-.][0-9]{2,4})?)$/.test(cleanLine)) {
+        const pureDateMatch = cleanLine.match(/([0-9]{1,2}[\/\-.][0-9]{1,2}(?:[\/\-.][0-9]{2,4})?)/);
+        if (pureDateMatch) {
+          singleDateFound = pureDateMatch[1].trim();
+          matchedSpecial = true;
+        }
       }
 
-      // FORMATO 2: Quantidade em linha própria (ex: "》Quantidade: 1.344 unidades")
+      // 6. Quantidade em linha própria (ex: "》Quantidade: 12", "QTD: 12", "12 UN")
       const singleQtyMatch = cleanLine.match(/(?:quantidade|qtd|qtde|estoque|total)\s*[:*》>\-\s]+([0-9.,]+)/i);
       if (singleQtyMatch) {
         singleQtyFound = parseQuantityString(singleQtyMatch[1]);
-        return;
+        matchedSpecial = true;
+      } else if (singleQtyFound === 0 && /^([0-9.,]+)\s*(?:unidades?|unids?|un|cx|pct)$/i.test(cleanLine)) {
+        const pureQtyMatch = cleanLine.match(/^([0-9.,]+)/);
+        if (pureQtyMatch) {
+          singleQtyFound = parseQuantityString(pureQtyMatch[1]);
+          matchedSpecial = true;
+        }
+      }
+
+      // Se a linha não é de campo especial e tem letras, é candidata a nome do produto!
+      if (!matchedSpecial && /[a-zA-ZÀ-ÿ]/.test(cleanLine)) {
+        // Limpa possíveis marcadores iniciais como ➡️, *, -, 》
+        const cleanedCandidate = cleanLine.replace(/^[➡️\s*>\-》–—:]+/, '').replace(/[*_~`]/g, '').trim();
+        if (cleanedCandidate.length >= 2) {
+          nameCandidateLines.push(cleanedCandidate);
+        }
       }
     });
 
-    // Se encontrou data/quantidade únicas pelo Formato 2
+    // Determina o nome do produto a partir das linhas candidatas
+    if (nameCandidateLines.length > 0) {
+      name = nameCandidateLines[0];
+    }
+
+    // Se encontrou data/quantidade únicas pelo formato individual
     if (expirations.length === 0) {
       if (singleDateFound || singleQtyFound > 0) {
         const iso = resolveDateStringToISO(singleDateFound) || getTodayISO();
@@ -349,7 +460,7 @@ export function parseWhatsAppText(rawText) {
 
       parsedItems.push({
         id: `temp_${Date.now()}_${Math.random().toString(36).substr(2, 6)}`,
-        name: name.toUpperCase() || 'PRODUTO IMPORTADO',
+        name: (name || `PRODUTO ${barcode}`).toUpperCase(),
         barcode: barcode || '',
         sector: sectorFound || 'MERCEARIA',
         corridor: corridorFound || 'CORREDOR 01',

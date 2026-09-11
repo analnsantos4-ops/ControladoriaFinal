@@ -562,9 +562,16 @@ export function openBlitzMassRegisterModal(defaultSector = 'MERCEARIA') {
       triggerSyncNow().catch(err => console.warn('Sync error:', err));
 
       if (importStats && currentActiveBlitzSession) {
-        showBlitzImportSummaryModal(importStats);
+        showBlitzImportSummaryModal({
+          ...importStats,
+          parseStats: parsedItems.stats
+        });
       } else {
-        showToast(`✓ ${parsedItems.length} produtos importados!`, 'success', 2000);
+        const pStats = parsedItems.stats;
+        const msg = pStats ? 
+          `✓ Importados com sucesso: ${pStats.success} | Duplicados: ${pStats.duplicates} | Erros: ${pStats.errors}` :
+          `✓ ${parsedItems.length} produtos importados!`;
+        showToast(msg, pStats && pStats.errors > 0 ? 'warning' : 'success', 4000);
         if (currentActiveBlitzSession) {
           openBlitzDashboardView();
         }

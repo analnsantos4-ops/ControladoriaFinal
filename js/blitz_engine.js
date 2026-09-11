@@ -6,6 +6,8 @@
 import {
   formatDateBR,
   parseDateBRtoISO,
+  parseStrictDateBR,
+  isValidCalendarDate,
   getTodayISO,
   generateId,
   CORRIDORS,
@@ -29,96 +31,216 @@ import {
 import { getCurrentUser, getUserById } from './auth.js';
 
 /**
- * 1. PARSER ROBUSTO DA LISTA DA BLITZ (Item 13 e 14)
- * Suporta formatos:
- * - 7898530843159 - PACOCA DADINHO ZERO QUADRADA 144G - 28/09/2026
- * - 7897115108805 - PACOCA ROLHA AMENDUPA 1,005KG - 30/09/2026
- * - 7891910020065 - BISCOITO 130G - 14/09/2026
- * - Com tabs, ponto-e-vírgula ou vírgula
- * - Garante chave composta: EAN + DATA_DE_VALIDADE
- * - Proteção contra duplicidades (Item 17): Nunca duplica o mesmo EAN + DATA_DE_VALIDADE
+ * 1. PARSER ROBUSTO DA LISTA DA BLITZ (Item 13 e 14 e Requisito 5)
+ * Suporta:
+ * - Arquivos CSV/TXT delimitados por vírgula (,), ponto-e-vírgula (;), tabulação (\t) ou barra vertical (|)
+ * - Colunas: EAN, Nome, Validade, Quantidade, Corredor
+ * - Detecção e descarte automático de linha de cabeçalho
+ * - Formatos livres de varejo (ex: 7898530843159 - PACOCA DADINHO - 28/09/2026 - 12 UN)
+ * - Validação estrita de data de calendário (rejeição de 31/02, 31/09 etc.)
+ * - Chave composta: EAN + DATA_DE_VALIDADE
+ * - Proteção e feedback de duplicidades e erros
  */
-export function parseBlitzInputList(rawText, fallbackDateISO = null) {
-  if (!rawText) return [];
-  const lines = rawText.split(/\r?\n/).map(l => l.trim()).filter(Boolean);
+export function parseDelimitedOrStructuredInput(rawText, fallbackDateISO = null) {
+  if (!rawText) return { items: [], stats: { success: 0, errors: 0, duplicates: 0, errorDetails: [] } };
+
+  const rawLines = rawText.split(/\r?\n/).map(l => l.trim()).filter(Boolean);
+  if (rawLines.length === 0) {
+    return { items: [], stats: { success: 0, errors: 0, duplicates: 0, errorDetails: [] } };
+  }
+
   const results = [];
   const seenCompositeKeys = new Set();
+  const stats = {
+    success: 0,
+    errors: 0,
+    duplicates: 0,
+    errorDetails: []
+  };
 
-  for (let i = 0; i < lines.length; i++) {
-    const line = lines[i];
+  // 1. Analisa se o arquivo tem delimitador regular (, ; \t |)
+  const sampleLines = rawLines.slice(0, Math.min(rawLines.length, 6));
+  const counts = { ',': 0, ';': 0, '\t': 0, '|': 0 };
+
+  sampleLines.forEach(l => {
+    for (const sep of [';', '\t', '|', ',']) {
+      const parts = l.split(sep);
+      if (parts.length >= 2) {
+        counts[sep] += parts.length;
+      }
+    }
+  });
+
+  // Escolhe o separador com maior contagem regular
+  let detectedSeparator = null;
+  let maxCount = 0;
+  for (const [sep, cnt] of Object.entries(counts)) {
+    if (cnt > maxCount && cnt >= sampleLines.length * 2) {
+      maxCount = cnt;
+      detectedSeparator = sep;
+    }
+  }
+
+  let startIndex = 0;
+  let colEan = -1;
+  let colNome = -1;
+  let colValidade = -1;
+  let colQtd = -1;
+  let colCorredor = -1;
+
+  if (detectedSeparator) {
+    const firstLineCols = rawLines[0].split(detectedSeparator).map(c => c.trim().toLowerCase());
+    const isHeader = firstLineCols.some(c => 
+      c.includes('ean') || c.includes('cod') || c.includes('barr') || 
+      c.includes('nom') || c.includes('prod') || c.includes('desc') || 
+      c.includes('val') || c.includes('venc') || c.includes('data') || 
+      c.includes('qtd') || c.includes('quant') || c.includes('corr') || c.includes('loc')
+    );
+
+    if (isHeader) {
+      startIndex = 1;
+      firstLineCols.forEach((col, idx) => {
+        if (col.includes('ean') || col.includes('cod') || col.includes('barr')) colEan = idx;
+        else if (col.includes('nom') || col.includes('prod') || col.includes('desc')) colNome = idx;
+        else if (col.includes('val') || col.includes('venc') || col.includes('data')) colValidade = idx;
+        else if (col.includes('qtd') || col.includes('quant') || col.includes('est') || col.includes('unid')) colQtd = idx;
+        else if (col.includes('corr') || col.includes('loc') || col.includes('gond')) colCorredor = idx;
+      });
+    } else {
+      // Tenta inferir colunas da primeira linha de dados
+      firstLineCols.forEach((col, idx) => {
+        const clean = col.replace(/[^0-9]/g, '');
+        if (clean.length >= 7 && clean.length <= 14 && colEan === -1) {
+          colEan = idx;
+        } else if (/\b\d{1,2}[\/\-.]\d{1,2}(?:[\/\-.]\d{2,4})?\b/.test(col) && colValidade === -1) {
+          colValidade = idx;
+        } else if (/^\d+$/.test(col) && colQtd === -1 && clean.length < 5) {
+          colQtd = idx;
+        } else if (/[a-zA-ZÀ-ÿ]/.test(col) && colNome === -1) {
+          colNome = idx;
+        }
+      });
+    }
+  }
+
+  for (let i = startIndex; i < rawLines.length; i++) {
+    const line = rawLines[i].trim();
     if (!line) continue;
 
     let ean = '';
     let nome = '';
-    let dataValidade = '';
-
-    // Procura padrão de data DD/MM/AAAA, DD/MM/AA ou AAAA-MM-DD na linha
-    const dateMatch = line.match(/\b(\d{4})[/-](\d{2})[/-](\d{2})\b/) ||
-                      line.match(/\b(\d{2})[/-](\d{2})[/-](\d{4})\b/) ||
-                      line.match(/\b(\d{2})[/-](\d{2})[/-](\d{2})\b/);
     let dateISO = '';
     let dateBR = '';
+    let quantidade = 0;
+    let corredor = '';
 
-    if (dateMatch) {
-      if (dateMatch[1].length === 4) {
-        // AAAA-MM-DD
-        dateISO = `${dateMatch[1]}-${dateMatch[2]}-${dateMatch[3]}`;
-        dateBR = `${dateMatch[3]}/${dateMatch[2]}/${dateMatch[1]}`;
-      } else if (dateMatch[3].length === 4) {
-        // DD/MM/AAAA
-        dateBR = `${dateMatch[1]}/${dateMatch[2]}/${dateMatch[3]}`;
-        dateISO = `${dateMatch[3]}-${dateMatch[2]}-${dateMatch[1]}`;
-      } else {
-        // DD/MM/AA -> converte AA para 20AA (ex: 26 -> 2026)
-        const yy = parseInt(dateMatch[3], 10);
-        const yyyy = yy < 50 ? (2000 + yy) : (1900 + yy);
-        dateBR = `${dateMatch[1]}/${dateMatch[2]}/${yyyy}`;
-        dateISO = `${yyyy}-${dateMatch[2]}-${dateMatch[1]}`;
-      }
-    }
+    if (detectedSeparator) {
+      const parts = line.split(detectedSeparator).map(p => p.trim());
+      if (parts.length >= 2) {
+        // Usa mapeamento de colunas se detectado, senão inferência por campo
+        if (colEan >= 0 && parts[colEan]) {
+          ean = parts[colEan].replace(/[^0-9]/g, '');
+        }
+        if (colNome >= 0 && parts[colNome]) {
+          nome = parts[colNome];
+        }
+        if (colValidade >= 0 && parts[colValidade]) {
+          const strict = parseStrictDateBR(parts[colValidade]);
+          if (strict) {
+            dateISO = strict.iso;
+            dateBR = strict.br;
+          }
+        }
+        if (colQtd >= 0 && parts[colQtd]) {
+          const qClean = parts[colQtd].replace(/\./g, '').replace(/,/g, '.').replace(/[^0-9.]/g, '');
+          quantidade = Math.max(0, Math.round(parseFloat(qClean) || 0));
+        }
+        if (colCorredor >= 0 && parts[colCorredor]) {
+          corredor = parts[colCorredor];
+        }
 
-    // Remove a data da linha para extrair EAN e Nome
-    let lineWithoutDate = line;
-    if (dateMatch) {
-      lineWithoutDate = line.replace(dateMatch[0], '').trim();
-    }
-
-    // Extrai EAN (4 a 14 dígitos consecutivos)
-    // Tenta primeiro no início
-    const eanStartMatch = lineWithoutDate.match(/^(\d{4,14})\s*[-–—:;\t, ]\s*(.*)$/);
-    if (eanStartMatch) {
-      ean = eanStartMatch[1].trim();
-      nome = eanStartMatch[2].trim().replace(/^[-–—:;\t, ]+|[-–—:;\t, ]+$/g, '').trim();
-    } else {
-      // Tenta EAN em qualquer posição
-      const eanAnyMatch = lineWithoutDate.match(/\b(\d{7,14})\b/);
-      if (eanAnyMatch) {
-        ean = eanAnyMatch[1].trim();
-        nome = lineWithoutDate.replace(ean, '').replace(/^[-–—:;\t, ]+|[-–—:;\t, ]+$/g, '').trim();
-      } else {
-        const onlyDigits = lineWithoutDate.match(/^(\d{4,14})$/);
-        if (onlyDigits) {
-          ean = onlyDigits[1].trim();
-          nome = `PRODUTO ${ean}`;
+        // Se colunas não estavam mapeadas
+        if (!ean || !nome || !dateISO) {
+          parts.forEach(part => {
+            const pClean = part.replace(/[*_~`]/g, '').trim();
+            if (!ean && /^\d{7,14}$/.test(pClean)) {
+              ean = pClean;
+            } else if (!dateISO) {
+              const strict = parseStrictDateBR(pClean);
+              if (strict) {
+                dateISO = strict.iso;
+                dateBR = strict.br;
+              }
+            } else if (quantidade === 0 && /^\d+(?:[.,]\d+)?(?:\s*(?:unidades?|un|cx|pct))?$/i.test(pClean)) {
+              const num = pClean.replace(/\./g, '').replace(/,/g, '.').replace(/[^0-9.]/g, '');
+              quantidade = Math.max(0, Math.round(parseFloat(num) || 0));
+            } else if (!nome && /[a-zA-ZÀ-ÿ]/.test(pClean)) {
+              nome = pClean;
+            }
+          });
         }
       }
     }
 
-    // Limpa nome
-    nome = (nome || '').toUpperCase().replace(/^[-–—:;\t, ]+|[-–—:;\t, ]+$/g, '').trim();
-    if (!nome && ean) {
-      nome = `PRODUTO ${ean}`;
+    // Se não foi delimitador ou faltou dados, tenta parser de linha de texto padrão
+    if (!ean) {
+      // Extrai data
+      const dateMatch = line.match(/\b(\d{4})[/-](\d{2})[/-](\d{2})\b/) ||
+                        line.match(/\b(\d{2})[/-](\d{2})[/-](\d{4})\b/) ||
+                        line.match(/\b(\d{2})[/-](\d{2})[/-](\d{2})\b/);
+      if (dateMatch) {
+        const strict = parseStrictDateBR(dateMatch[0]);
+        if (strict) {
+          dateISO = strict.iso;
+          dateBR = strict.br;
+        }
+      }
+
+      let lineWithoutDate = line;
+      if (dateMatch) {
+        lineWithoutDate = line.replace(dateMatch[0], '').trim();
+      }
+
+      const eanStartMatch = lineWithoutDate.match(/^(\d{4,14})\s*[-–—:;\t, ]\s*(.*)$/);
+      if (eanStartMatch) {
+        ean = eanStartMatch[1].trim();
+        nome = eanStartMatch[2].trim().replace(/^[-–—:;\t, ]+|[-–—:;\t, ]+$/g, '').trim();
+      } else {
+        const eanAnyMatch = lineWithoutDate.match(/\b(\d{7,14})\b/);
+        if (eanAnyMatch) {
+          ean = eanAnyMatch[1].trim();
+          nome = lineWithoutDate.replace(ean, '').replace(/^[-–—:;\t, ]+|[-–—:;\t, ]+$/g, '').trim();
+        } else {
+          const onlyDigits = lineWithoutDate.match(/^(\d{4,14})$/);
+          if (onlyDigits) {
+            ean = onlyDigits[1].trim();
+            nome = `PRODUTO ${ean}`;
+          }
+        }
+      }
     }
 
-    if (!ean) continue;
+    // Validações e Sanidade
+    if (!ean || ean.length < 4) {
+      stats.errors++;
+      stats.errorDetails.push(`Linha ${i + 1}: Código de barras inválido ou ausente ("${line.substring(0, 30)}...")`);
+      continue;
+    }
 
-    // Se não encontrou data na linha, usa a data informada no período ou data padrão (30 dias)
+    nome = (nome || `PRODUTO ${ean}`).toUpperCase().replace(/^[-–—:;\t, ]+|[-–—:;\t, ]+$/g, '').trim();
+
+    // Se não encontrou data na linha, usa fallback
     if (!dateISO) {
       if (fallbackDateISO) {
-        dateISO = String(fallbackDateISO).includes('/') ? parseDateBRtoISO(fallbackDateISO) : String(fallbackDateISO).trim().split('T')[0];
-        dateBR = formatDateBR(dateISO);
+        const strict = parseStrictDateBR(fallbackDateISO);
+        if (strict) {
+          dateISO = strict.iso;
+          dateBR = strict.br;
+        } else {
+          dateISO = String(fallbackDateISO).split('T')[0];
+          dateBR = formatDateBR(dateISO);
+        }
       } else {
-        // Data padrão hoje + 30 dias
         const d = new Date();
         d.setDate(d.getDate() + 30);
         dateISO = d.toISOString().split('T')[0];
@@ -129,15 +251,23 @@ export function parseBlitzInputList(rawText, fallbackDateISO = null) {
     // Chave composta EAN + DATA_DE_VALIDADE (Item 14 e 17)
     const compositeKey = `${ean}__${dateISO}`;
     if (seenCompositeKeys.has(compositeKey)) {
-      // Atualiza nome se a versão atual tiver um nome mais completo
+      stats.duplicates++;
       const existing = results.find(r => r.compositeKey === compositeKey);
-      if (existing && nome && nome.length > existing.nome.length) {
-        existing.nome = nome;
+      if (existing) {
+        if (nome && nome.length > existing.nome.length && !existing.nome.includes(nome)) {
+          existing.nome = nome;
+          existing.descricao = nome;
+        }
+        if (quantidade > 0) {
+          existing.quantidade = (existing.quantidade || 0) + quantidade;
+        }
       }
-      continue; // Ignora duplicidade
+      continue;
     }
 
     seenCompositeKeys.add(compositeKey);
+    stats.success++;
+
     results.push({
       compositeKey,
       ean,
@@ -146,11 +276,21 @@ export function parseBlitzInputList(rawText, fallbackDateISO = null) {
       dataValidade: dateISO,
       data_validade: dateISO,
       dataValidadeBR: dateBR,
-      data_validade_br: dateBR
+      data_validade_br: dateBR,
+      quantidade: quantidade || 0,
+      corredor: corredor || ''
     });
   }
 
-  return results;
+  return { items: results, stats };
+}
+
+export function parseBlitzInputList(rawText, fallbackDateISO = null) {
+  const parsed = parseDelimitedOrStructuredInput(rawText, fallbackDateISO);
+  // Mantém retrocompatibilidade total com retorno de Array + anexa stats
+  const items = parsed.items;
+  items.stats = parsed.stats;
+  return items;
 }
 
 /**

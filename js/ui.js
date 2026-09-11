@@ -88,12 +88,22 @@ export function openPhotoModal(imageSrc, title = 'Foto do Produto') {
   modal.classList.add('open');
 }
 
-// Feedback haptic e áudio para botões principais
+// Feedback haptic e interação para botões principais e expansão de fotos
 export function setupButtonFeedbacks() {
   document.addEventListener('click', (e) => {
     const btn = e.target.closest('button, .action-card, .btn-primary, .btn-secondary, .quick-btn');
     if (btn) {
       triggerHaptic(20);
+    }
+
+    // Expansão de fotos ao clicar na miniatura (Requisito 14)
+    const imgEl = e.target.closest('.photo-preview-img, .product-item-thumb, .blitz-item-photo, [data-photo-expand]');
+    if (imgEl && imgEl.tagName === 'IMG' && imgEl.getAttribute('src')) {
+      const src = imgEl.getAttribute('src');
+      if (src && !src.startsWith('data:image/svg+xml')) {
+        const title = imgEl.getAttribute('alt') || 'Foto do Produto';
+        openPhotoModal(src, title);
+      }
     }
   });
 }
