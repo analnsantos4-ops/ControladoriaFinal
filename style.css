@@ -4172,3 +4172,197 @@ input[type="date"]::-webkit-calendar-picker-indicator {
   display: inline-block;
   white-space: nowrap;
 }
+
+/* ===================================================================
+   USER IDENTITY THEMES & WORKSPACE CARD (ANGÉLICA & ANA LUIZA)
+   =================================================================== */
+body.user-theme-angelica .app-top-bar {
+  border-bottom: 2px solid #10b981;
+  box-shadow: 0 4px 20px rgba(16, 185, 129, 0.15);
+}
+
+body.user-theme-ana-luiza .app-top-bar {
+  border-bottom: 2px solid #a855f7;
+  box-shadow: 0 4px 20px rgba(168, 85, 247, 0.15);
+}
+
+.user-workspace-banner {
+  margin: 0 16px 16px;
+}
+
+.user-workspace-card {
+  border-radius: var(--radius-md);
+  padding: 14px 16px;
+  background: #121214;
+  border: 1px solid #2a2a30;
+  transition: all 0.25s ease;
+}
+
+.user-workspace-card.theme-angelica {
+  background: linear-gradient(135deg, rgba(16, 185, 129, 0.1) 0%, #121214 100%);
+  border: 1px solid rgba(16, 185, 129, 0.4);
+  box-shadow: 0 4px 18px rgba(16, 185, 129, 0.1);
+}
+
+.user-workspace-card.theme-ana-luiza {
+  background: linear-gradient(135deg, rgba(168, 85, 247, 0.1) 0%, #121214 100%);
+  border: 1px solid rgba(168, 85, 247, 0.4);
+  box-shadow: 0 4px 18px rgba(168, 85, 247, 0.1);
+}
+
+.workspace-header-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 10px;
+}
+
+.workspace-user-info {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.workspace-avatar {
+  font-size: 2rem;
+  line-height: 1;
+}
+
+.workspace-title-badge {
+  font-size: 0.65rem;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--text-secondary);
+}
+
+.workspace-user-name {
+  font-size: 1.2rem;
+  font-weight: 900;
+  margin: 0;
+  line-height: 1.2;
+}
+
+.theme-angelica .workspace-user-name {
+  color: #10b981;
+}
+
+.theme-ana-luiza .workspace-user-name {
+  color: #c084fc;
+}
+
+.btn-db-quick {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  background: rgba(56, 189, 248, 0.14);
+  border: 1px solid rgba(56, 189, 248, 0.4);
+  color: #38bdf8;
+  padding: 6px 12px;
+  border-radius: var(--radius-sm);
+  font-size: 0.8rem;
+  font-weight: 800;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.btn-db-quick:hover {
+  background: rgba(56, 189, 248, 0.25);
+  transform: translateY(-1px);
+}
+
+.workspace-sectors-row {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-bottom: 12px;
+  font-size: 0.82rem;
+}
+
+.sectors-label {
+  color: var(--text-secondary);
+  font-weight: 700;
+}
+
+.sector-chip {
+  display: inline-block;
+  padding: 3px 8px;
+  border-radius: var(--radius-full);
+  font-size: 0.75rem;
+  font-weight: 800;
+  background: #1e1e24;
+  border: 1px solid #33333d;
+  color: var(--text-primary);
+}
+
+.theme-angelica .sector-chip {
+  background: rgba(16, 185, 129, 0.14);
+  border-color: rgba(16, 185, 129, 0.35);
+  color: #34d399;
+}
+
+.theme-ana-luiza .sector-chip {
+  background: rgba(168, 85, 247, 0.14);
+  border-color: rgba(168, 85, 247, 0.35);
+  color: #d8b4fe;
+}
+
+.workspace-scope-toggles {
+  display: flex;
+  gap: 8px;
+}
+
+.btn-scope-toggle {
+  flex: 1;
+  padding: 8px 10px;
+  border-radius: var(--radius-sm);
+  font-size: 0.8rem;
+  font-weight: 800;
+  border: 1px solid #2a2a30;
+  background: #1a1a1e;
+  color: var(--text-secondary);
+  cursor: pointer;
+  text-align: center;
+  transition: all 0.2s ease;
+}
+
+.btn-scope-toggle.active {
+  background: var(--text-primary);
+  color: #050505;
+  border-color: var(--text-primary);
+}
+
+.theme-angelica .btn-scope-toggle.active {
+  background: #10b981;
+  color: #042617;
+  border-color: #10b981;
+}
+
+.theme-ana-luiza .btn-scope-toggle.active {
+  background: #a855f7;
+  color: #ffffff;
+  border-color: #a855f7;
+}
+
+/* Header Quick DB Button */
+.btn-header-db {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  background: rgba(56, 189, 248, 0.12);
+  border: 1px solid rgba(56, 189, 248, 0.35);
+  color: #38bdf8;
+  padding: 4px 10px;
+  border-radius: var(--radius-sm);
+  font-size: 0.78rem;
+  font-weight: 800;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.btn-header-db:hover {
+  background: rgba(56, 189, 248, 0.22);
+  color: #7dd3fc;
+}

@@ -1,9 +1,9 @@
 // Importa Estilos Globais
 import '../style.css';
 
-// Orquestrador Principal do Aplicativo Controladoria - Ana Luiza
-import { isAuthenticated, verifyCode, verifyMasterSecurityPin, logout } from './auth.js';
-import { initDB, getProductByBarcode, getProductById, searchProducts, getAllProducts, getProductExpirations, getLatestCountsForExpiration, clearAllDatabaseData, toggleExpirationTriaged, sendProductExpirationToTriage, restoreProductExpirationFromTriage, runAutomaticTriageCleanup, getDatabaseStorageStats, TRIAGE_RETENTION_MS, isProductVerifiedOnly, isProductBlitzImport, saveProduct } from './db.js';
+// Orquestrador Principal do Aplicativo Controladoria - Ana Luiza & Angélica
+import { isAuthenticated, verifyCode, verifyMasterSecurityPin, logout, getCurrentUser, SYSTEM_USERS } from './auth.js';
+import { initDB, getProductByBarcode, getProductById, searchProducts, getAllProducts, getProductExpirations, getLatestCountsForExpiration, clearAllDatabaseData, toggleExpirationTriaged, sendProductExpirationToTriage, restoreProductExpirationFromTriage, runAutomaticTriageCleanup, getDatabaseStorageStats, TRIAGE_RETENTION_MS, isProductRegistered, isProductVerifiedOnly, isProductBlitzImport, saveProduct } from './db.js';
 import { initSyncEngine, registerSyncStatusListener, wipeSupabaseCloudData, triggerSyncNow, checkSupabaseHealth, syncAllLocalDataToSupabase, SUPABASE_SETUP_SQL, getSyncStatus, getSyncDiagnostics } from './sync.js';
 import { showView, showToast, setupButtonFeedbacks, openPhotoModal, getActiveView, promptTriageBarcodeConfirmation, promptSecurityPin } from './ui.js';
 import { startCameraScanner, stopCameraScanner, toggleTorch, switchCamera, toggleCameraZoom, scanBarcodeFromImageFile } from './scanner.js';
@@ -13,10 +13,12 @@ import { openConferenceForProduct, confirmConference, openCorridorAuditView, loa
 import { SETORS, CORRIDORS, formatDateBR, formatNumber, getDaysUntilExpiration, triggerHaptic } from './utils.js';
 import { openWhatsAppImportModal, formatMultipleProductsWhatsApp, openWhatsAppExportModal } from './whatsapp.js';
 import { initBlitzModule, getActiveBlitz, promptStartBlitz, handleBlitzBarcodeScanned, openBlitzDashboardView, renderBlitzDashboard, openBlitzHistoryView, updateBlitzTopBarIndicator, promptVerifiedProductLocationModal, openBlitzQuickRegisterModal, promptRequestedExpirationDate } from './blitz.js';
+import { openDatabaseModal } from './database-modal.js';
 
 if (typeof window !== 'undefined') {
   window.renderBlitzDashboard = openBlitzDashboardView;
   window.openBlitzDashboardView = openBlitzDashboardView;
+  window.openDatabaseModal = openDatabaseModal;
 }
 
 let torchState = false;
@@ -25,6 +27,11 @@ let currentProductTypeFilter = 'REGISTERED'; // 'REGISTERED' | 'VERIFIED'
 // Inicialização da Aplicação
 async function initApp() {
   setupButtonFeedbacks();
+
+  // Botão rápido para acesso/backup do banco de dados no cabeçalho
+  document.getElementById('btn-header-database')?.addEventListener('click', () => {
+    openDatabaseModal();
+  });
 
   // Inicializa Banco IndexedDB e executa limpeza automática de triagem (3 dias)
   try {
@@ -96,6 +103,7 @@ function showLoginView() {
   const pinInput = document.getElementById('login-pin-input');
   if (pinInput) {
     pinInput.value = '';
+    pinInput.placeholder = 'Digite o PIN (ex: 1407 ou 160926)...';
     pinInput.focus();
   }
   const errorMsg = document.getElementById('login-error-msg');
@@ -105,7 +113,131 @@ function showLoginView() {
 }
 
 // Configura Tela de Dashboard
+export function updateAppUserInterface(user = null) {
+  const currentUser = user || getCurrentUser();
+  const badgeContainer = document.getElementById('header-user-badge-container');
+  const greetingEl = document.getElementById('dashboard-greeting');
+  const brandTitleEl = document.getElementById('app-header-brand-title');
+
+  // Atualiza atributo no HTML e classes de tema no body para identidade visual
+  document.documentElement.setAttribute('data-active-user', currentUser.id);
+  document.body.classList.toggle('user-theme-angelica', currentUser.id === 'angelica');
+  document.body.classList.toggle('user-theme-ana-luiza', currentUser.id === 'ana_luiza');
+  document.title = `Controladoria — ${currentUser.name}`;
+
+  if (brandTitleEl) {
+    brandTitleEl.textContent = `CONTROLADORIA — ${currentUser.name.toUpperCase()}`;
+  }
+
+  if (greetingEl) {
+    greetingEl.textContent = `Olá, ${currentUser.name}! 👋`;
+  }
+
+  if (badgeContainer) {
+    badgeContainer.innerHTML = `
+      <button type="button" id="btn-header-active-user" style="
+        background: ${currentUser.badgeColor};
+        border: 1px solid ${currentUser.color}66;
+        color: ${currentUser.textColor};
+        padding: 3px 9px;
+        border-radius: 9999px;
+        font-size: 0.72rem;
+        font-weight: 800;
+        cursor: pointer;
+        display: flex;
+        align-items: center;
+        gap: 5px;
+        white-space: nowrap;
+      " title="Usuária ativa: ${currentUser.name}. Toque para ver detalhes da sessão.">
+        <span>${currentUser.icon}</span>
+        <span>${currentUser.name}</span>
+      </button>
+    `;
+
+    document.getElementById('btn-header-active-user')?.addEventListener('click', () => {
+      showUserAccountModal(currentUser);
+    });
+  }
+}
+
+// Modal informativo de perfil de usuária e troca rápida
+function showUserAccountModal(user) {
+  let modal = document.getElementById('modal-user-account-dialog');
+  if (!modal) {
+    modal = document.createElement('div');
+    modal.id = 'modal-user-account-dialog';
+    modal.className = 'custom-modal';
+    document.body.appendChild(modal);
+  }
+
+  const sectorsList = (user.sectors || []).map(s => `<span style="background: #27272a; color: #fbbf24; font-size: 0.72rem; font-weight: 800; padding: 2px 8px; border-radius: 4px;">${s}</span>`).join(' ');
+
+  modal.innerHTML = `
+    <div class="modal-backdrop" id="modal-user-account-backdrop"></div>
+    <div class="modal-card" style="padding: 20px; max-width: 380px; width: 100%;">
+      <div style="display: flex; align-items: center; justify-content: space-between; border-bottom: 1px solid #27272a; padding-bottom: 10px; margin-bottom: 14px;">
+        <div style="display: flex; align-items: center; gap: 8px;">
+          <span style="font-size: 1.4rem;">${user.icon}</span>
+          <div>
+            <h3 style="font-size: 1.05rem; font-weight: 900; color: #f4f4f5; margin: 0;">${user.name}</h3>
+            <span style="font-size: 0.7rem; color: #a1a1aa;">Usuária Autenticada</span>
+          </div>
+        </div>
+        <button type="button" id="btn-close-user-account" class="btn-icon-control" style="width: 32px; height: 32px;">✕</button>
+      </div>
+
+      <div style="display: flex; flex-direction: column; gap: 10px; margin-bottom: 16px;">
+        <div style="background: #18181c; border: 1px solid #27272a; border-radius: 8px; padding: 10px;">
+          <div style="font-size: 0.7rem; color: #a1a1aa; font-weight: 700; text-transform: uppercase; margin-bottom: 6px;">
+            🏷️ Setores Sob Sua Responsabilidade:
+          </div>
+          <div style="display: flex; flex-wrap: wrap; gap: 4px;">
+            ${sectorsList}
+          </div>
+        </div>
+
+        <div style="background: rgba(16, 185, 129, 0.08); border: 1px solid rgba(16, 185, 129, 0.3); border-radius: 8px; padding: 10px; font-size: 0.76rem; color: #d1fae5; line-height: 1.35;">
+          ✓ Todas as Blitz e conferências bipadas nesta sessão serão registradas sob a autoria de <strong>${user.name}</strong>.
+        </div>
+      </div>
+
+      <div style="display: flex; flex-direction: column; gap: 8px;">
+        <button type="button" id="btn-user-open-db" class="btn-primary" style="height: 42px; font-weight: 800; justify-content: center; font-size: 0.82rem; background: rgba(56, 189, 248, 0.2); border: 1px solid rgba(56, 189, 248, 0.5); color: #38bdf8;">
+          💾 Ver & Exportar Banco de Dados
+        </button>
+        <button type="button" id="btn-user-switch-account" class="btn-secondary" style="height: 42px; font-weight: 800; justify-content: center; font-size: 0.82rem; color: #fbbf24; border-color: rgba(245, 158, 11, 0.4);">
+          🔄 Trocar Usuária (Login)
+        </button>
+        <button type="button" id="btn-user-account-close" class="btn-secondary" style="height: 42px; font-weight: 800; justify-content: center; font-size: 0.82rem;">
+          Fechar
+        </button>
+      </div>
+    </div>
+  `;
+
+  modal.classList.add('open');
+  const closeModal = () => modal.classList.remove('open');
+
+  document.getElementById('modal-user-account-backdrop')?.addEventListener('click', closeModal);
+  document.getElementById('btn-close-user-account')?.addEventListener('click', closeModal);
+  document.getElementById('btn-user-account-close')?.addEventListener('click', closeModal);
+
+  document.getElementById('btn-user-open-db')?.addEventListener('click', () => {
+    closeModal();
+    openDatabaseModal();
+  });
+
+  document.getElementById('btn-user-switch-account')?.addEventListener('click', () => {
+    closeModal();
+    logout();
+    showLoginView();
+    showToast('Sessão encerrada para troca de usuária', 'info', 1500);
+  });
+}
+
+// Configura Tela de Dashboard
 async function showDashboardView() {
+  updateAppUserInterface();
   await renderDashboard();
   updateBlitzTopBarIndicator();
   showView('view-dashboard');
@@ -114,11 +246,52 @@ async function showDashboardView() {
 // Configuração dos Event Listeners
 function setupEventListeners() {
   // --------------------------------------------------
-  // 1. LOGIN
+  // 1. LOGIN & SELEÇÃO DE USUÁRIA
   // --------------------------------------------------
   const loginForm = document.getElementById('form-login');
   const pinInput = document.getElementById('login-pin-input');
   const loginError = document.getElementById('login-error-msg');
+  const loginSelectionSub = document.getElementById('login-selection-subtitle');
+  const btnSelectAna = document.getElementById('btn-login-select-ana');
+  const btnSelectAngelica = document.getElementById('btn-login-select-angelica');
+
+  btnSelectAna?.addEventListener('click', () => {
+    btnSelectAna.style.borderColor = '#a855f7';
+    btnSelectAna.style.background = 'rgba(168, 85, 247, 0.18)';
+    if (btnSelectAngelica) {
+      btnSelectAngelica.style.borderColor = '#27272a';
+      btnSelectAngelica.style.background = '#18181c';
+    }
+    if (loginSelectionSub) {
+      loginSelectionSub.innerHTML = 'Usuária selecionada: <strong style="color: #c084fc;">🟣 Ana Luiza</strong>';
+    }
+    if (pinInput) {
+      pinInput.value = '';
+      pinInput.placeholder = 'Digite o PIN de Ana Luiza (1407)...';
+      pinInput.focus();
+    }
+    if (loginError) loginError.classList.add('hidden');
+    triggerHaptic(40);
+  });
+
+  btnSelectAngelica?.addEventListener('click', () => {
+    btnSelectAngelica.style.borderColor = '#10b981';
+    btnSelectAngelica.style.background = 'rgba(16, 185, 129, 0.18)';
+    if (btnSelectAna) {
+      btnSelectAna.style.borderColor = '#27272a';
+      btnSelectAna.style.background = '#18181c';
+    }
+    if (loginSelectionSub) {
+      loginSelectionSub.innerHTML = 'Usuária selecionada: <strong style="color: #34d399;">🟢 Angélica</strong>';
+    }
+    if (pinInput) {
+      pinInput.value = '';
+      pinInput.placeholder = 'Digite o PIN de Angélica (160926)...';
+      pinInput.focus();
+    }
+    if (loginError) loginError.classList.add('hidden');
+    triggerHaptic(40);
+  });
 
   if (loginForm) {
     loginForm.addEventListener('submit', (e) => {
@@ -126,8 +299,10 @@ function setupEventListeners() {
       const code = pinInput ? pinInput.value : '';
       if (verifyCode(code)) {
         if (loginError) loginError.classList.add('hidden');
+        const currentUser = getCurrentUser();
+        updateAppUserInterface(currentUser);
         showDashboardView();
-        showToast('✓ Bem-vinda, Ana Luiza!', 'success', 2000);
+        showToast(`✓ Bem-vinda, ${currentUser.name}!`, 'success', 2000);
       } else {
         if (loginError) {
           loginError.textContent = '⚠ Código incorreto.';
@@ -141,7 +316,7 @@ function setupEventListeners() {
     });
   }
 
-  // Teclado virtual numérico na tela de login
+  // Teclado virtual numérico na tela de login (suporta até 6 dígitos: 1407 e 160926)
   document.querySelectorAll('.btn-numpad').forEach((btn) => {
     btn.addEventListener('click', () => {
       const val = btn.getAttribute('data-val');
@@ -150,7 +325,7 @@ function setupEventListeners() {
           pinInput.value = '';
         } else if (val === 'backspace') {
           pinInput.value = pinInput.value.slice(0, -1);
-        } else if (pinInput.value.length < 4) {
+        } else if (pinInput.value.length < 6) {
           pinInput.value += val;
         }
       }
@@ -548,10 +723,10 @@ function setupEventListeners() {
     openExpirationsView('15_DAYS');
   });
   document.getElementById('card-metric-total')?.addEventListener('click', () => {
-    openSearchView();
+    openSearchView('REGISTERED');
   });
   document.getElementById('card-metric-units')?.addEventListener('click', () => {
-    openSearchView();
+    openSearchView('WITH_UNITS');
   });
 
   // --------------------------------------------------
@@ -756,28 +931,35 @@ function setupEventListeners() {
   searchSectorSelect?.addEventListener('change', executeSearch);
   searchCorridorSelect?.addEventListener('change', executeSearch);
 
-  // Abas de tipo de produto: Registrados vs Exportados da Blitz vs Verificados
+  // Abas de tipo de produto: Registrados vs Exportados da Blitz vs Com Unidades vs Todos
+  const updateProductTabsUI = () => {
+    document.getElementById('tab-products-registered')?.classList.toggle('active', currentProductTypeFilter === 'REGISTERED');
+    document.getElementById('tab-products-blitz')?.classList.toggle('active', currentProductTypeFilter === 'BLITZ');
+    document.getElementById('tab-products-with-units')?.classList.toggle('active', currentProductTypeFilter === 'WITH_UNITS');
+    document.getElementById('tab-products-all')?.classList.toggle('active', currentProductTypeFilter === 'ALL');
+  };
+
   document.getElementById('tab-products-registered')?.addEventListener('click', async () => {
     currentProductTypeFilter = 'REGISTERED';
-    document.getElementById('tab-products-registered')?.classList.add('active');
-    document.getElementById('tab-products-blitz')?.classList.remove('active');
-    document.getElementById('tab-products-verified')?.classList.remove('active');
+    updateProductTabsUI();
     await executeSearch();
   });
 
   document.getElementById('tab-products-blitz')?.addEventListener('click', async () => {
     currentProductTypeFilter = 'BLITZ';
-    document.getElementById('tab-products-blitz')?.classList.add('active');
-    document.getElementById('tab-products-registered')?.classList.remove('active');
-    document.getElementById('tab-products-verified')?.classList.remove('active');
+    updateProductTabsUI();
     await executeSearch();
   });
 
-  document.getElementById('tab-products-verified')?.addEventListener('click', async () => {
-    currentProductTypeFilter = 'VERIFIED';
-    document.getElementById('tab-products-verified')?.classList.add('active');
-    document.getElementById('tab-products-registered')?.classList.remove('active');
-    document.getElementById('tab-products-blitz')?.classList.remove('active');
+  document.getElementById('tab-products-with-units')?.addEventListener('click', async () => {
+    currentProductTypeFilter = 'WITH_UNITS';
+    updateProductTabsUI();
+    await executeSearch();
+  });
+
+  document.getElementById('tab-products-all')?.addEventListener('click', async () => {
+    currentProductTypeFilter = 'ALL';
+    updateProductTabsUI();
     await executeSearch();
   });
 
@@ -1022,22 +1204,27 @@ export async function updateSearchTabCounts() {
     const allProducts = await getAllProducts();
     let regCount = 0;
     let blitzCount = 0;
-    let verCount = 0;
+    let withUnitsCount = 0;
+
     for (const p of allProducts) {
+      if (isProductRegistered(p)) {
+        regCount++;
+      }
       if (isProductBlitzImport(p)) {
         blitzCount++;
-      } else if (isProductVerifiedOnly(p)) {
-        verCount++;
-      } else {
-        regCount++;
+      }
+      if ((Number(p.total_quantity) || 0) > 0) {
+        withUnitsCount++;
       }
     }
     const regBadge = document.getElementById('tab-count-registered');
     const blitzBadge = document.getElementById('tab-count-blitz');
-    const verBadge = document.getElementById('tab-count-verified');
+    const unitsBadge = document.getElementById('tab-count-with-units');
+    const allBadge = document.getElementById('tab-count-all');
     if (regBadge) regBadge.textContent = regCount;
     if (blitzBadge) blitzBadge.textContent = blitzCount;
-    if (verBadge) verBadge.textContent = verCount;
+    if (unitsBadge) unitsBadge.textContent = withUnitsCount;
+    if (allBadge) allBadge.textContent = allProducts.length;
   } catch (e) {
     console.warn('Erro ao calcular contagem das abas:', e);
   }
@@ -1057,7 +1244,8 @@ export async function openSearchView(typeFilter) {
   // Atualiza classe ativa nas abas
   document.getElementById('tab-products-registered')?.classList.toggle('active', currentProductTypeFilter === 'REGISTERED');
   document.getElementById('tab-products-blitz')?.classList.toggle('active', currentProductTypeFilter === 'BLITZ');
-  document.getElementById('tab-products-verified')?.classList.toggle('active', currentProductTypeFilter === 'VERIFIED');
+  document.getElementById('tab-products-with-units')?.classList.toggle('active', currentProductTypeFilter === 'WITH_UNITS');
+  document.getElementById('tab-products-all')?.classList.toggle('active', currentProductTypeFilter === 'ALL');
 
   await updateSearchTabCounts();
   await renderSearchResults('', 'TODOS', 'TODOS', currentProductTypeFilter);
@@ -1082,10 +1270,10 @@ async function renderSearchResults(query, sector, corridor, typeFilter = current
   const countDisplay = document.getElementById('search-results-count');
 
   if (countDisplay) {
-    let label = 'produtos registrados';
-    if (typeFilter === 'VERIFIED') label = results.length === 1 ? 'produto verificado' : 'produtos verificados';
+    let label = 'produtos registrados (com foto, corredor e setor)';
+    if (typeFilter === 'WITH_UNITS') label = results.length === 1 ? 'produto com unidades em estoque' : 'produtos com unidades em estoque';
     else if (typeFilter === 'BLITZ') label = results.length === 1 ? 'produto exportado da blitz' : 'produtos exportados da blitz';
-    else label = results.length === 1 ? 'produto registrado' : 'produtos registrados';
+    else if (typeFilter === 'ALL') label = results.length === 1 ? 'produto cadastrado' : 'produtos cadastrados';
     countDisplay.textContent = `${results.length} ${label}`;
   }
 
@@ -1096,8 +1284,9 @@ async function renderSearchResults(query, sector, corridor, typeFilter = current
 
   if (results.length === 0) {
     let emptyMsg = 'Nenhum produto cadastrado encontrado para os filtros selecionados.';
-    if (typeFilter === 'VERIFIED') emptyMsg = 'Nenhum produto verificado pendente com os filtros selecionados.';
+    if (typeFilter === 'WITH_UNITS') emptyMsg = 'Nenhum produto possui unidades em estoque no momento.';
     else if (typeFilter === 'BLITZ') emptyMsg = 'Nenhum produto na lista de exportados da blitz com os filtros selecionados.';
+    else if (typeFilter === 'REGISTERED') emptyMsg = 'Nenhum produto com registro completo (foto, corredor e setor) encontrado.';
     container.innerHTML = `
       <div class="empty-search-card">
         <p>${emptyMsg}</p>
@@ -1113,8 +1302,8 @@ async function renderSearchResults(query, sector, corridor, typeFilter = current
   // Calcula estoque ativo e triado de cada produto para exibição rica na busca
   const cardsHtml = await Promise.all(
     results.map(async (p) => {
+      const isReg = isProductRegistered(p);
       const isBlitz = isProductBlitzImport(p);
-      const isVerified = isProductVerifiedOnly(p);
       let activeStock = 0;
       let triagedStock = 0;
       let hasExps = false;
@@ -1147,23 +1336,27 @@ async function renderSearchResults(query, sector, corridor, typeFilter = current
       }
 
       let typeBadgeHtml = '';
+      if (isReg) {
+        typeBadgeHtml += `<span class="loc-badge" style="background: rgba(16, 185, 129, 0.15); color: #34d399; border: 1px solid rgba(16, 185, 129, 0.35); font-weight: 800;">✓ REGISTRADO</span> `;
+      }
       if (isBlitz) {
-        typeBadgeHtml = `<span class="loc-badge" style="background: rgba(14, 165, 233, 0.15); color: #38bdf8; border: 1px solid rgba(14, 165, 233, 0.4); font-weight: 800;">⚡ LISTA DA BLITZ</span>`;
-      } else if (isVerified) {
-        typeBadgeHtml = `<span class="loc-badge" style="background: rgba(245, 158, 11, 0.15); color: #fbbf24; border: 1px solid rgba(245, 158, 11, 0.35); font-weight: 800;">🔍 PRODUTO VERIFICADO</span>`;
+        typeBadgeHtml += `<span class="loc-badge" style="background: rgba(14, 165, 233, 0.15); color: #38bdf8; border: 1px solid rgba(14, 165, 233, 0.4); font-weight: 800;">⚡ EXPORTADO DA BLITZ</span> `;
+      }
+      if (!isReg && !isBlitz) {
+        typeBadgeHtml += `<span class="loc-badge" style="background: rgba(245, 158, 11, 0.15); color: #fbbf24; border: 1px solid rgba(245, 158, 11, 0.35); font-weight: 800;">⚠️ PENDENTE FOTO/LOCAL</span> `;
       }
 
       return `
-        <div class="search-result-card ${isVerified ? 'search-card-verified' : ''}" data-prodid="${p.id}">
+        <div class="search-result-card" data-prodid="${p.id}">
           <div class="search-thumb-col">
             ${
-              p.image
-                ? `<img src="${p.image}" alt="" class="compact-prod-thumb" />`
-                : `<div class="photo-placeholder-mini" style="${isVerified ? 'border-color: rgba(245, 158, 11, 0.4); color: #fbbf24;' : ''}">${isVerified ? 'VERIF' : 'FOTO'}</div>`
+              p.image || p.photo_url
+                ? `<img src="${p.image || p.photo_url}" alt="" class="compact-prod-thumb" />`
+                : `<div class="photo-placeholder-mini">${isReg ? 'FOTO' : 'SEM FOTO'}</div>`
             }
           </div>
           <div class="search-info-col">
-            <h4 class="search-prod-name" style="${isVerified ? 'color: #fef08a;' : ''}">${p.name}</h4>
+            <h4 class="search-prod-name">${p.name}</h4>
             <span class="search-barcode">${p.barcode}</span>
             <div class="search-loc-tags">
               <span class="loc-badge sector">${p.sector}</span>
@@ -1175,8 +1368,8 @@ async function renderSearchResults(query, sector, corridor, typeFilter = current
           <div class="search-action-col" style="display: flex; flex-direction: column; gap: 6px; align-items: flex-end;">
             <button type="button" class="btn-search-view" data-prodid="${p.id}">Ver</button>
             ${
-              isVerified
-                ? `<button type="button" class="btn-complete-reg-action" data-prodid="${p.id}" style="background: #10b981; color: #022c22; border: none; border-radius: 4px; padding: 3px 6px; font-size: 0.68rem; font-weight: 800; cursor: pointer; white-space: nowrap;">✏️ Cadastrar</button>`
+              !isReg
+                ? `<button type="button" class="btn-complete-reg-action" data-prodid="${p.id}" style="background: #10b981; color: #022c22; border: none; border-radius: 4px; padding: 4px 8px; font-size: 0.72rem; font-weight: 800; cursor: pointer; white-space: nowrap;">✏️ Completar</button>`
                 : ''
             }
           </div>

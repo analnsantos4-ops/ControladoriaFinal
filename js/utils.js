@@ -80,37 +80,84 @@ export const BLITZ_TYPES = BLITZ_SECTORS.map(s => ({
   schedule: s.schedule
 }));
 
-export const WEEKLY_CYCLES = [
-  {
-    id: 'alho_mercearia',
-    label: 'Alho + Mercearia',
-    icon: '🧄 🛒',
-    sectors: ['ALHO', 'MERCEARIA'],
-    days: [1, 2, 3], // Seg, Ter, Qua
-    periodLabel: 'Segunda a Quarta',
-    daysLabel: 'Seg → Qua'
-  },
-  {
-    id: 'bazar',
-    label: 'Bazar',
-    icon: '🛍️',
-    sectors: ['BAZAR'],
-    days: [4], // Qui
-    periodLabel: 'Quinta-feira',
-    daysLabel: 'Quinta'
-  },
-  {
-    id: 'bebidas',
-    label: 'Bebidas',
-    icon: '🥤',
-    sectors: ['BEBIDAS'],
-    days: [5, 6], // Sex, Sab
-    periodLabel: 'Sexta e Sábado',
-    daysLabel: 'Sex → Sáb'
-  }
-];
+export const WEEKLY_CYCLES_BY_USER = {
+  ana_luiza: [
+    {
+      id: 'alho_mercearia',
+      label: 'Alho + Mercearia',
+      icon: '🧄 🛒',
+      sectors: ['ALHO', 'MERCEARIA'],
+      days: [1, 2, 3], // Seg, Ter, Qua
+      periodLabel: 'Segunda a Quarta',
+      daysLabel: 'Seg → Qua'
+    },
+    {
+      id: 'bazar',
+      label: 'Bazar',
+      icon: '🛍️',
+      sectors: ['BAZAR'],
+      days: [4], // Qui
+      periodLabel: 'Quinta-feira',
+      daysLabel: 'Quinta'
+    },
+    {
+      id: 'bebidas',
+      label: 'Bebidas',
+      icon: '🥤',
+      sectors: ['BEBIDAS'],
+      days: [5, 6], // Sex, Sab
+      periodLabel: 'Sexta e Sábado',
+      daysLabel: 'Sex → Sáb'
+    }
+  ],
+  angelica: [
+    {
+      id: 'mercearia',
+      label: 'Mercearia',
+      icon: '🛒',
+      sectors: ['MERCEARIA'],
+      days: [1, 2, 3], // Seg, Ter, Qua
+      periodLabel: 'Segunda a Quarta',
+      daysLabel: 'Seg → Qua'
+    },
+    {
+      id: 'perfumaria',
+      label: 'Perfumaria',
+      icon: '🌸',
+      sectors: ['PERFUMARIA'],
+      days: [4], // Qui
+      periodLabel: 'Quinta-feira',
+      daysLabel: 'Quinta'
+    },
+    {
+      id: 'limpeza',
+      label: 'Produtos de Limpeza',
+      icon: '🧼',
+      sectors: ['PRODUTOS DE LIMPEZA', 'LIMPEZA'],
+      days: [5, 6], // Sex, Sab
+      periodLabel: 'Sexta e Sábado',
+      daysLabel: 'Sex → Sáb'
+    }
+  ]
+};
 
-export function getWeeklyCycleForDate(date = new Date()) {
+export function getWeeklyCycles(userId = null) {
+  let targetId = userId;
+  if (!targetId) {
+    try {
+      targetId = localStorage.getItem('active_system_user_id') || sessionStorage.getItem('active_system_user_id');
+    } catch (_) {}
+  }
+  if (targetId && (targetId === 'angelica' || targetId.includes('ang'))) {
+    return WEEKLY_CYCLES_BY_USER.angelica;
+  }
+  return WEEKLY_CYCLES_BY_USER.ana_luiza;
+}
+
+// Para compatibilidade com código existente legado:
+export const WEEKLY_CYCLES = WEEKLY_CYCLES_BY_USER.ana_luiza;
+
+export function getWeeklyCycleForDate(date = new Date(), userId = null) {
   const d = typeof date === 'string' ? new Date(date.includes('T') ? date : date + 'T12:00:00') : date;
   const day = d.getDay(); // 0: Dom, 1: Seg ... 6: Sab
   if (day === 0) {
@@ -125,15 +172,14 @@ export function getWeeklyCycleForDate(date = new Date()) {
       isRestDay: true
     };
   }
-  const found = WEEKLY_CYCLES.find(c => c.days.includes(day));
-  return found || WEEKLY_CYCLES[0];
+  const cycles = getWeeklyCycles(userId);
+  const found = cycles.find(c => c.days.includes(day));
+  return found || cycles[0];
 }
 
-export function getSuggestedBlitzType() {
-  const cycle = getWeeklyCycleForDate();
-  if (cycle.id === 'bazar') return 'bazar';
-  if (cycle.id === 'bebidas') return 'bebidas';
-  return 'mercearia';
+export function getSuggestedBlitzType(userId = null) {
+  const cycle = getWeeklyCycleForDate(new Date(), userId);
+  return cycle.id;
 }
 
 /**
@@ -274,15 +320,27 @@ export function getDaysUntilExpiration(expirationDateISO) {
   return Math.ceil(diffTime / (1000 * 60 * 60 * 24));
 }
 
-// Retorna saudação baseada na hora do dia
-export function getGreeting() {
+// Retorna saudação baseada na hora do dia e usuário ativo
+export function getGreeting(userName = null) {
   const hour = new Date().getHours();
+  let name = userName;
+  if (!name) {
+    try {
+      const stored = localStorage.getItem('controladoria_active_user');
+      if (stored) {
+        const u = JSON.parse(stored);
+        if (u?.name) name = u.name;
+      }
+    } catch (_) {}
+  }
+  const displayName = name || 'Ana Luiza';
+
   if (hour < 12) {
-    return 'Bom dia, Ana Luiza! ☀️';
+    return `Bom dia, ${displayName}! ☀️`;
   } else if (hour < 18) {
-    return 'Boa tarde, Ana Luiza! 👋';
+    return `Boa tarde, ${displayName}! 👋`;
   } else {
-    return 'Boa noite, Ana Luiza! 🌙';
+    return `Boa noite, ${displayName}! 🌙`;
   }
 }
 

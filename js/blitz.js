@@ -81,6 +81,7 @@ import { startCameraScanner, stopCameraScanner } from './scanner.js';
 import { openWhatsAppExportModal } from './whatsapp.js';
 import { triggerSyncNow } from './sync.js';
 import { openConferenceForProduct } from './inventory.js';
+import { getCurrentUser, getUserById, getAllowedSectorsForUser, isSectorAllowedForUser } from './auth.js';
 
 let currentActiveBlitzSession = null;
 
@@ -212,7 +213,7 @@ export function updateBlitzTopBarIndicator() {
             </span>
           </div>
           <div style="font-size: 0.72rem; color: #a1a1aa; margin-top: 2px;">
-            Por ${currentActiveBlitzSession.user_name || 'Ana Luiza'} • Iniciada às ${startedAtTime}
+            Por ${currentActiveBlitzSession.responsible_user_name || currentActiveBlitzSession.user_name || 'Ana Luiza'} • Iniciada às ${startedAtTime}
           </div>
         </div>
       </div>
@@ -310,7 +311,7 @@ function showActiveBlitzDialog() {
           ${periodLabel}
         </div>
         <div style="font-size: 0.72rem; color: #71717a; margin-top: 4px;">
-          Iniciada em ${startedAt} por ${currentActiveBlitzSession.user_name || 'Ana Luiza'}
+          Iniciada em ${startedAt} por ${currentActiveBlitzSession.responsible_user_name || currentActiveBlitzSession.user_name || 'Ana Luiza'}
         </div>
       </div>
 
@@ -587,46 +588,90 @@ export function showBlitzImportSummaryModal(stats) {
     document.body.appendChild(modal);
   }
 
+  const itemsList = stats.itens || [];
+  const totalCount = stats.total || stats.totalImportados || itemsList.length;
+  const novosCount = stats.novos || stats.produtosNovos || 0;
+  const jaVerificadosCount = stats.jaVerificados || 0;
+  const tinhamQtdCount = stats.tinhamQuantidade || 0;
+  const tinhamZeroCount = stats.tinhamZero || 0;
+
   modal.innerHTML = `
     <div class="modal-backdrop" id="modal-import-summary-backdrop"></div>
-    <div class="modal-card" style="padding: 20px; max-width: 440px; width: 100%; box-sizing: border-box; text-align: center;">
-      <div style="font-size: 2.2rem; margin-bottom: 6px;">📊</div>
-      <h3 style="font-size: 1.15rem; font-weight: 900; color: #10b981; margin: 0 0 6px 0;">
-        LISTA IMPORTADA COM SUCESSO!
-      </h3>
-      <div style="font-size: 0.84rem; color: #a1a1aa; margin-bottom: 16px;">
-        O sistema analisou o histórico de todas as conferências anteriores:
+    <div class="modal-card" style="padding: 18px; max-width: 520px; width: 100%; box-sizing: border-box; max-height: 92vh; display: flex; flex-direction: column;">
+      <div style="display: flex; align-items: center; justify-content: space-between; border-bottom: 1px solid #27272a; padding-bottom: 10px; margin-bottom: 12px;">
+        <div style="display: flex; align-items: center; gap: 8px;">
+          <span style="font-size: 1.5rem;">📊</span>
+          <div>
+            <h3 style="font-size: 1.08rem; font-weight: 900; color: #10b981; margin: 0;">
+              LISTA IMPORTADA COM SUCESSO!
+            </h3>
+            <span style="font-size: 0.72rem; color: #a1a1aa;">Histórico de conferências anteriores cruzado</span>
+          </div>
+        </div>
+        <button type="button" id="btn-close-import-summary-x" class="btn-icon-control" style="font-size: 1rem; width: 32px; height: 32px;">✕</button>
       </div>
 
-      <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-bottom: 16px; text-align: left;">
-        <div style="background: #18181c; border: 1px solid #27272a; border-radius: 8px; padding: 10px;">
-          <div style="font-size: 0.68rem; color: #a1a1aa; font-weight: 800;">TOTAL DE ITENS</div>
-          <div style="font-size: 1.3rem; font-weight: 900; color: #f4f4f5;">${stats.total}</div>
+      <!-- Cards de Métricas do Histórico -->
+      <div style="display: grid; grid-template-columns: repeat(4, 1fr); gap: 6px; margin-bottom: 12px;">
+        <div style="background: #18181c; border: 1px solid #27272a; border-radius: 8px; padding: 8px; text-align: center;">
+          <div style="font-size: 0.65rem; color: #a1a1aa; font-weight: 800;">TOTAL</div>
+          <div style="font-size: 1.25rem; font-weight: 900; color: #f4f4f5; margin-top: 2px;">${totalCount}</div>
         </div>
-        <div style="background: #18181c; border: 1px solid #27272a; border-radius: 8px; padding: 10px;">
-          <div style="font-size: 0.68rem; color: #34d399; font-weight: 800;">PRODUTOS NOVOS</div>
-          <div style="font-size: 1.3rem; font-weight: 900; color: #34d399;">${stats.novos}</div>
+        <div style="background: rgba(56, 189, 248, 0.08); border: 1px solid rgba(56, 189, 248, 0.3); border-radius: 8px; padding: 8px; text-align: center;">
+          <div style="font-size: 0.65rem; color: #38bdf8; font-weight: 800;">JÁ CONFERIDOS</div>
+          <div style="font-size: 1.25rem; font-weight: 900; color: #38bdf8; margin-top: 2px;">${jaVerificadosCount}</div>
         </div>
-        <div style="background: #18181c; border: 1px solid #27272a; border-radius: 8px; padding: 10px;">
-          <div style="font-size: 0.68rem; color: #38bdf8; font-weight: 800;">JÁ VERIFICADOS</div>
-          <div style="font-size: 1.3rem; font-weight: 900; color: #38bdf8;">${stats.jaVerificados}</div>
+        <div style="background: rgba(52, 211, 153, 0.08); border: 1px solid rgba(52, 211, 153, 0.3); border-radius: 8px; padding: 8px; text-align: center;">
+          <div style="font-size: 0.65rem; color: #34d399; font-weight: 800;">PROD. NOVOS</div>
+          <div style="font-size: 1.25rem; font-weight: 900; color: #34d399; margin-top: 2px;">${novosCount}</div>
         </div>
-        <div style="background: #18181c; border: 1px solid #27272a; border-radius: 8px; padding: 10px;">
-          <div style="font-size: 0.68rem; color: #fbbf24; font-weight: 800;">TINHAM QUANTIDADE</div>
-          <div style="font-size: 1.3rem; font-weight: 900; color: #fbbf24;">${stats.tinhamQuantidade}</div>
-        </div>
-        <div style="background: #18181c; border: 1px solid #27272a; border-radius: 8px; padding: 10px; grid-column: span 2;">
-          <div style="font-size: 0.68rem; color: #f87171; font-weight: 800;">TINHAM ZERO NA ÚLTIMA BLITZ</div>
-          <div style="font-size: 1.3rem; font-weight: 900; color: #f87171;">${stats.tinhamZero}</div>
+        <div style="background: rgba(251, 191, 36, 0.08); border: 1px solid rgba(251, 191, 36, 0.3); border-radius: 8px; padding: 8px; text-align: center;">
+          <div style="font-size: 0.65rem; color: #fbbf24; font-weight: 800;">TINHAM QTD</div>
+          <div style="font-size: 1.25rem; font-weight: 900; color: #fbbf24; margin-top: 2px;">${tinhamQtdCount}</div>
         </div>
       </div>
 
-      <div style="display: flex; flex-direction: column; gap: 8px;">
-        <button type="button" id="btn-start-scanning-after-import" class="btn-primary" style="height: 52px; font-size: 1.05rem; font-weight: 900; justify-content: center; background: #10b981; color: #022c22; border-radius: 10px;">
-          📷 COMEÇAR CONFERÊNCIA (BIPAR)
+      <!-- Abas de visualização rápida da lista importada -->
+      <div style="display: flex; gap: 4px; overflow-x: auto; padding-bottom: 6px; margin-bottom: 8px; scrollbar-width: none;">
+        <button type="button" class="btn-summary-tab active" data-tab="TODOS" style="padding: 5px 10px; font-size: 0.72rem; font-weight: 800; border-radius: 6px; background: #10b981; color: #022c22; border: none; cursor: pointer; white-space: nowrap;">
+          Todos (${totalCount})
         </button>
-        <button type="button" id="btn-view-dash-after-import" class="btn-secondary" style="height: 44px; font-size: 0.88rem; font-weight: 800; justify-content: center;">
-          📋 Ver Painel da Blitz
+        <button type="button" class="btn-summary-tab" data-tab="JA_CONFERIDOS" style="padding: 5px 10px; font-size: 0.72rem; font-weight: 800; border-radius: 6px; background: #272730; color: #a1a1aa; border: none; cursor: pointer; white-space: nowrap;">
+          📋 Já Conferidos (${jaVerificadosCount})
+        </button>
+        <button type="button" class="btn-summary-tab" data-tab="NOVOS" style="padding: 5px 10px; font-size: 0.72rem; font-weight: 800; border-radius: 6px; background: #272730; color: #a1a1aa; border: none; cursor: pointer; white-space: nowrap;">
+          🆕 Novos (${novosCount})
+        </button>
+        <button type="button" class="btn-summary-tab" data-tab="TINHAM_QTD" style="padding: 5px 10px; font-size: 0.72rem; font-weight: 800; border-radius: 6px; background: #272730; color: #a1a1aa; border: none; cursor: pointer; white-space: nowrap;">
+          🟢 Tinham Qtd (${tinhamQtdCount})
+        </button>
+        <button type="button" class="btn-summary-tab" data-tab="TINHAM_ZERO" style="padding: 5px 10px; font-size: 0.72rem; font-weight: 800; border-radius: 6px; background: #272730; color: #a1a1aa; border: none; cursor: pointer; white-space: nowrap;">
+          🔴 Tinham 0 (${tinhamZeroCount})
+        </button>
+      </div>
+
+      <!-- Campo de filtro rápido -->
+      <div style="margin-bottom: 8px;">
+        <input
+          type="text"
+          id="input-filter-imported-summary"
+          placeholder="🔍 Filtrar produtos importados..."
+          style="width: 100%; height: 36px; background: #18181d; border: 1px solid #33333d; border-radius: 6px; padding: 0 10px; font-size: 0.8rem; color: #f4f4f5; outline: none;"
+        />
+      </div>
+
+      <!-- Container rolável com a lista de itens e histórico -->
+      <div id="summary-items-list-container" style="flex: 1; overflow-y: auto; display: flex; flex-direction: column; gap: 6px; max-height: 320px; padding-right: 2px;">
+        <!-- Itens injetados via renderSummaryItems() -->
+      </div>
+
+      <!-- Ações de Rodapé -->
+      <div style="display: flex; gap: 8px; margin-top: 12px; border-top: 1px solid #27272a; padding-top: 12px;">
+        <button type="button" id="btn-view-dash-after-import" class="btn-secondary" style="flex: 1; height: 48px; font-size: 0.88rem; font-weight: 800; justify-content: center; border-radius: 8px;">
+          📋 Ver Painel
+        </button>
+        <button type="button" id="btn-start-scanning-after-import" class="btn-primary" style="flex: 1.5; height: 48px; font-size: 0.95rem; font-weight: 900; justify-content: center; background: #10b981; color: #022c22; border-radius: 8px;">
+          📷 BIPAR AGORA
         </button>
       </div>
     </div>
@@ -635,7 +680,108 @@ export function showBlitzImportSummaryModal(stats) {
   modal.classList.add('open');
   const closeModal = () => modal.classList.remove('open');
 
+  let activeTab = 'TODOS';
+  let searchText = '';
+
+  const renderSummaryItems = () => {
+    const listEl = document.getElementById('summary-items-list-container');
+    if (!listEl) return;
+
+    let filtered = itemsList.slice();
+
+    if (activeTab === 'JA_CONFERIDOS') {
+      filtered = filtered.filter(i => !i.is_new_product);
+    } else if (activeTab === 'NOVOS') {
+      filtered = filtered.filter(i => i.is_new_product === true);
+    } else if (activeTab === 'TINHAM_QTD') {
+      filtered = filtered.filter(i => i.had_quantity_previously === true || (Number(i.previous_quantity) || 0) > 0);
+    } else if (activeTab === 'TINHAM_ZERO') {
+      filtered = filtered.filter(i => i.had_zero_previously === true);
+    }
+
+    if (searchText) {
+      const q = searchText.toLowerCase();
+      filtered = filtered.filter(i => {
+        const name = String(i.nome_produto || i.nome || i.descricao || '').toLowerCase();
+        const barcode = String(i.ean || i.barcode || '').toLowerCase();
+        return name.includes(q) || barcode.includes(q);
+      });
+    }
+
+    if (filtered.length === 0) {
+      listEl.innerHTML = `
+        <div style="text-align: center; padding: 24px 10px; color: #71717a; font-size: 0.82rem; background: #18181d; border-radius: 8px;">
+          Nenhum produto nesta filtragem.
+        </div>
+      `;
+      return;
+    }
+
+    listEl.innerHTML = filtered.map(it => {
+      const name = it.nome_produto || it.nome || it.descricao || `Produto ${it.ean || it.barcode}`;
+      const barcode = it.ean || it.barcode || '';
+      const expDate = it.data_validade || it.requested_expiration_date;
+      const isNew = it.is_new_product === true;
+      const prevQty = Number(it.previous_quantity) || 0;
+      const hadQty = it.had_quantity_previously === true || prevQty > 0;
+      const hadZero = it.had_zero_previously === true;
+
+      let historyBadge = '';
+      if (isNew) {
+        historyBadge = `<span style="font-size: 0.68rem; font-weight: 800; padding: 2px 6px; border-radius: 4px; background: rgba(52, 211, 153, 0.15); color: #34d399; border: 1px solid rgba(52, 211, 153, 0.35);">🆕 PRODUTO NOVO</span>`;
+      } else if (hadQty) {
+        historyBadge = `<span style="font-size: 0.68rem; font-weight: 800; padding: 2px 6px; border-radius: 4px; background: rgba(56, 189, 248, 0.15); color: #38bdf8; border: 1px solid rgba(56, 189, 248, 0.35);">📋 CONFERIDO ANTERIOR: ${prevQty} un</span>`;
+      } else if (hadZero) {
+        historyBadge = `<span style="font-size: 0.68rem; font-weight: 800; padding: 2px 6px; border-radius: 4px; background: rgba(239, 68, 68, 0.15); color: #f87171; border: 1px solid rgba(239, 68, 68, 0.35);">🔴 ZERADO NA ÚLTIMA BLITZ</span>`;
+      } else {
+        historyBadge = `<span style="font-size: 0.68rem; font-weight: 800; padding: 2px 6px; border-radius: 4px; background: rgba(161, 161, 170, 0.15); color: #d4d4d8;">📋 JÁ NO HISTÓRICO</span>`;
+      }
+
+      return `
+        <div style="background: #18181d; border: 1px solid #27272e; border-radius: 6px; padding: 8px 10px; display: flex; justify-content: space-between; align-items: center; gap: 8px;">
+          <div style="flex: 1; min-width: 0;">
+            <div style="font-size: 0.82rem; font-weight: 800; color: #f4f4f5; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">
+              ${name}
+            </div>
+            <div style="font-size: 0.7rem; color: #a1a1aa; margin-top: 2px; display: flex; align-items: center; gap: 6px; flex-wrap: wrap;">
+              <span style="font-family: monospace; color: #fbbf24;">${barcode}</span>
+              ${expDate ? `<span>• Val: ${formatDateBR(expDate)}</span>` : ''}
+              ${it.corredor ? `<span>• Corredor: <strong>${it.corredor}</strong></span>` : ''}
+            </div>
+          </div>
+          <div>
+            ${historyBadge}
+          </div>
+        </div>
+      `;
+    }).join('');
+  };
+
+  renderSummaryItems();
+
+  modal.querySelectorAll('.btn-summary-tab').forEach(btn => {
+    btn.addEventListener('click', () => {
+      modal.querySelectorAll('.btn-summary-tab').forEach(b => {
+        b.classList.remove('active');
+        b.style.background = '#272730';
+        b.style.color = '#a1a1aa';
+      });
+      btn.classList.add('active');
+      btn.style.background = '#10b981';
+      btn.style.color = '#022c22';
+      activeTab = btn.getAttribute('data-tab') || 'TODOS';
+      renderSummaryItems();
+    });
+  });
+
+  const searchInput = document.getElementById('input-filter-imported-summary');
+  searchInput?.addEventListener('input', (e) => {
+    searchText = e.target.value?.trim() || '';
+    renderSummaryItems();
+  });
+
   document.getElementById('modal-import-summary-backdrop')?.addEventListener('click', closeModal);
+  document.getElementById('btn-close-import-summary-x')?.addEventListener('click', closeModal);
   document.getElementById('btn-start-scanning-after-import')?.addEventListener('click', () => {
     closeModal();
     startBlitzScanning();
@@ -668,6 +814,13 @@ function showStartBlitzModal() {
   const defaultStartISO = today.toISOString().split('T')[0];
   const defaultEndISO = next30.toISOString().split('T')[0];
 
+  const currentUser = getCurrentUser();
+  const isAngelica = currentUser?.id === 'angelica';
+  const userPrimaryColor = isAngelica ? '#10b981' : '#a855f7';
+  const userBadgeColor = isAngelica ? 'rgba(16, 185, 129, 0.15)' : 'rgba(168, 85, 247, 0.15)';
+  const userBadgeText = isAngelica ? '🟢 Angélica' : '🟣 Ana Luiza';
+  const userBadgeColorText = isAngelica ? '#34d399' : '#c084fc';
+
   modal.innerHTML = `
     <div class="modal-backdrop" id="modal-start-blitz-backdrop"></div>
     <div class="modal-card" style="padding: 20px; max-width: 480px; width: 100%; box-sizing: border-box; max-height: 92vh; overflow-y: auto;">
@@ -682,6 +835,14 @@ function showStartBlitzModal() {
           </div>
         </div>
         <button type="button" id="btn-close-start-blitz" class="btn-icon-control" style="font-size: 1rem; width: 30px; height: 30px;">✕</button>
+      </div>
+
+      <!-- Identificação da Usuária Ativa Responsável -->
+      <div style="background: ${userBadgeColor}; border: 1.5px solid ${userPrimaryColor}55; border-radius: 8px; padding: 8px 12px; margin-bottom: 12px; display: flex; align-items: center; justify-content: space-between;">
+        <span style="font-size: 0.74rem; color: #a1a1aa; font-weight: 700;">Responsável por esta Blitz:</span>
+        <span style="font-size: 0.86rem; font-weight: 900; color: ${userBadgeColorText};">
+          ${userBadgeText}
+        </span>
       </div>
 
       <form id="form-start-blitz-period" style="display: flex; flex-direction: column; gap: 14px;">
@@ -731,29 +892,46 @@ function showStartBlitzModal() {
           </div>
         </div>
 
-        <!-- 2. SETOR DA BLITZ -->
+        <!-- 2. SETOR DA BLITZ (Personalizado para a usuária ativa) -->
         <div style="background: #18181c; border: 1px solid #27272a; border-radius: 10px; padding: 12px;">
           <label style="font-size: 0.78rem; font-weight: 900; color: #fbbf24; text-transform: uppercase; display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px;">
             <span>🏷️ Setor da Blitz:</span>
-            <span style="font-size: 0.68rem; color: #a1a1aa; text-transform: none; font-weight: 700;">Selecione o setor</span>
+            <span style="font-size: 0.68rem; color: ${userBadgeColorText}; text-transform: none; font-weight: 700;">Setores de ${currentUser?.name || 'Ana Luiza'}</span>
           </label>
 
-          <!-- Chips Principais -->
-          <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 6px; margin-bottom: 6px;">
-            <button type="button" class="btn-start-blitz-chip btn-secondary active" data-sector="MERCEARIA" style="padding: 9px 8px; font-size: 0.82rem; font-weight: 900; justify-content: center; border-color: #f59e0b; background: rgba(245, 158, 11, 0.2); color: #fbbf24;">
-              🥫 MERCEARIA
-            </button>
-            <button type="button" class="btn-start-blitz-chip btn-secondary" data-sector="BEBIDAS" style="padding: 9px 8px; font-size: 0.82rem; font-weight: 900; justify-content: center;">
-              🍾 BEBIDAS
-            </button>
-          </div>
+          ${isAngelica ? `
+            <!-- Setores Prioritários de Angélica -->
+            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 6px; margin-bottom: 6px;">
+              <button type="button" class="btn-start-blitz-chip btn-secondary active" data-sector="MERCEARIA" style="padding: 9px 8px; font-size: 0.82rem; font-weight: 900; justify-content: center; border-color: #10b981; background: rgba(16, 185, 129, 0.2); color: #34d399;">
+                🥫 MERCEARIA
+              </button>
+              <button type="button" class="btn-start-blitz-chip btn-secondary" data-sector="PERFUMARIA" style="padding: 9px 8px; font-size: 0.82rem; font-weight: 900; justify-content: center;">
+                🧴 PERFUMARIA
+              </button>
+            </div>
+            <div style="margin-bottom: 8px;">
+              <button type="button" class="btn-start-blitz-chip btn-secondary" data-sector="LIMPEZA" style="width: 100%; padding: 7px 8px; font-size: 0.76rem; font-weight: 800; justify-content: center;">
+                🧹 PRODUTOS DE LIMPEZA
+              </button>
+            </div>
+          ` : `
+            <!-- Setores Prioritários de Ana Luiza -->
+            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 6px; margin-bottom: 6px;">
+              <button type="button" class="btn-start-blitz-chip btn-secondary active" data-sector="MERCEARIA" style="padding: 9px 8px; font-size: 0.82rem; font-weight: 900; justify-content: center; border-color: #a855f7; background: rgba(168, 85, 247, 0.2); color: #c084fc;">
+                🥫 MERCEARIA
+              </button>
+              <button type="button" class="btn-start-blitz-chip btn-secondary" data-sector="BEBIDAS" style="padding: 9px 8px; font-size: 0.82rem; font-weight: 900; justify-content: center;">
+                🍾 BEBIDAS
+              </button>
+            </div>
+            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 4px; margin-bottom: 8px;">
+              <button type="button" class="btn-start-blitz-chip btn-secondary" data-sector="ALHO" style="padding: 7px 4px; font-size: 0.74rem; font-weight: 800; justify-content: center;">🧄 Alho</button>
+              <button type="button" class="btn-start-blitz-chip btn-secondary" data-sector="BAZAR" style="padding: 7px 4px; font-size: 0.74rem; font-weight: 800; justify-content: center;">📦 Bazar</button>
+            </div>
+          `}
 
-          <!-- Outros Setores -->
-          <div style="display: grid; grid-template-columns: repeat(4, 1fr); gap: 4px; margin-bottom: 8px;">
-            <button type="button" class="btn-start-blitz-chip btn-secondary" data-sector="LIMPEZA" style="padding: 6px 2px; font-size: 0.7rem; font-weight: 700; justify-content: center;">🧹 Limpeza</button>
-            <button type="button" class="btn-start-blitz-chip btn-secondary" data-sector="PERFUMARIA" style="padding: 6px 2px; font-size: 0.7rem; font-weight: 700; justify-content: center;">🧴 Perfumaria</button>
-            <button type="button" class="btn-start-blitz-chip btn-secondary" data-sector="ALHO" style="padding: 6px 2px; font-size: 0.7rem; font-weight: 700; justify-content: center;">🧄 Alho</button>
-            <button type="button" class="btn-start-blitz-chip btn-secondary" data-sector="BAZAR" style="padding: 6px 2px; font-size: 0.7rem; font-weight: 700; justify-content: center;">📦 Bazar</button>
+          <div style="font-size: 0.7rem; color: #71717a; margin-bottom: 6px;">
+            💡 <em>Mercearia é compartilhada entre Ana Luiza e Angélica.</em>
           </div>
 
           <select id="select-blitz-start-sector" class="form-input" style="font-weight: 800; height: 40px; color: #fbbf24; background: #121214; border-color: #3f3f46;">
@@ -944,6 +1122,10 @@ export async function startNewBlitzSession(startDateInput, endDateInput, sectorI
 
     showToast(`Iniciando Blitz [${chosenSector}]...`, 'sync', 1000);
 
+    const currentUser = getCurrentUser();
+    const effectiveUserId = currentUser?.id || 'ana_luiza';
+    const effectiveUserName = currentUser?.name || 'Ana Luiza';
+
     const session = await createBlitzSession({
       blitz_type: chosenSector,
       sector: chosenSector,
@@ -951,8 +1133,27 @@ export async function startNewBlitzSession(startDateInput, endDateInput, sectorI
       end_date: eDateISO,
       target_dates: cleanTargetDates,
       period_label: periodLabel,
-      user_name: 'Ana Luiza'
+      user_id: effectiveUserId,
+      user_name: effectiveUserName,
+      responsible_user_id: effectiveUserId,
+      responsible_user_name: effectiveUserName
     });
+
+    // Registra auditoria da criação da Blitz
+    try {
+      await recordAudit({
+        blitz_id: session.id,
+        registro_id: session.id,
+        tabela: 'blitz_sessions',
+        acao: 'CRIACAO_BLITZ',
+        usuario: effectiveUserName,
+        userId: effectiveUserId,
+        userName: effectiveUserName,
+        responsible_user_id: effectiveUserId,
+        responsible_user_name: effectiveUserName,
+        descricao: `Blitz iniciada por ${effectiveUserName} no setor ${chosenSector} (${periodLabel})`
+      });
+    } catch (_) {}
 
     // Se foram fornecidos produtos na listagem em massa:
     let importStats = null;
@@ -973,16 +1174,14 @@ export async function startNewBlitzSession(startDateInput, endDateInput, sectorI
 
     setActiveBlitz(session);
 
-    if (parsedItems && parsedItems.length > 0) {
+    if (parsedItems && parsedItems.length > 0 && importStats) {
       showToast(`✓ Blitz iniciada com ${parsedItems.length} produtos carregados!`, 'success', 2500);
+      showBlitzImportSummaryModal(importStats);
     } else {
       showToast(`✓ Blitz iniciada: Setor ${chosenSector}`, 'success', 2000);
+      // Abre diretamente a tela principal da Blitz
+      openBlitzDashboardView();
     }
-
-    triggerSyncNow().catch(e => console.warn('Sync error:', e));
-
-    // Abre diretamente a tela principal da Blitz
-    openBlitzDashboardView();
   } catch (err) {
     console.error('Erro ao iniciar Blitz:', err);
     showToast('Erro ao criar sessão da Blitz', 'warning');
@@ -1275,6 +1474,8 @@ export async function openBlitzDashboardView() {
   if (!container) return;
 
   const totalCount = sessionListItems.length > 0 ? sessionListItems.length : metrics.total;
+  const jaConferidosCount = sessionListItems.filter(i => i.had_quantity_previously === true || i.had_zero_previously === true || (Number(i.previous_quantity) || 0) > 0 || (Array.isArray(i.previous_history) && i.previous_history.length > 0) || (i.is_new_product === false)).length;
+  const novosCount = sessionListItems.filter(i => i.is_new_product === true).length;
   const startTimeFormatted = session.started_at
     ? new Date(session.started_at).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })
     : '--:--';
@@ -1335,7 +1536,7 @@ export async function openBlitzDashboardView() {
         </div>
 
         <div style="font-size: 0.74rem; color: #71717a; border-top: 1px solid #22222a; padding-top: 8px; display: flex; justify-content: space-between; align-items: center;">
-          <span>Auditora: <strong style="color: #d4d4d8;">${session.user_name || 'Ana Luiza'}</strong></span>
+          <span>Auditora: <strong style="color: #d4d4d8;">${session.responsible_user_name || session.user_name || 'Ana Luiza'}</strong></span>
           <span>Iniciada às <strong style="color: #d4d4d8;">${startTimeFormatted}</strong></span>
         </div>
       </div>
@@ -1443,6 +1644,12 @@ export async function openBlitzDashboardView() {
         </button>
         <button type="button" class="btn-filter-pill" data-filter="ZERADOS" style="padding: 7px 14px; font-size: 0.76rem; font-weight: 800; border-radius: 9999px; background: #272730; color: #a1a1aa; border: none; white-space: nowrap; cursor: pointer;">
           🔴 Zerados (${metrics.zerados})
+        </button>
+        <button type="button" class="btn-filter-pill" data-filter="JA_CONFERIDOS" style="padding: 7px 14px; font-size: 0.76rem; font-weight: 800; border-radius: 9999px; background: #272730; color: #38bdf8; border: 1px solid rgba(56, 189, 248, 0.4); white-space: nowrap; cursor: pointer;">
+          📋 Já Conferidos (${jaConferidosCount})
+        </button>
+        <button type="button" class="btn-filter-pill" data-filter="NOVOS" style="padding: 7px 14px; font-size: 0.76rem; font-weight: 800; border-radius: 9999px; background: #272730; color: #34d399; border: 1px solid rgba(52, 211, 153, 0.4); white-space: nowrap; cursor: pointer;">
+          🆕 Produtos Novos (${novosCount})
         </button>
       </div>
 
@@ -1635,6 +1842,10 @@ async function renderBlitzSessionItemsListFiltered(session, filter = 'TODOS', se
     itemsToRender = itemsToRender.filter(i => i.isConferred && (Number(i.total_quantity) || 0) > 0);
   } else if (filter === 'ZERADOS') {
     itemsToRender = itemsToRender.filter(i => i.isConferred && (Number(i.total_quantity) || 0) === 0);
+  } else if (filter === 'JA_CONFERIDOS') {
+    itemsToRender = itemsToRender.filter(i => i.had_quantity_previously === true || i.had_zero_previously === true || (Number(i.previous_quantity) || 0) > 0 || (Array.isArray(i.previous_history) && i.previous_history.length > 0) || (i.is_new_product === false));
+  } else if (filter === 'NOVOS') {
+    itemsToRender = itemsToRender.filter(i => i.is_new_product === true);
   }
 
   // Aplica busca por texto em tempo real (se houver)
@@ -1717,6 +1928,17 @@ async function renderBlitzSessionItemsListFiltered(session, filter = 'TODOS', se
       tagHtml = `<span style="font-size: 0.65rem; font-weight: 800; padding: 2px 6px; border-radius: 4px; background: rgba(56, 189, 248, 0.2); color: #7dd3fc;">⚠️ Voltou a ter</span>`;
     }
 
+    // Histórico de conferências anteriores ou produto novo
+    let historyBadgeHtml = '';
+    if (item.had_quantity_previously === true || (Number(item.previous_quantity) || 0) > 0) {
+      const prevQty = Number(item.previous_quantity) || 0;
+      historyBadgeHtml = `<span style="font-size: 0.66rem; font-weight: 800; padding: 2px 6px; border-radius: 4px; background: rgba(56, 189, 248, 0.15); color: #38bdf8; border: 1px solid rgba(56, 189, 248, 0.35);">📋 Anterior: ${prevQty} un</span>`;
+    } else if (item.had_zero_previously === true) {
+      historyBadgeHtml = `<span style="font-size: 0.66rem; font-weight: 800; padding: 2px 6px; border-radius: 4px; background: rgba(239, 68, 68, 0.15); color: #f87171; border: 1px solid rgba(239, 68, 68, 0.35);">📋 Anterior: 0 un</span>`;
+    } else if (item.is_new_product === true) {
+      historyBadgeHtml = `<span style="font-size: 0.66rem; font-weight: 800; padding: 2px 6px; border-radius: 4px; background: rgba(52, 211, 153, 0.15); color: #34d399; border: 1px solid rgba(52, 211, 153, 0.35);">🆕 Novo</span>`;
+    }
+
     const displayBarcode = (barcode && barcode !== 'undefined') ? barcode : 'S/ CÓDIGO';
     let photoUrl = prod?.image || prod?.photo_url || item.foto_url || item.photo_proof;
     if (!photoUrl && (prodId || (barcode && barcode !== 'undefined'))) {
@@ -1763,6 +1985,7 @@ async function renderBlitzSessionItemsListFiltered(session, filter = 'TODOS', se
                 📅 Val: ${dateFormatted}
               </span>
               ${tagHtml}
+              ${historyBadgeHtml}
             </div>
 
             <!-- Nome do produto com alto contraste e legibilidade -->
@@ -2878,7 +3101,8 @@ export async function promptBlitzQuantityAndHistoryStep(product, targetDateISO, 
         locations: [],
         photo_proof: productPhoto || null,
         foto_url: productPhoto || null,
-        userName: session?.user_name || 'Ana Luiza'
+        userId: getCurrentUser()?.id || session?.responsible_user_id || session?.user_id || 'ana_luiza',
+        userName: getCurrentUser()?.name || session?.responsible_user_name || session?.user_name || 'Ana Luiza'
       });
 
       await updateProductStatus(product.id, 'VERIFICADO');
@@ -2946,7 +3170,8 @@ export async function promptBlitzQuantityAndHistoryStep(product, targetDateISO, 
               locations: [],
               photo_proof: productPhoto || null,
               foto_url: productPhoto || null,
-              userName: session?.user_name || 'Ana Luiza'
+              userId: getCurrentUser()?.id || session?.responsible_user_id || session?.user_id || 'ana_luiza',
+              userName: getCurrentUser()?.name || session?.responsible_user_name || session?.user_name || 'Ana Luiza'
             });
             await updateProductStatus(product.id, 'VERIFICADO');
             product.status = 'VERIFICADO';
@@ -3030,7 +3255,8 @@ export async function promptBlitzQuantityAndHistoryStep(product, targetDateISO, 
         locations: locations.length > 0 ? locations : [{ location: prodCorridor, quantity: totalQty }],
         photo_proof: productPhoto || null,
         foto_url: productPhoto || null,
-        userName: session?.user_name || 'Ana Luiza'
+        userId: getCurrentUser()?.id || session?.responsible_user_id || session?.user_id || 'ana_luiza',
+        userName: getCurrentUser()?.name || session?.responsible_user_name || session?.user_name || 'Ana Luiza'
       });
 
       triggerSyncNow().catch(err => console.warn('Sync error:', err));
@@ -3354,7 +3580,8 @@ export async function showBlitzProductDatesVerification(product) {
           result: 'TEM',
           locations: [{ location: prodCorridor, quantity: qty }],
           photo_proof: null,
-          userName: session?.user_name || 'Ana Luiza'
+          userId: getCurrentUser()?.id || session?.responsible_user_id || session?.user_id || 'ana_luiza',
+          userName: getCurrentUser()?.name || session?.responsible_user_name || session?.user_name || 'Ana Luiza'
         });
 
         // 10. PRODUTO VERIFICADO: Muda status para VERIFICADO
@@ -3406,7 +3633,8 @@ export async function showBlitzProductDatesVerification(product) {
             result: 'TEM',
             locations: [{ location: prodCorridor, quantity: newQty }],
             photo_proof: null,
-            userName: session?.user_name || 'Ana Luiza'
+            userId: getCurrentUser()?.id || session?.responsible_user_id || session?.user_id || 'ana_luiza',
+            userName: getCurrentUser()?.name || session?.responsible_user_name || session?.user_name || 'Ana Luiza'
           });
 
           await updateProductStatus(product.id, 'VERIFICADO');
@@ -3464,7 +3692,8 @@ export async function showBlitzProductDatesVerification(product) {
             result: 'TEM',
             locations: [{ location: location || prodCorridor, quantity: quantity }],
             photo_proof: photo || null,
-            userName: session?.user_name || 'Ana Luiza'
+            userId: getCurrentUser()?.id || session?.responsible_user_id || session?.user_id || 'ana_luiza',
+            userName: getCurrentUser()?.name || session?.responsible_user_name || session?.user_name || 'Ana Luiza'
           });
 
           // 10. Muda status para VERIFICADO
@@ -3517,7 +3746,8 @@ export async function showBlitzProductDatesVerification(product) {
           result: 'NAO_TEM',
           locations: [],
           photo_proof: null,
-          userName: session?.user_name || 'Ana Luiza'
+          userId: getCurrentUser()?.id || session?.responsible_user_id || session?.user_id || 'ana_luiza',
+          userName: getCurrentUser()?.name || session?.responsible_user_name || session?.user_name || 'Ana Luiza'
         });
 
         // 10. Muda status para VERIFICADO
@@ -4930,7 +5160,10 @@ async function saveBlitzNaoTemConference(product, requestedDate, existingItem = 
       newQuantity: 0,
       result: 'NAO_TEM',
       locations: [],
-      userName: currentActiveBlitzSession.user_name || 'Ana Luiza'
+      userId: getCurrentUser()?.id || currentActiveBlitzSession.responsible_user_id || currentActiveBlitzSession.user_id || 'ana_luiza',
+      userName: getCurrentUser()?.name || currentActiveBlitzSession.responsible_user_name || currentActiveBlitzSession.user_name || 'Ana Luiza',
+      responsible_user_id: getCurrentUser()?.id || currentActiveBlitzSession.responsible_user_id || currentActiveBlitzSession.user_id || 'ana_luiza',
+      responsible_user_name: getCurrentUser()?.name || currentActiveBlitzSession.responsible_user_name || currentActiveBlitzSession.user_name || 'Ana Luiza'
     });
 
     triggerSyncNow().catch(e => console.warn('Sync error:', e));
@@ -5152,7 +5385,10 @@ async function saveBlitzTemConference(product, requestedDate, totalQuantity, loc
       newQuantity: totalQuantity,
       result: 'TEM',
       locations: locationsArray,
-      userName: currentActiveBlitzSession.user_name || 'Ana Luiza'
+      userId: getCurrentUser()?.id || currentActiveBlitzSession.responsible_user_id || currentActiveBlitzSession.user_id || 'ana_luiza',
+      userName: getCurrentUser()?.name || currentActiveBlitzSession.responsible_user_name || currentActiveBlitzSession.user_name || 'Ana Luiza',
+      responsible_user_id: getCurrentUser()?.id || currentActiveBlitzSession.responsible_user_id || currentActiveBlitzSession.user_id || 'ana_luiza',
+      responsible_user_name: getCurrentUser()?.name || currentActiveBlitzSession.responsible_user_name || currentActiveBlitzSession.user_name || 'Ana Luiza'
     });
 
     triggerSyncNow().catch(e => console.warn('Sync error:', e));
@@ -5273,11 +5509,15 @@ export async function finishActiveBlitzSession(sessionId = null) {
   const session = await getBlitzSessionById(id) || currentActiveBlitzSession;
   const metrics = await calculateBlitzPaceMetrics(id);
 
+  const activeUser = getCurrentUser();
+  const effectiveUserName = activeUser?.name || session.responsible_user_name || session.user_name || 'Ana Luiza';
+  const effectiveUserId = activeUser?.id || session.responsible_user_id || session.user_id || 'ana_luiza';
+
   if (metrics.pendentes > 0) {
     promptConfirmFinishBlitzModal(session, metrics, async () => {
       try {
         showToast('Finalizando e zerando pendências...', 'sync', 1500);
-        const finalStats = await finalizeBlitzWithAutoZeros(id, session.user_name || 'Ana Luiza');
+        const finalStats = await finalizeBlitzWithAutoZeros(id, effectiveUserName);
         const updated = await getBlitzSessionById(id);
         setActiveBlitz(null);
         triggerSyncNow().catch(e => console.warn('Sync error:', e));
@@ -5297,7 +5537,7 @@ export async function finishActiveBlitzSession(sessionId = null) {
 
     try {
       showToast('Finalizando Blitz...', 'sync', 1000);
-      const updated = await finishBlitzSession(id);
+      const updated = await finishBlitzSession(id, effectiveUserId, effectiveUserName);
       const items = await getBlitzItemsBySessionId(id);
       setActiveBlitz(null);
       triggerSyncNow().catch(e => console.warn('Sync error:', e));
@@ -5519,7 +5759,7 @@ export function promptReopenBlitzModal(session) {
             type="text"
             id="input-reopen-user"
             class="form-input"
-            value="${session.user_name || 'Ana Luiza'}"
+            value="${getCurrentUser()?.name || session.responsible_user_name || session.user_name || 'Ana Luiza'}"
             required
             style="height: 42px; font-weight: 800; color: #f4f4f5;"
           />
@@ -5559,7 +5799,7 @@ export function promptReopenBlitzModal(session) {
 
   document.getElementById('form-reopen-blitz-action')?.addEventListener('submit', async (e) => {
     e.preventDefault();
-    const userName = document.getElementById('input-reopen-user')?.value?.trim() || 'Ana Luiza';
+    const userName = document.getElementById('input-reopen-user')?.value?.trim() || getCurrentUser()?.name || 'Ana Luiza';
     const reason = document.getElementById('textarea-reopen-reason')?.value?.trim();
 
     if (!reason || reason.length < 5) {
@@ -5645,7 +5885,7 @@ export async function promptCorrectBlitzItemQuantity(item, session, onSaved) {
             type="text"
             id="input-correct-user"
             class="form-input"
-            value="${session?.user_name || 'Ana Luiza'}"
+            value="${getCurrentUser()?.name || session?.responsible_user_name || session?.user_name || 'Ana Luiza'}"
             required
             style="height: 40px; font-weight: 800;"
           />
@@ -5686,7 +5926,7 @@ export async function promptCorrectBlitzItemQuantity(item, session, onSaved) {
   document.getElementById('form-correct-blitz-item-action')?.addEventListener('submit', async (e) => {
     e.preventDefault();
     const newQty = Number(document.getElementById('input-correct-qty-val')?.value) || 0;
-    const userName = document.getElementById('input-correct-user')?.value?.trim() || 'Ana Luiza';
+    const userName = document.getElementById('input-correct-user')?.value?.trim() || getCurrentUser()?.name || 'Ana Luiza';
     const reason = document.getElementById('textarea-correct-reason')?.value?.trim();
 
     if (!reason || reason.length < 3) {
@@ -5765,11 +6005,30 @@ export async function openWhatChangedModal(sessionId) {
     if (!contentArea) return;
 
     if (!analysis.hasPrevious) {
+      const novosList = analysis.novos || [];
       contentArea.innerHTML = `
-        <div style="background: rgba(59, 130, 246, 0.1); border: 1px solid rgba(59, 130, 246, 0.3); border-radius: 8px; padding: 14px; text-align: center; color: #93c5fd; font-size: 0.86rem; line-height: 1.4;">
+        <div style="background: rgba(59, 130, 246, 0.1); border: 1px solid rgba(59, 130, 246, 0.3); border-radius: 8px; padding: 14px; text-align: center; color: #93c5fd; font-size: 0.86rem; line-height: 1.4; margin-bottom: 8px;">
           ✨ <strong>Primeira Blitz deste setor!</strong><br>
-          Não há conferência anterior para comparação. Todos os ${analysis.novos.length} itens conferidos estabeleceram o marco inicial.
+          Não há blitz anterior para comparação de diferença. Todos os ${novosList.length} itens registrados são novos nesta blitz e servem de marco referencial.
         </div>
+        ${novosList.length > 0 ? `
+          <div style="background: rgba(192, 132, 252, 0.08); border: 1px solid rgba(192, 132, 252, 0.3); border-radius: 8px; padding: 10px;">
+            <div style="font-size: 0.74rem; font-weight: 900; color: #c084fc; text-transform: uppercase; margin-bottom: 6px;">
+              🆕 PRODUTOS REGISTRADOS NESTA BLITZ (${novosList.length})
+            </div>
+            <div style="display: flex; flex-direction: column; gap: 4px; max-height: 320px; overflow-y: auto;">
+              ${novosList.map(it => `
+                <div style="background: #18181c; padding: 6px 8px; border-radius: 4px; font-size: 0.78rem; display: flex; justify-content: space-between; align-items: center;">
+                  <div style="overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 65%;">
+                    <span style="color: #f4f4f5;">${it.name}</span>
+                    <span style="display: block; font-size: 0.68rem; color: #a1a1aa; font-family: monospace;">${it.barcode || ''}</span>
+                  </div>
+                  <span style="color: #c084fc; font-weight: 800;">${it.currentQty} un</span>
+                </div>
+              `).join('')}
+            </div>
+          </div>
+        ` : ''}
       `;
       return;
     }
@@ -5863,6 +6122,26 @@ export async function openWhatChangedModal(sessionId) {
               <div style="background: #18181c; padding: 6px 8px; border-radius: 4px; font-size: 0.78rem; display: flex; justify-content: space-between; align-items: center;">
                 <span style="color: #f4f4f5; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 65%;">${it.name}</span>
                 <span style="color: #fbbf24; font-weight: 800;">${it.prevQty} ➔ <strong>${it.currentQty} un</strong> (${it.diff})</span>
+              </div>
+            `).join('')}
+          </div>
+        </div>
+      ` : ''}
+
+      <!-- Seção: Produtos Novos -->
+      ${novos.length > 0 ? `
+        <div style="background: rgba(192, 132, 252, 0.08); border: 1px solid rgba(192, 132, 252, 0.3); border-radius: 8px; padding: 10px;">
+          <div style="font-size: 0.74rem; font-weight: 900; color: #c084fc; text-transform: uppercase; margin-bottom: 6px;">
+            🆕 PRODUTOS NOVOS NESTA BLITZ
+          </div>
+          <div style="display: flex; flex-direction: column; gap: 4px;">
+            ${novos.map(it => `
+              <div style="background: #18181c; padding: 6px 8px; border-radius: 4px; font-size: 0.78rem; display: flex; justify-content: space-between; align-items: center;">
+                <div style="overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 65%;">
+                  <span style="color: #f4f4f5;">${it.name}</span>
+                  <span style="display: block; font-size: 0.68rem; color: #a1a1aa; font-family: monospace;">${it.barcode || ''}</span>
+                </div>
+                <span style="color: #c084fc; font-weight: 800;">Conferido: <strong>${it.currentQty} un</strong></span>
               </div>
             `).join('')}
           </div>
@@ -6158,6 +6437,15 @@ async function renderBlitzHistorySessions(sessions) {
     }
     const startedAtFormatted = new Date(s.started_at).toLocaleString('pt-BR');
 
+    const respName = s.responsible_user_name || s.user_name || 'Ana Luiza';
+    const respUser = getUserById(s.responsible_user_id || s.user_id);
+    const respBadgeHtml = respUser ? `
+      <span style="background: ${respUser.badgeColor || 'rgba(168, 85, 247, 0.2)'}; color: ${respUser.textColor || '#c084fc'}; font-size: 0.72rem; font-weight: 800; padding: 2px 8px; border-radius: 9999px; border: 1px solid ${respUser.color || '#a855f7'}44; display: inline-flex; align-items: center; gap: 4px;">
+        <span>${respUser.icon || '👤'}</span>
+        <span>${respName}</span>
+      </span>
+    ` : `<strong style="color: #d4d4d8;">${respName}</strong>`;
+
     return `
       <div style="
         background: #121214;
@@ -6190,9 +6478,18 @@ async function renderBlitzHistorySessions(sessions) {
           </span>
         </div>
 
-        <div style="font-size: 0.72rem; color: #a1a1aa;">
-          Iniciada em ${startedAtFormatted} por ${s.user_name || 'Ana Luiza'}
+        <div style="display: flex; align-items: center; justify-content: space-between; font-size: 0.74rem; color: #a1a1aa; flex-wrap: wrap; gap: 4px;">
+          <div style="display: flex; align-items: center; gap: 6px;">
+            <span style="color: #71717a;">Responsável:</span>
+            ${respBadgeHtml}
+          </div>
+          <span style="color: #71717a;">Iniciada em: <strong style="color: #a1a1aa;">${startedAtFormatted}</strong></span>
         </div>
+        ${s.finalized_by ? `
+          <div style="font-size: 0.7rem; color: #10b981; display: flex; align-items: center; gap: 4px;">
+            <span>✓ Finalizada por: <strong>${s.finalized_by}</strong></span>
+          </div>
+        ` : ''}
 
         <div style="display: flex; gap: 8px; background: #18181c; padding: 6px 10px; border-radius: 6px; font-size: 0.76rem; font-weight: 800;">
           <span style="color: #f4f4f5;">Total: <strong>${items.length}</strong></span>
@@ -6269,6 +6566,15 @@ async function openBlitzSessionDetailModal(session) {
   const items = await getBlitzItemsBySessionId(session.id);
   const periodLabel = session.period_label || `${formatDateBR(session.start_date)} → ${formatDateBR(session.end_date)}`;
 
+  const respName = session.responsible_user_name || session.user_name || 'Ana Luiza';
+  const respUser = getUserById(session.responsible_user_id || session.user_id);
+  const respBadgeHtml = respUser ? `
+    <span style="background: ${respUser.badgeColor || 'rgba(168, 85, 247, 0.2)'}; color: ${respUser.textColor || '#c084fc'}; font-size: 0.74rem; font-weight: 800; padding: 2px 8px; border-radius: 9999px; border: 1px solid ${respUser.color || '#a855f7'}44; display: inline-flex; align-items: center; gap: 4px;">
+      <span>${respUser.icon || '👤'}</span>
+      <span>${respName}</span>
+    </span>
+  ` : `<strong style="color: #d4d4d8;">${respName}</strong>`;
+
   modal.innerHTML = `
     <div class="modal-backdrop" id="modal-blitz-detail-backdrop"></div>
     <div class="modal-card" style="padding: 16px; max-width: 460px; width: 100%; box-sizing: border-box; max-height: 85vh; display: flex; flex-direction: column;">
@@ -6283,6 +6589,30 @@ async function openBlitzSessionDetailModal(session) {
           </span>
         </div>
         <button type="button" id="btn-close-blitz-detail" class="btn-icon-control" style="font-size: 1rem; width: 30px; height: 30px;">✕</button>
+      </div>
+
+      <!-- Resumo de Auditoria da Sessão -->
+      <div style="background: #141418; border: 1px solid #27272a; border-radius: 8px; padding: 8px 12px; margin-bottom: 10px; font-size: 0.74rem; display: flex; flex-direction: column; gap: 4px;">
+        <div style="display: flex; justify-content: space-between; align-items: center;">
+          <span style="color: #71717a;">Responsável:</span>
+          <div>${respBadgeHtml}</div>
+        </div>
+        <div style="display: flex; justify-content: space-between; align-items: center;">
+          <span style="color: #71717a;">Setor:</span>
+          <span style="color: #fbbf24; font-weight: 800;">🏷️ ${session.sector || 'GERAL'}</span>
+        </div>
+        <div style="display: flex; justify-content: space-between; align-items: center;">
+          <span style="color: #71717a;">Status:</span>
+          <span style="color: ${session.status === 'finalizada' ? '#34d399' : '#fbbf24'}; font-weight: 800;">
+            ${session.status?.toUpperCase() || 'EM ANDAMENTO'}
+          </span>
+        </div>
+        ${session.finalized_by ? `
+          <div style="display: flex; justify-content: space-between; align-items: center;">
+            <span style="color: #71717a;">Finalizada por:</span>
+            <span style="color: #10b981; font-weight: 800;">✓ ${session.finalized_by}</span>
+          </div>
+        ` : ''}
       </div>
 
       <div id="modal-blitz-detail-items" style="flex: 1; overflow-y: auto; display: flex; flex-direction: column; gap: 6px; padding-right: 2px;">
@@ -6440,10 +6770,15 @@ export async function formatBlitzSessionWhatsApp(session, items) {
     }
   }
 
+  const respName = session.responsible_user_name || session.user_name || 'Ana Luiza';
+
   let text = `📋 *RELATÓRIO DA BLITZ POR PERÍODO*\n`;
   text += `🏷️ Setor: *${session.sector || 'GERAL'}*\n`;
   text += `📅 Período: *${periodLabel}*\n`;
-  text += `Responsável: *${session.user_name || 'Ana Luiza'}*\n`;
+  text += `Responsável: *${respName}*\n`;
+  if (session.finalized_by) {
+    text += `Finalizada por: *${session.finalized_by}*\n`;
+  }
   text += `Início: ${startDate}\n`;
   text += `Término: ${finishDate}\n`;
   text += `Status: *${session.status?.toUpperCase()}*\n`;
@@ -6466,7 +6801,7 @@ export async function formatBlitzSessionWhatsApp(session, items) {
     text += `━━━━━━━━━━━━━━━━━━━━━\n\n`;
   }
 
-  text += `*Controladoria - Ana Luiza*\n`;
+  text += `*Controladoria - ${respName}*\n`;
   text += `Enviado em: ${new Date().toLocaleString('pt-BR')}`;
 
   return text;

@@ -1,21 +1,41 @@
-// Dashboard Inteligente para Controladoria - Ana Luiza
+// Dashboard Inteligente para Controladoria - Ana Luiza & Angélica
 import { getGreeting, getFormattedFullDate, formatNumber, formatDateBR } from './utils.js';
 import { getDashboardMetrics, getActiveSession, clearActiveSession, getProductById } from './db.js';
 import { showView, showToast } from './ui.js';
 import { openConferenceForProduct, openCorridorAuditView } from './inventory.js';
 import { getWeeklyRoutineStatus } from './blitz_engine.js';
 import { openBlitzDashboardView, promptStartBlitz } from './blitz.js';
+import { getCurrentUser } from './auth.js';
+import { openDatabaseModal } from './database-modal.js';
+
+let currentDashboardScope = 'user'; // 'user' (filtrado pelos setores da usuária) ou 'all' (loja toda)
 
 export async function renderDashboard() {
+  const currentUser = getCurrentUser();
+
   // 1. Saudação e Data
   const greetingEl = document.getElementById('dashboard-greeting');
   const dateEl = document.getElementById('dashboard-date');
 
-  if (greetingEl) greetingEl.textContent = getGreeting();
+  if (greetingEl) greetingEl.textContent = `Olá, ${currentUser.name}! 👋`;
   if (dateEl) dateEl.textContent = `Hoje é ${getFormattedFullDate()}.`;
 
-  // 2. Busca Métricas
-  const metrics = await getDashboardMetrics();
+  // 2. Banner do Espaço de Trabalho Exclusivo da Usuária
+  renderUserWorkspaceBanner(currentUser);
+
+  // 3. Atualiza Título da Seção de Métricas de acordo com o escopo
+  const sectionTitleEl = document.getElementById('dash-metrics-section-title');
+  if (sectionTitleEl) {
+    if (currentDashboardScope === 'user' && currentUser?.sectors?.length > 0) {
+      sectionTitleEl.textContent = `SITUAÇÃO DOS SEUS SETORES (${currentUser.sectors.join(', ')})`;
+    } else {
+      sectionTitleEl.textContent = 'SITUAÇÃO GERAL (LOJA TODA)';
+    }
+  }
+
+  // 4. Busca Métricas (filtradas se escopo for 'user')
+  const sectorFilter = currentDashboardScope === 'user' ? currentUser?.sectors : null;
+  const metrics = await getDashboardMetrics(sectorFilter);
 
   // 3. Mensagem Automática Inteligente com Ícone Refinado e Status Visual
   const msgEl = document.getElementById('dashboard-smart-msg');
@@ -171,16 +191,78 @@ export async function renderDashboard() {
     }
   }
 
-  // 7. Painel "Como está minha semana?" e Prioridade Inteligente (Item 5, 10, 11)
+  // 7. Painel "Como está minha semana?" e Prioridade Inteligente (adaptado para a usuária)
   const routineContainer = document.getElementById('dashboard-weekly-routine-section');
   if (routineContainer) {
-    await renderWeeklyRoutine(routineContainer);
+    await renderWeeklyRoutine(routineContainer, currentUser);
   }
 }
 
-async function renderWeeklyRoutine(container) {
+function renderUserWorkspaceBanner(user) {
+  const container = document.getElementById('dashboard-user-workspace-banner');
+  if (!container) return;
+
+  const isAngelica = user.id === 'angelica';
+  const themeClass = isAngelica ? 'theme-angelica' : 'theme-ana-luiza';
+
+  container.innerHTML = `
+    <div class="user-workspace-card ${themeClass}">
+      <div class="workspace-header-row">
+        <div class="workspace-user-info">
+          <span class="workspace-avatar">${user.icon}</span>
+          <div>
+            <div class="workspace-title-badge">Espaço de Trabalho Exclusivo</div>
+            <h2 class="workspace-user-name">${user.name}</h2>
+          </div>
+        </div>
+        <div class="workspace-actions">
+          <button type="button" id="btn-dash-open-db" class="btn-db-quick" title="Acessar e Baixar Banco de Dados">
+            💾 <span>Banco de Dados</span>
+          </button>
+        </div>
+      </div>
+
+      <div class="workspace-sectors-row">
+        <span class="sectors-label">🏷️ Seus Setores:</span>
+        <div class="sectors-chips">
+          ${(user.sectors || []).map(s => `<span class="sector-chip">${s}</span>`).join(' ')}
+        </div>
+      </div>
+
+      <div class="workspace-scope-toggles">
+        <button type="button" id="btn-scope-user" class="btn-scope-toggle ${currentDashboardScope === 'user' ? 'active' : ''}">
+          ${user.icon} Meus Setores (${user.name})
+        </button>
+        <button type="button" id="btn-scope-all" class="btn-scope-toggle ${currentDashboardScope === 'all' ? 'active' : ''}">
+          🌐 Loja Toda
+        </button>
+      </div>
+    </div>
+  `;
+
+  document.getElementById('btn-dash-open-db')?.addEventListener('click', () => {
+    openDatabaseModal();
+  });
+
+  document.getElementById('btn-scope-user')?.addEventListener('click', async () => {
+    if (currentDashboardScope !== 'user') {
+      currentDashboardScope = 'user';
+      await renderDashboard();
+    }
+  });
+
+  document.getElementById('btn-scope-all')?.addEventListener('click', async () => {
+    if (currentDashboardScope !== 'all') {
+      currentDashboardScope = 'all';
+      await renderDashboard();
+    }
+  });
+}
+
+async function renderWeeklyRoutine(container, user = null) {
   try {
-    const data = await getWeeklyRoutineStatus();
+    const activeUser = user || getCurrentUser();
+    const data = await getWeeklyRoutineStatus(activeUser?.id);
     const { currentCycle, cyclesProgress, delayedBlitz, priorityAlert } = data;
 
     let priorityHtml = '';
@@ -219,10 +301,13 @@ async function renderWeeklyRoutine(container) {
       `;
     }
 
+    const isAngelica = activeUser?.id === 'angelica';
+    const accentColor = isAngelica ? '#10b981' : '#f59e0b';
+
     const cyclesCardsHtml = cyclesProgress.map(c => {
       const isCurrent = c.isCurrent;
-      const borderStyle = isCurrent ? 'border: 1.5px solid #f59e0b; background: #1a1a1f;' : 'border: 1px solid #27272a; background: #141417;';
-      const currentBadge = isCurrent ? '<span style="background: #f59e0b; color: #000; font-size: 0.62rem; font-weight: 900; padding: 2px 6px; border-radius: 4px; text-transform: uppercase;">HOJE</span>' : '';
+      const borderStyle = isCurrent ? `border: 1.5px solid ${accentColor}; background: #1a1a1f;` : 'border: 1px solid #27272a; background: #141417;';
+      const currentBadge = isCurrent ? `<span style="background: ${accentColor}; color: #000; font-size: 0.62rem; font-weight: 900; padding: 2px 6px; border-radius: 4px; text-transform: uppercase;">HOJE</span>` : '';
 
       return `
         <div style="${borderStyle} border-radius: 8px; padding: 10px; margin-bottom: 8px;">
@@ -237,7 +322,7 @@ async function renderWeeklyRoutine(container) {
 
           <div style="margin: 6px 0;">
             <div style="background: #27272a; height: 7px; border-radius: 4px; overflow: hidden;">
-              <div style="background: ${c.isFinished ? '#10b981' : (c.badgeClass === 'red-badge' ? '#ef4444' : '#f59e0b')}; width: ${c.percent}%; height: 100%; transition: width 0.3s ease;"></div>
+              <div style="background: ${c.isFinished ? '#10b981' : (c.badgeClass === 'red-badge' ? '#ef4444' : accentColor)}; width: ${c.percent}%; height: 100%; transition: width 0.3s ease;"></div>
             </div>
           </div>
 
@@ -261,10 +346,10 @@ async function renderWeeklyRoutine(container) {
           <div style="display: flex; align-items: center; gap: 6px;">
             <span style="font-size: 1rem;">📊</span>
             <h4 style="font-size: 0.86rem; font-weight: 900; color: #f4f4f5; margin: 0; text-transform: uppercase; letter-spacing: 0.5px;">
-              COMO ESTÁ MINHA SEMANA?
+              ROTINA SEMANAL · ${activeUser.name.toUpperCase()}
             </h4>
           </div>
-          <button type="button" id="btn-routine-open-blitz-dash" style="background: none; border: none; color: #fbbf24; font-size: 0.74rem; font-weight: 800; cursor: pointer; padding: 2px 6px;">
+          <button type="button" id="btn-routine-open-blitz-dash" style="background: none; border: none; color: ${accentColor}; font-size: 0.74rem; font-weight: 800; cursor: pointer; padding: 2px 6px;">
             Abrir Painel Blitz →
           </button>
         </div>
@@ -276,9 +361,9 @@ async function renderWeeklyRoutine(container) {
         <div style="background: #111113; border: 1px dashed #3f3f46; border-radius: 6px; padding: 8px 10px; display: flex; align-items: center; justify-content: space-between; font-size: 0.76rem;">
           <div>
             <span style="color: #a1a1aa;">Setor sugerido para hoje:</span>
-            <strong style="color: #fbbf24; margin-left: 4px;">${currentCycle.label}</strong>
+            <strong style="color: ${accentColor}; margin-left: 4px;">${currentCycle.label}</strong>
           </div>
-          <button type="button" id="btn-routine-quick-blitz" style="background: rgba(245, 158, 11, 0.2); color: #fbbf24; border: 1px solid rgba(245, 158, 11, 0.4); border-radius: 4px; font-weight: 800; font-size: 0.7rem; padding: 4px 8px; cursor: pointer;">
+          <button type="button" id="btn-routine-quick-blitz" style="background: rgba(${isAngelica ? '16, 185, 129' : '245, 158, 11'}, 0.2); color: ${accentColor}; border: 1px solid rgba(${isAngelica ? '16, 185, 129' : '245, 158, 11'}, 0.4); border-radius: 4px; font-weight: 800; font-size: 0.7rem; padding: 4px 8px; cursor: pointer;">
             ${currentCycle.isRestDay ? 'Ver Histórico' : 'Iniciar / Continuar'}
           </button>
         </div>

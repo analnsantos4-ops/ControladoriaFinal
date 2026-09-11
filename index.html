@@ -1649,17 +1649,54 @@
     <div class="login-container">
       <div class="login-brand-box">
         <div class="login-avatar-wrapper">
-          <img src="/icons/icon-192.png" alt="Ana Luiza" class="login-avatar-img" referrerPolicy="no-referrer" />
+          <img src="/icons/icon-192.png" alt="Controladoria" class="login-avatar-img" referrerPolicy="no-referrer" />
         </div>
-        <h1 class="brand-title">ANA LUIZA</h1>
-        <h2 class="brand-subtitle">CONTROLADORIA</h2>
+        <h1 class="brand-title">CONTROLADORIA</h1>
+        <h2 class="brand-subtitle">ANA LUIZA &amp; ANGÉLICA</h2>
         <div class="brand-divider"></div>
       </div>
 
       <div class="login-card">
         <div class="login-header-icon">🔐</div>
         <h3 class="login-card-title">ACESSO AO SISTEMA</h3>
-        <p class="login-card-subtitle">Digite seu código de acesso:</p>
+        <p class="login-card-subtitle" id="login-selection-subtitle">Selecione quem está acessando ou digite seu PIN:</p>
+
+        <!-- Seleção Visual de Usuária -->
+        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-bottom: 14px;">
+          <button type="button" id="btn-login-select-ana" class="btn-login-user-card" style="
+            background: rgba(168, 85, 247, 0.16);
+            border: 2px solid #a855f7;
+            border-radius: 10px;
+            padding: 10px 8px;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 4px;
+            cursor: pointer;
+            transition: all 0.15s;
+          ">
+            <span style="font-size: 1.5rem;">🟣</span>
+            <span style="font-size: 0.88rem; font-weight: 900; color: #c084fc;">Ana Luiza</span>
+            <span style="font-size: 0.68rem; color: #a1a1aa;">Alho • Mercearia • Bazar • Bebidas</span>
+          </button>
+
+          <button type="button" id="btn-login-select-angelica" class="btn-login-user-card" style="
+            background: #18181c;
+            border: 1px solid #27272a;
+            border-radius: 10px;
+            padding: 10px 8px;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 4px;
+            cursor: pointer;
+            transition: all 0.15s;
+          ">
+            <span style="font-size: 1.5rem;">🟢</span>
+            <span style="font-size: 0.88rem; font-weight: 900; color: #34d399;">Angélica</span>
+            <span style="font-size: 0.68rem; color: #a1a1aa;">Mercearia • Perfumaria • Limpeza</span>
+          </button>
+        </div>
 
         <form id="form-login" autocomplete="off">
           <div class="pin-input-wrapper">
@@ -1667,9 +1704,9 @@
               type="password"
               id="login-pin-input"
               class="login-pin-field"
-              maxlength="4"
+              maxlength="6"
               inputmode="numeric"
-              placeholder="••••"
+              placeholder="Digite o PIN..."
               autocomplete="one-time-code"
               required
             />
@@ -1708,10 +1745,12 @@
     <!-- Top Header Bar -->
     <header class="app-top-bar">
       <div class="top-bar-left" style="display: flex; align-items: center; gap: 8px;">
-        <img src="/icons/icon-192.png" alt="Ana Luiza" style="width: 26px; height: 26px; border-radius: 7px; border: 1px solid rgba(16, 185, 129, 0.4); object-fit: cover;" referrerPolicy="no-referrer" />
-        <span class="app-name-tag">ANA LUIZA — CONTROLADORIA</span>
+        <img src="/icons/icon-192.png" alt="Controladoria" style="width: 26px; height: 26px; border-radius: 7px; border: 1px solid rgba(16, 185, 129, 0.4); object-fit: cover;" referrerPolicy="no-referrer" />
+        <span class="app-name-tag" id="app-header-brand-title">CONTROLADORIA</span>
       </div>
-      <div class="top-bar-right">
+      <div class="top-bar-right" style="display: flex; align-items: center; gap: 6px;">
+        <button type="button" id="btn-header-database" class="btn-header-db" title="Acessar e Baixar Banco de Dados">💾 <span>Banco</span></button>
+        <div id="header-user-badge-container"></div>
         <span id="sync-status-badge" class="sync-badge status-offline">● Offline</span>
         <button id="btn-header-logout" class="btn-icon-link" title="Sair">Sair</button>
       </div>
@@ -1723,6 +1762,9 @@
         <h1 id="dashboard-greeting" class="dash-greeting-title">Olá, Ana Luiza! 👋</h1>
         <p id="dashboard-date" class="dash-greeting-date">Hoje é terça-feira, 25 de agosto de 2026.</p>
       </section>
+
+      <!-- Banner do Espaço de Trabalho Exclusivo da Usuária -->
+      <section id="dashboard-user-workspace-banner" class="user-workspace-banner"></section>
 
       <!-- Mensagem Automática Curta e Inteligente -->
       <div class="dash-smart-message" id="dashboard-smart-msg">
@@ -1775,7 +1817,7 @@
 
       <!-- Dashboard Inteligente - Métricas -->
       <section class="dash-metrics-section">
-        <h3 class="section-title">SITUAÇÃO GERAL</h3>
+        <h3 class="section-title" id="dash-metrics-section-title">SITUAÇÃO DOS SEUS SETORES</h3>
         <div class="metrics-grid">
           <!-- 1. Vencidos -->
           <div class="metric-card metric-expired" id="card-metric-expired">
@@ -2312,17 +2354,21 @@
     <main class="search-main-content">
       <!-- Abas de Separação: Produtos Registrados vs Exportados da Blitz vs Verificados -->
       <div class="product-type-tabs" id="search-product-tabs">
-        <button type="button" id="tab-products-registered" class="btn-product-tab active" data-type="REGISTERED">
+        <button type="button" id="tab-products-registered" class="btn-product-tab active" data-type="REGISTERED" title="Produtos com foto, corredor e setor cadastrados">
           <span>📋 Registrados</span>
           <span id="tab-count-registered" class="tab-badge">0</span>
         </button>
-        <button type="button" id="tab-products-blitz" class="btn-product-tab" data-type="BLITZ">
+        <button type="button" id="tab-products-blitz" class="btn-product-tab" data-type="BLITZ" title="Produtos colocados semanalmente através da blitz">
           <span>⚡ Exportados da Blitz</span>
           <span id="tab-count-blitz" class="tab-badge">0</span>
         </button>
-        <button type="button" id="tab-products-verified" class="btn-product-tab" data-type="VERIFIED">
-          <span>🔍 Verificados</span>
-          <span id="tab-count-verified" class="tab-badge">0</span>
+        <button type="button" id="tab-products-with-units" class="btn-product-tab" data-type="WITH_UNITS" title="Somente produtos que possuem unidades">
+          <span>📦 Com Unidades</span>
+          <span id="tab-count-with-units" class="tab-badge">0</span>
+        </button>
+        <button type="button" id="tab-products-all" class="btn-product-tab" data-type="ALL" title="Todos os produtos cadastrados">
+          <span>🌐 Todos</span>
+          <span id="tab-count-all" class="tab-badge">0</span>
         </button>
       </div>
 
@@ -2386,6 +2432,9 @@
   <!-- 11. TELA DO HISTÓRICO DE SESSÕES DE BLITZ -->
   <!-- ========================================== -->
   <div id="view-blitz-history" class="app-view"></div>
+
+  <!-- Container para Modal do Banco de Dados -->
+  <div id="modal-database-container"></div>
 
   <!-- Script Principal com Módulos ES6 -->
   <script type="module" src="/js/app.js"></script>

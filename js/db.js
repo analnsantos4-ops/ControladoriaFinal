@@ -1,8 +1,9 @@
-// Banco de Dados Local com IndexedDB para Controladoria - Ana Luiza
+// Banco de Dados Local com IndexedDB para Controladoria - Ana Luiza & Angélica
 import { generateId, getTodayISO, getDaysUntilExpiration, LOCATIONS, formatDateBR, parseDateBRtoISO } from './utils.js';
+import { getCurrentUser } from './auth.js';
 
 const DB_NAME = 'ControladoriaAnaLuizaDB';
-const DB_VERSION = 4;
+const DB_VERSION = 5;
 
 let dbInstance = null;
 let dbInitPromise = null;
@@ -154,6 +155,16 @@ export function initDB(force = false) {
           fotoStore.createIndex('blitz_id', 'blitz_id', { unique: false });
           fotoStore.createIndex('created_at', 'created_at', { unique: false });
         }
+
+        // 13. Tabela oficial auditoria_blitz (Auditoria multiusuária detalhada)
+        if (!db.objectStoreNames.contains('auditoria_blitz')) {
+          const audStore = db.createObjectStore('auditoria_blitz', { keyPath: 'id' });
+          audStore.createIndex('blitz_id', 'blitz_id', { unique: false });
+          audStore.createIndex('tabela', 'tabela', { unique: false });
+          audStore.createIndex('acao', 'acao', { unique: false });
+          audStore.createIndex('responsible_user_id', 'responsible_user_id', { unique: false });
+          audStore.createIndex('created_at', 'created_at', { unique: false });
+        }
       };
 
       request.onsuccess = (event) => {
@@ -293,31 +304,35 @@ export async function getAllProducts() {
 }
 
 /**
- * Determina se o produto é apenas "Verificado" (sem cadastro completo de nome, foto etc.)
- * ou se é um produto com registro completo.
+ * Produtos registrados: SOMENTE produtos com fotografia, corredor e setor preenchidos.
+ */
+export function isProductRegistered(product) {
+  if (!product) return false;
+  const hasPhoto = Boolean(
+    (product.image && String(product.image).trim().length > 0) ||
+    (product.photo_url && String(product.photo_url).trim().length > 0)
+  );
+  const hasCorridor = Boolean(product.corridor && String(product.corridor).trim().length > 0);
+  const hasSector = Boolean(product.sector && String(product.sector).trim().length > 0 && String(product.sector).trim().toUpperCase() !== 'GERAL');
+  return hasPhoto && hasCorridor && hasSector;
+}
+
+/**
+ * Legado mantido para compatibilidade, 'Verificados' foi descontinuado conforme solicitação.
  */
 export function isProductVerifiedOnly(product) {
-  if (!product) return false;
-  if (product.is_verified_only === true || product.is_verified_only === 'true' || product.is_verified_only === 1) {
-    return true;
-  }
-  const name = (product.name || '').trim().toUpperCase();
-  const code = (product.barcode || '').trim().toUpperCase();
-  // Se não tem nome ou o nome é provisório/código de barras
-  if (!name || name === code || name === `PRODUTO ${code}` || (name.startsWith('PRODUTO ') && name.includes(code))) {
-    return true;
-  }
   return false;
 }
 
 /**
  * Determina se o produto é originário do cadastro em massa da Blitz
- * (Produtos exportados/importados da Blitz)
+ * (Produtos exportados da Blitz colocados semanalmente no programa)
  */
 export function isProductBlitzImport(product) {
   if (!product) return false;
   return product.is_blitz_import === true ||
          product.origin === 'BLITZ_IMPORT' ||
+         product.status === 'LISTA DE BLITZ' ||
          product.status === 'LISTA_DE_BLITZ';
 }
 
@@ -326,12 +341,13 @@ export async function searchProducts(searchTerm = '', sectorFilter = '', corrido
   const term = searchTerm.toLowerCase().trim();
 
   const filtered = all.filter((p) => {
+    const isReg = isProductRegistered(p);
     const isBlitz = isProductBlitzImport(p);
-    const isVerified = isProductVerifiedOnly(p);
+    const hasUnits = (Number(p.total_quantity) || 0) > 0;
 
-    if (typeFilter === 'REGISTERED' && (isVerified || isBlitz)) return false;
-    if (typeFilter === 'VERIFIED' && (!isVerified || isBlitz)) return false;
+    if (typeFilter === 'REGISTERED' && !isReg) return false;
     if (typeFilter === 'BLITZ' && !isBlitz) return false;
+    if (typeFilter === 'WITH_UNITS' && !hasUnits) return false;
 
     const matchTerm = !term ||
       (p.name && p.name.toLowerCase().includes(term)) ||
@@ -1341,25 +1357,42 @@ let cachedMetrics = null;
 let lastMetricsCalculationTime = 0;
 const METRICS_CACHE_TTL = 1500; // 1.5 segundos de cache para evitar leituras repetidas em rajada
 
+const metricsCacheMap = new Map();
+
 export function invalidateMetricsCache() {
   cachedMetrics = null;
+  metricsCacheMap.clear();
   lastMetricsCalculationTime = 0;
 }
 
-export async function getDashboardMetrics() {
+export async function getDashboardMetrics(sectorFilter = null) {
+  const cleanFilter = Array.isArray(sectorFilter) && sectorFilter.length > 0
+    ? sectorFilter.map(s => String(s).trim().toUpperCase())
+    : null;
+  const cacheKey = cleanFilter ? cleanFilter.slice().sort().join('|') : '__all__';
+
   const now = Date.now();
-  if (cachedMetrics && (now - lastMetricsCalculationTime < METRICS_CACHE_TTL)) {
-    return cachedMetrics;
+  const cached = metricsCacheMap.get(cacheKey);
+  if (cached && (now - cached.timestamp < METRICS_CACHE_TTL)) {
+    return cached.data;
   }
 
   await runAutomaticTriageCleanup();
 
   // Carrega produtos, validades e histórico de contagens recentes
-  const [products, allExpirations, allCounts] = await Promise.all([
+  const [allProductsRaw, allExpirations, allCounts] = await Promise.all([
     getAllProducts(),
     getAllExpirations(),
     getAllCounts()
   ]);
+
+  // Aplica filtro de setores se fornecido (ex: setores da Angélica ou Ana Luiza)
+  const products = cleanFilter
+    ? allProductsRaw.filter((p) => {
+        const pSec = String(p.sector || '').trim().toUpperCase();
+        return cleanFilter.some(s => s === pSec || (s.includes('LIMPEZA') && pSec.includes('LIMPEZA')));
+      })
+    : allProductsRaw;
 
   // Mapeia produto por id
   const productMap = {};
@@ -1507,7 +1540,7 @@ export async function getDashboardMetrics() {
     smartMessage = 'Nenhum produto cadastrado no momento.';
   }
 
-  return {
+  const result = {
     totalProductsCount: products.length,
     totalUnitsCount: totalAllUnits,
     totalAllUnits,
@@ -1533,6 +1566,9 @@ export async function getDashboardMetrics() {
     smartMessage,
     upcomingExpirations: upcomingList.slice(0, 10)
   };
+
+  metricsCacheMap.set(cacheKey, { timestamp: now, data: result });
+  return result;
 }
 
 // Alterna o status de 'Retirado para triagem' de uma validade
@@ -2043,9 +2079,12 @@ export async function markQueueItemSynced(id) {
 // BLITZ POR PERÍODO (blitz_sessions e blitz_items)
 // ----------------------------------------------------
 
-export async function createBlitzSession({ blitz_type, sector, user_name, start_date = null, end_date = null, period_label = null, target_dates = [] }) {
+export async function createBlitzSession({ blitz_type, sector, user_name, user_id, responsible_user_id, responsible_user_name, start_date = null, end_date = null, period_label = null, target_dates = [] }) {
   const now = new Date().toISOString();
   const normalizedSector = (sector || blitz_type || 'GERAL').toUpperCase();
+  const currentUser = getCurrentUser();
+  const effectiveUserId = user_id || responsible_user_id || currentUser?.id || 'ana_luiza';
+  const effectiveUserName = user_name || responsible_user_name || (effectiveUserId === 'angelica' ? 'Angélica' : currentUser?.name || 'Ana Luiza');
 
   // Processa datas procuradas (uma ou várias datas)
   const cleanTargetDates = Array.isArray(target_dates) && target_dates.length > 0
@@ -2091,7 +2130,10 @@ export async function createBlitzSession({ blitz_type, sector, user_name, start_
     end_date: cleanEnd,
     target_dates: cleanTargetDates,
     period_label: label,
-    user_name: user_name || 'Ana Luiza',
+    user_id: effectiveUserId,
+    responsible_user_id: effectiveUserId,
+    user_name: effectiveUserName,
+    responsible_user_name: effectiveUserName,
     started_at: now,
     finished_at: null,
     status: 'em_andamento',
@@ -2107,12 +2149,13 @@ export async function createBlitzSession({ blitz_type, sector, user_name, start_
         const syncStore = tx.objectStore('sync_queue');
         const blitzStore = tx.objectStoreNames.contains('blitz') ? tx.objectStore('blitz') : null;
 
-        // Fecha preventivamente qualquer outra sessão anterior que tenha ficado em aberto
+        // Fecha preventivamente APENAS a sessão anterior em aberto DESTA MESMA usuária (nunca fecha a da colega!)
         const getAllReq = sessionStore.getAll();
         getAllReq.onsuccess = () => {
           const allSessions = getAllReq.result || [];
           allSessions.forEach((s) => {
-            if (s.status === 'em_andamento') {
+            const sUserId = s.responsible_user_id || s.user_id || (s.user_name?.toLowerCase().includes('angelica') ? 'angelica' : 'ana_luiza');
+            if (s.status === 'em_andamento' && sUserId === effectiveUserId) {
               s.status = 'finalizada';
               s.finished_at = now;
               s.updated_at = now;
@@ -2123,7 +2166,8 @@ export async function createBlitzSession({ blitz_type, sector, user_name, start_
                   data_inicio: s.start_date || cleanStart,
                   data_fim: s.end_date || cleanEnd,
                   setor: s.sector || normalizedSector,
-                  responsavel: s.user_name || 'Ana Luiza',
+                  responsavel: s.responsible_user_name || s.user_name || effectiveUserName,
+                  user_id: sUserId,
                   status: 'FINALIZADA',
                   observacao: s.period_label || '',
                   finalized_at: now,
@@ -2143,7 +2187,8 @@ export async function createBlitzSession({ blitz_type, sector, user_name, start_
             data_inicio: session.start_date,
             data_fim: session.end_date,
             setor: session.sector,
-            responsavel: session.user_name,
+            responsavel: session.responsible_user_name || session.user_name,
+            user_id: effectiveUserId,
             status: 'EM_ANDAMENTO',
             observacao: session.period_label || '',
             finalized_at: null,
@@ -2173,7 +2218,44 @@ export async function createBlitzSession({ blitz_type, sector, user_name, start_
   }
 }
 
-export async function getActiveBlitzSession() {
+export async function getActiveBlitzSession(targetUserId = null) {
+  try {
+    const { tx } = await getSafeTransaction('blitz_sessions', 'readonly');
+    const store = tx.objectStore('blitz_sessions');
+    const index = store.index('status');
+    return new Promise((resolve) => {
+      const req = index.getAll('em_andamento');
+      req.onsuccess = () => {
+        let list = req.result || [];
+        if (list.length === 0) {
+          resolve(null);
+          return;
+        }
+        // Se targetUserId for fornecido ou se tivermos a usuária ativa do sistema:
+        const effectiveUserId = targetUserId || getCurrentUser()?.id;
+        if (effectiveUserId) {
+          const userFiltered = list.filter(s => {
+            const sUserId = s.responsible_user_id || s.user_id || (s.user_name?.toLowerCase().includes('angelica') ? 'angelica' : 'ana_luiza');
+            return sUserId === effectiveUserId;
+          });
+          if (userFiltered.length > 0) {
+            userFiltered.sort((a, b) => new Date(b.started_at || 0) - new Date(a.started_at || 0));
+            resolve(userFiltered[0]);
+            return;
+          }
+        }
+        // Fallback: retorna a mais recente em andamento
+        list.sort((a, b) => new Date(b.started_at || 0) - new Date(a.started_at || 0));
+        resolve(list[0] || null);
+      };
+      req.onerror = () => resolve(null);
+    });
+  } catch (e) {
+    return null;
+  }
+}
+
+export async function getAllActiveBlitzSessions() {
   try {
     const { tx } = await getSafeTransaction('blitz_sessions', 'readonly');
     const store = tx.objectStore('blitz_sessions');
@@ -2182,18 +2264,13 @@ export async function getActiveBlitzSession() {
       const req = index.getAll('em_andamento');
       req.onsuccess = () => {
         const list = req.result || [];
-        if (list.length === 0) {
-          resolve(null);
-          return;
-        }
-        // Retorna a sessão em andamento mais recente
         list.sort((a, b) => new Date(b.started_at || 0) - new Date(a.started_at || 0));
-        resolve(list[0]);
+        resolve(list);
       };
-      req.onerror = () => resolve(null);
+      req.onerror = () => resolve([]);
     });
   } catch (e) {
-    return null;
+    return [];
   }
 }
 
@@ -2268,8 +2345,11 @@ export async function updateBlitzSessionPeriod(sessionId, { start_date, end_date
   }
 }
 
-export async function finishBlitzSession(sessionId = null) {
+export async function finishBlitzSession(sessionId = null, userId = null, userName = null) {
   const now = new Date().toISOString();
+  const currentUser = getCurrentUser();
+  const currentUserId = userId || currentUser?.id || 'ana_luiza';
+  const effectiveUserName = userName || (currentUserId === 'angelica' ? 'Angélica' : currentUser?.name || 'Ana Luiza');
 
   try {
     const { tx } = await getSafeTransaction(['blitz_sessions', 'sync_queue', 'blitz'], 'readwrite');
@@ -2285,10 +2365,15 @@ export async function finishBlitzSession(sessionId = null) {
         getAllReq.onsuccess = () => {
           const allSessions = getAllReq.result || [];
           allSessions.forEach((session) => {
-            // Finaliza a sessão alvo ou qualquer sessão que ainda esteja 'em_andamento'
-            if ((sessionId && session.id === sessionId) || (!sessionId && session.status === 'em_andamento') || session.status === 'em_andamento') {
+            const sUserId = session.responsible_user_id || session.user_id || (session.user_name?.toLowerCase().includes('angelica') ? 'angelica' : 'ana_luiza');
+            const matchesTarget = sessionId ? session.id === sessionId : (session.status === 'em_andamento' && sUserId === currentUserId);
+
+            if (matchesTarget && session.status === 'em_andamento') {
               session.status = 'finalizada';
               session.finished_at = session.finished_at || now;
+              session.finalized_at = session.finalized_at || now;
+              session.finalized_by = effectiveUserName;
+              session.finalized_by_user_id = currentUserId;
               session.updated_at = now;
               if (!updatedSession || session.id === sessionId) {
                 updatedSession = session;
@@ -2303,11 +2388,13 @@ export async function finishBlitzSession(sessionId = null) {
                     data_inicio: session.start_date,
                     data_fim: session.end_date,
                     setor: session.sector,
-                    responsavel: session.user_name || 'Ana Luiza',
+                    responsavel: session.responsible_user_name || session.user_name || 'Ana Luiza',
                     created_at: session.created_at || now
                   };
                   bRecord.status = 'FINALIZADA';
                   bRecord.finalized_at = now;
+                  bRecord.finalized_by = effectiveUserName;
+                  bRecord.finalized_by_user_id = currentUserId;
                   bRecord.updated_at = now;
                   blitzStore.put(bRecord);
                 };
@@ -2338,8 +2425,9 @@ export async function finishBlitzSession(sessionId = null) {
   }
 }
 
-export async function cancelBlitzSession(sessionId = null) {
+export async function cancelBlitzSession(sessionId = null, userId = null) {
   const now = new Date().toISOString();
+  const currentUserId = userId || getCurrentUser()?.id;
 
   try {
     const { tx } = await getSafeTransaction(['blitz_sessions', 'sync_queue'], 'readwrite');
@@ -2354,8 +2442,10 @@ export async function cancelBlitzSession(sessionId = null) {
         getAllReq.onsuccess = () => {
           const allSessions = getAllReq.result || [];
           allSessions.forEach((session) => {
-            // Cancela a sessão alvo ou qualquer sessão que ainda esteja 'em_andamento'
-            if ((sessionId && session.id === sessionId) || (!sessionId && session.status === 'em_andamento') || (session.id === sessionId)) {
+            const sUserId = session.responsible_user_id || session.user_id || (session.user_name?.toLowerCase().includes('angelica') ? 'angelica' : 'ana_luiza');
+            const matchesTarget = sessionId ? session.id === sessionId : (session.status === 'em_andamento' && sUserId === currentUserId);
+
+            if (matchesTarget && session.status === 'em_andamento') {
               session.status = 'cancelada';
               session.finished_at = session.finished_at || now;
               session.updated_at = now;
@@ -2407,7 +2497,7 @@ export async function saveBlitzItem({
   locations = [],
   conference_id = null,
   user_id = null,
-  user_name = 'Ana Luiza',
+  user_name = null,
   is_new_expiration = false,
   notes = ''
 }) {
@@ -2416,6 +2506,10 @@ export async function saveBlitzItem({
   const prevQty = Number(previous_quantity) || 0;
   const totQty = Number(total_quantity) || 0;
   const diff = difference !== undefined && difference !== null ? Number(difference) : (totQty - prevQty);
+
+  const currentUser = getCurrentUser();
+  const effectiveUserId = user_id || currentUser?.id || 'ana_luiza';
+  const effectiveUserName = (user_name && user_name !== 'Ana Luiza') ? user_name : (effectiveUserId === 'angelica' ? 'Angélica' : currentUser?.name || 'Ana Luiza');
 
   const itemData = {
     id: itemId,
@@ -2430,8 +2524,9 @@ export async function saveBlitzItem({
     result: (result === 'TEM' || result === 'NAO_TEM' || result === 'NAO_IDENTIFICADO') ? result : 'TEM',
     locations: Array.isArray(locations) ? locations : [],
     conference_id: conference_id || null,
-    user_id: user_id || null,
-    user_name: user_name || 'Ana Luiza',
+    user_id: effectiveUserId,
+    user_name: effectiveUserName,
+    created_by: effectiveUserId,
     is_new_expiration: Boolean(is_new_expiration),
     notes: String(notes || ''),
     checked_at: now,
@@ -2845,11 +2940,16 @@ export async function saveBlitzConferenceRecord({
   locations = [], // [{ location: 'Depósito', quantity: 70 }, ...]
   photo_proof = null,
   foto_url = null,
-  userName = 'Ana Luiza',
+  userName = null,
+  userId = null,
   isNewExpiration = false
 }) {
   const diff = Number(newQuantity) - Number(previousQuantity);
   const photoData = photo_proof || foto_url || null;
+
+  const currentUser = getCurrentUser();
+  const effectiveUserId = userId || currentUser?.id || 'ana_luiza';
+  const effectiveUserName = (userName && userName !== 'Ana Luiza') ? userName : (effectiveUserId === 'angelica' ? 'Angélica' : currentUser?.name || 'Ana Luiza');
 
   // Garante que o produto SEMPRE seja guardado e exista na tabela de produtos do banco de dados
   let effectiveProductId = productId;
@@ -2937,13 +3037,16 @@ export async function saveBlitzConferenceRecord({
     result: result,
     locations: locations,
     photo_proof: photoData,
-    user_name: userName,
+    user_id: effectiveUserId,
+    user_name: effectiveUserName,
+    responsible_user_id: effectiveUserId,
+    responsible_user_name: effectiveUserName,
     is_new_expiration: isNewExpiration
   });
 
   // Também sincroniza atomicamente blitz_itens e conferencias_blitz
   try {
-    const { tx: bTx } = await getSafeTransaction(['blitz_itens', 'conferencias_blitz'], 'readwrite');
+    const { tx: bTx } = await getSafeTransaction(['blitz_itens', 'conferencias_blitz', 'auditoria_blitz'], 'readwrite');
     const bItensStore = bTx.objectStore('blitz_itens');
     const confStore = bTx.objectStore('conferencias_blitz');
 
@@ -2962,6 +3065,10 @@ export async function saveBlitzConferenceRecord({
         targetBItem.locations = locations;
         if (photoData) targetBItem.foto_url = photoData;
         if (corridor) targetBItem.corredor = corridor;
+        targetBItem.user_id = effectiveUserId;
+        targetBItem.usuario = effectiveUserName;
+        targetBItem.responsible_user_id = effectiveUserId;
+        targetBItem.responsible_user_name = effectiveUserName;
         targetBItem.conferido_em = new Date().toISOString();
         targetBItem.updated_at = new Date().toISOString();
         bItensStore.put(targetBItem);
@@ -2993,6 +3100,11 @@ export async function saveBlitzConferenceRecord({
         primary.locations = locations;
         primary.tipo_conferencia = 'MANUAL';
         primary.data_validade = cleanReqDate;
+        primary.user_id = effectiveUserId;
+        primary.usuario = effectiveUserName;
+        primary.responsible_user_id = effectiveUserId;
+        primary.responsible_user_name = effectiveUserName;
+        primary.updated_by = effectiveUserId;
         primary.sync_status = 'pending';
         if (effectiveProductId && !primary.produto_id) primary.produto_id = effectiveProductId;
         if (photoData) {
@@ -3025,15 +3137,40 @@ export async function saveBlitzConferenceRecord({
           corredor: corridor || null,
           foto_url: photoData || null,
           foto_conferencia: photoData || null,
-          usuario: userName || 'Ana Luiza',
+          user_id: effectiveUserId,
+          usuario: effectiveUserName,
+          responsible_user_id: effectiveUserId,
+          responsible_user_name: effectiveUserName,
+          created_by: effectiveUserId,
           sync_status: 'pending',
           conferido_em: nowIso,
           created_at: nowIso,
           updated_at: nowIso
         };
-        confStore.add(newConf);
+        confStore.put(newConf);
         savedConfRecord = newConf;
       }
+
+      // Grava auditoria detalhada da conferência
+      try {
+        if (bTx.objectStoreNames.contains('auditoria_blitz')) {
+          const audStore = bTx.objectStore('auditoria_blitz');
+          audStore.add({
+            id: generateId('aud_'),
+            blitz_id: sessionId,
+            registro_id: savedConfRecord?.id || generateId('reg_'),
+            tabela: 'conferencias_blitz',
+            acao: 'CONFERENCIA',
+            user_id: effectiveUserId,
+            user_name: effectiveUserName,
+            responsible_user_id: effectiveUserId,
+            responsible_user_name: effectiveUserName,
+            detalhes: `${effectiveUserName} conferiu ${Number(newQuantity) || 0} un do produto ${cleanBar} (Validade: ${cleanReqDate})`,
+            data_hora: nowIso,
+            created_at: nowIso
+          });
+        }
+      } catch (_) {}
 
       // Enfileira para sincronização segura com o Supabase
       if (savedConfRecord) {
@@ -3145,10 +3282,15 @@ export async function getPreviousFinalizedBlitzConference({ currentBlitzId, barc
 
     allSessions.forEach(s => {
       if (s.id && s.id !== currentBlitzId) {
+        const respId = s.responsible_user_id || s.user_id || (s.user_name?.toLowerCase().includes('angelica') ? 'angelica' : 'ana_luiza');
+        const respName = s.responsible_user_name || s.user_name || (respId === 'angelica' ? 'Angélica' : 'Ana Luiza');
         priorBlitzMap.set(s.id, {
           id: s.id,
           date: s.finished_at || s.started_at || s.start_date || s.created_at,
           label: s.period_label || s.sector || `Blitz ${String(s.id).slice(0, 8)}`,
+          sector: s.sector || 'MERCEARIA',
+          responsible_user_id: respId,
+          responsible_user_name: respName,
           isFinalized: s.status === 'finalizada' || s.status === 'finished' || Boolean(s.finished_at)
         });
       }
@@ -3157,10 +3299,15 @@ export async function getPreviousFinalizedBlitzConference({ currentBlitzId, barc
     allBlitzes.forEach(b => {
       if (b.id && b.id !== currentBlitzId) {
         if (!priorBlitzMap.has(b.id)) {
+          const respId = b.responsible_user_id || b.user_id || (b.responsavel?.toLowerCase().includes('angelica') ? 'angelica' : 'ana_luiza');
+          const respName = b.responsible_user_name || b.responsavel || (respId === 'angelica' ? 'Angélica' : 'Ana Luiza');
           priorBlitzMap.set(b.id, {
             id: b.id,
             date: b.finalized_at || b.data_fim || b.data_inicio || b.created_at,
             label: b.setor || `Blitz ${String(b.id).slice(0, 8)}`,
+            sector: b.setor || 'MERCEARIA',
+            responsible_user_id: respId,
+            responsible_user_name: respName,
             isFinalized: b.status === 'FINALIZADA' || b.status === 'finalizada' || Boolean(b.finalized_at)
           });
         }
@@ -3240,6 +3387,10 @@ export async function getPreviousFinalizedBlitzConference({ currentBlitzId, barc
             depositQty: locDetails.depositQty,
             fridgeQty: locDetails.fridgeQty,
             otherLocations: locDetails.otherLocations,
+            responsible_user_id: b.responsible_user_id,
+            responsible_user_name: b.responsible_user_name,
+            responsible: b.responsible_user_name,
+            sector: b.sector,
             result: qty > 0 ? 'TEM' : 'NAO_TEM'
           };
         }
@@ -3280,6 +3431,10 @@ export async function getPreviousFinalizedBlitzConference({ currentBlitzId, barc
             depositQty: locDetails.depositQty,
             fridgeQty: locDetails.fridgeQty,
             otherLocations: locDetails.otherLocations,
+            responsible_user_id: b.responsible_user_id,
+            responsible_user_name: b.responsible_user_name,
+            responsible: b.responsible_user_name,
+            sector: b.sector,
             result: qty > 0 ? 'TEM' : 'NAO_TEM'
           };
         }
@@ -3321,6 +3476,10 @@ export async function getPreviousFinalizedBlitzConference({ currentBlitzId, barc
             depositQty: locDetails.depositQty,
             fridgeQty: locDetails.fridgeQty,
             otherLocations: locDetails.otherLocations,
+            responsible_user_id: b.responsible_user_id,
+            responsible_user_name: b.responsible_user_name,
+            responsible: b.responsible_user_name,
+            sector: b.sector,
             result: matchItem.result || (qty > 0 ? 'TEM' : 'NAO_TEM')
           };
         }
@@ -3673,5 +3832,176 @@ export async function clearAllDatabaseData() {
     console.error('Erro ao limpar dados:', err);
     throw err;
   }
+}
+
+// ----------------------------------------------------
+// EXPORTAÇÃO E EXTRAÇÃO DO BANCO DE DADOS (JSON E SQL)
+// ----------------------------------------------------
+
+export async function getAllDatabaseData() {
+  const storeNames = [
+    'products',
+    'product_expirations',
+    'inventory_counts',
+    'count_sessions',
+    'blitz_sessions',
+    'blitz_items',
+    'blitz',
+    'blitz_itens',
+    'conferencias_blitz',
+    'historico_alteracoes',
+    'fotos_produtos',
+    'auditoria_blitz'
+  ];
+
+  const db = await initDB();
+  const result = {};
+
+  for (const storeName of storeNames) {
+    try {
+      if (db.objectStoreNames.contains(storeName)) {
+        result[storeName] = await getAllRecords(storeName);
+      } else {
+        result[storeName] = [];
+      }
+    } catch (_) {
+      result[storeName] = [];
+    }
+  }
+
+  return result;
+}
+
+export async function getDatabaseSummaryStats() {
+  const data = await getAllDatabaseData();
+  let totalUnits = 0;
+  (data.products || []).forEach(p => {
+    totalUnits += Number(p.total_quantity) || 0;
+  });
+
+  return {
+    productsCount: data.products?.length || 0,
+    expirationsCount: data.product_expirations?.length || 0,
+    countsCount: data.inventory_counts?.length || 0,
+    blitzSessionsCount: data.blitz_sessions?.length || 0,
+    blitzItemsCount: (data.blitz_items?.length || 0) + (data.blitz_itens?.length || 0),
+    conferenciasCount: data.conferencias_blitz?.length || 0,
+    totalUnits,
+    historyCount: (data.historico_alteracoes?.length || 0) + (data.auditoria_blitz?.length || 0),
+    photosCount: data.fotos_produtos?.length || 0
+  };
+}
+
+export async function exportDatabaseJSON() {
+  const data = await getAllDatabaseData();
+  const now = new Date();
+  const dateStr = now.toISOString().replace(/[:.]/g, '-').slice(0, 19);
+
+  const stats = await getDatabaseSummaryStats();
+  const payload = {
+    export_version: '2.0',
+    app_name: 'Controladoria - Ana Luiza & Angélica',
+    exported_at: now.toISOString(),
+    stats,
+    tables: data
+  };
+
+  const jsonStr = JSON.stringify(payload, null, 2);
+  const blob = new Blob([jsonStr], { type: 'application/json' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = `banco_controladoria_backup_${dateStr}.json`;
+  document.body.appendChild(a);
+  a.click();
+  setTimeout(() => {
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+  }, 500);
+
+  return payload;
+}
+
+export async function exportDatabaseSQL() {
+  const data = await getAllDatabaseData();
+  const now = new Date();
+  const dateStr = now.toISOString().replace(/[:.]/g, '-').slice(0, 19);
+
+  let sql = `-- ====================================================================\n`;
+  sql += `-- DUMP COMPLETO DO BANCO DE DADOS - CONTROLADORIA\n`;
+  sql += `-- Usuárias: Ana Luiza & Angélica\n`;
+  sql += `-- Exportado em: ${now.toLocaleString('pt-BR')}\n`;
+  sql += `-- Compatível com Supabase / PostgreSQL\n`;
+  sql += `-- ====================================================================\n\n`;
+
+  const esc = (val) => {
+    if (val === null || val === undefined) return 'NULL';
+    if (typeof val === 'number') return isNaN(val) ? '0' : String(val);
+    if (typeof val === 'boolean') return val ? 'TRUE' : 'FALSE';
+    if (typeof val === 'object') return `'${JSON.stringify(val).replace(/'/g, "''")}'::jsonb`;
+    return `'${String(val).replace(/'/g, "''")}'`;
+  };
+
+  // 1. Tabela products
+  if (data.products?.length > 0) {
+    sql += `-- --------------------------------------------------------------------\n`;
+    sql += `-- PRODUTOS (${data.products.length} registros)\n`;
+    sql += `-- --------------------------------------------------------------------\n`;
+    for (const p of data.products) {
+      sql += `INSERT INTO public.products (id, barcode, name, sector, corridor, image, total_quantity, deposit_qty, fridge_qty, shelf_qty, gondola_end_qty, ear_qty, island_qty, cart_qty, checkout_qty, is_verified_only, created_at, updated_at)\n`;
+      sql += `VALUES (${esc(p.id)}, ${esc(p.barcode)}, ${esc(p.name)}, ${esc(p.sector)}, ${esc(p.corridor)}, ${esc(p.image)}, ${esc(p.total_quantity || 0)}, ${esc(p.deposit_qty || 0)}, ${esc(p.fridge_qty || 0)}, ${esc(p.shelf_qty || 0)}, ${esc(p.gondola_end_qty || 0)}, ${esc(p.ear_qty || 0)}, ${esc(p.island_qty || 0)}, ${esc(p.cart_qty || 0)}, ${esc(p.checkout_qty || 0)}, ${esc(p.is_verified_only || false)}, ${esc(p.created_at || now.toISOString())}, ${esc(p.updated_at || now.toISOString())})\n`;
+      sql += `ON CONFLICT (id) DO UPDATE SET name = EXCLUDED.name, total_quantity = EXCLUDED.total_quantity, updated_at = NOW();\n\n`;
+    }
+  }
+
+  // 2. Tabela product_expirations
+  if (data.product_expirations?.length > 0) {
+    sql += `-- --------------------------------------------------------------------\n`;
+    sql += `-- VALIDADES (${data.product_expirations.length} registros)\n`;
+    sql += `-- --------------------------------------------------------------------\n`;
+    for (const exp of data.product_expirations) {
+      sql += `INSERT INTO public.product_expirations (id, product_id, expiration_date, is_triaged, created_at, updated_at)\n`;
+      sql += `VALUES (${esc(exp.id)}, ${esc(exp.product_id)}, ${esc(exp.expiration_date)}, ${esc(exp.is_triaged || false)}, ${esc(exp.created_at || now.toISOString())}, ${esc(exp.updated_at || now.toISOString())})\n`;
+      sql += `ON CONFLICT (id) DO NOTHING;\n\n`;
+    }
+  }
+
+  // 3. Tabela blitz_sessions
+  if (data.blitz_sessions?.length > 0) {
+    sql += `-- --------------------------------------------------------------------\n`;
+    sql += `-- SESSÕES DE BLITZ (${data.blitz_sessions.length} registros)\n`;
+    sql += `-- --------------------------------------------------------------------\n`;
+    for (const bs of data.blitz_sessions) {
+      sql += `INSERT INTO public.blitz_sessions (id, blitz_type, sector, user_name, start_date, end_date, period_label, status, started_at, finished_at)\n`;
+      sql += `VALUES (${esc(bs.id)}, ${esc(bs.blitz_type)}, ${esc(bs.sector)}, ${esc(bs.responsible_user_name || bs.user_name || 'Ana Luiza')}, ${esc(bs.start_date)}, ${esc(bs.end_date)}, ${esc(bs.period_label)}, ${esc(bs.status)}, ${esc(bs.started_at)}, ${esc(bs.finished_at)})\n`;
+      sql += `ON CONFLICT (id) DO NOTHING;\n\n`;
+    }
+  }
+
+  // 4. Tabela conferencias_blitz
+  if (data.conferencias_blitz?.length > 0) {
+    sql += `-- --------------------------------------------------------------------\n`;
+    sql += `-- CONFERÊNCIAS DE BLITZ (${data.conferencias_blitz.length} registros)\n`;
+    sql += `-- --------------------------------------------------------------------\n`;
+    for (const c of data.conferencias_blitz) {
+      sql += `INSERT INTO public.conferencias_blitz (id, blitz_id, item_id, blitz_item_id, produto_id, ean, data_validade, quantidade, diferenca, usuario, conferido_em)\n`;
+      sql += `VALUES (${esc(c.id)}, ${esc(c.blitz_id)}, ${esc(c.item_id)}, ${esc(c.blitz_item_id)}, ${esc(c.produto_id)}, ${esc(c.ean)}, ${esc(c.data_validade)}, ${esc(c.quantidade || 0)}, ${esc(c.diferenca || 0)}, ${esc(c.responsible_user_name || c.usuario || 'Ana Luiza')}, ${esc(c.conferido_em || now.toISOString())})\n`;
+      sql += `ON CONFLICT (id) DO NOTHING;\n\n`;
+    }
+  }
+
+  const blob = new Blob([sql], { type: 'text/sql' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = `banco_controladoria_dump_${dateStr}.sql`;
+  document.body.appendChild(a);
+  a.click();
+  setTimeout(() => {
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+  }, 500);
+
+  return sql;
 }
 
