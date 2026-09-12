@@ -1484,7 +1484,7 @@ export async function openBlitzDashboardView() {
     : '--:--';
 
   container.innerHTML = `
-    <header class="app-top-bar" style="background: #121216; border-bottom: 1px solid #27272e; padding: 12px 16px; display: flex; align-items: center; justify-content: space-between;">
+    <header class="app-top-bar">
       <button type="button" id="btn-blitz-dash-back" class="btn-back" style="color: #a1a1aa; font-weight: 700; font-size: 0.88rem; background: none; border: none; cursor: pointer;">
         ← Início
       </button>
@@ -1497,7 +1497,7 @@ export async function openBlitzDashboardView() {
       </button>
     </header>
 
-    <main style="padding: 6px 8px 30px; max-width: 500px; margin: 0 auto; display: flex; flex-direction: column; gap: 8px; width: 100%; box-sizing: border-box;">
+    <main class="blitz-main-content">
       
       <!-- Card Principal da Blitz Ativa -->
       <div style="background: #141418; border: 1px solid rgba(245, 158, 11, 0.35); border-radius: 10px; padding: 8px 10px; display: flex; flex-direction: column; gap: 6px; box-shadow: 0 2px 10px rgba(0, 0, 0, 0.3);">
@@ -6312,7 +6312,7 @@ export async function openBlitzHistoryView() {
       </button>
     </header>
 
-    <main style="padding: 12px; max-width: 640px; margin: 0 auto; display: flex; flex-direction: column; gap: 12px;">
+    <main class="blitz-history-main-content">
       
       <!-- Abas de Navegação -->
       <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 6px; background: #121214; padding: 4px; border-radius: 8px; border: 1px solid #27272a;">

@@ -231,17 +231,19 @@
       color: #7dd3fc;
     }
 
-    /* 1. Tela de Login Compacta */
+    /* 1. Tela de Login Fluida e Responsiva */
     .login-container {
       display: flex;
       flex-direction: column;
       align-items: center;
       justify-content: center;
       min-height: 100vh;
-      padding: max(env(safe-area-inset-top, 0px), 8px) 12px max(env(safe-area-inset-bottom, 0px), 8px);
-      max-width: 320px;
+      padding: max(env(safe-area-inset-top, 0px), 16px) 14px max(env(safe-area-inset-bottom, 0px), 16px);
+      max-width: 440px;
+      width: 100%;
       margin: 0 auto;
       text-align: center;
+      box-sizing: border-box;
     }
 
     .login-brand-box {
@@ -452,14 +454,16 @@
       border-radius: 8px;
     }
 
-    /* 2. Dashboard Compacto */
+    /* 2. Dashboard Fluido e Responsivo */
     .dashboard-main-content {
-      padding: 8px 10px;
-      max-width: 540px;
+      padding: 10px 12px;
+      width: 100%;
+      max-width: 880px;
       margin: 0 auto;
       display: flex;
       flex-direction: column;
-      gap: 8px;
+      gap: 10px;
+      box-sizing: border-box;
     }
 
     .dash-greeting-title {
@@ -1006,19 +1010,25 @@
       white-space: nowrap;
     }
 
-    /* Formulários e Containers Compactos */
+    /* Formulários e Containers Fluidos e Responsivos */
     .conference-main-content,
     .new-product-main-content,
     .product-detail-main-content,
     .corridor-audit-main-content,
     .search-main-content,
-    .expirations-main-content {
-      padding: 8px 10px;
-      max-width: 540px;
+    .expirations-main-content,
+    .blitz-main-content,
+    .blitz-history-main-content,
+    #view-blitz-dashboard main,
+    #view-blitz-history main {
+      padding: 10px 12px;
+      width: 100%;
+      max-width: 880px;
       margin: 0 auto;
       display: flex;
       flex-direction: column;
       gap: 10px;
+      box-sizing: border-box;
     }
 
     .form-group {
@@ -1662,108 +1672,253 @@
     }
 
     /* ===================================================================
-       RESPONSIVIDADE E BREAKPOINTS MOBILE-FIRST DEDICADOS
-       Aparelhos testados: 320px, 360px, 375px, 390px, 393px, 430px
+       SISTEMA RESPONSIVO DEFINITIVO E FLUIDO (TODAS AS TELAS)
+       - Mobile (320px a 599px): 100% fluido, sem cortes ou scroll lateral
+       - Tablet / Telas Médias (600px a 1023px): Confortável e bem distribuído
+       - Desktop / Telas Grandes (>= 1024px): Layout profissional centralizado
        =================================================================== */
 
-    /* Breakpoint 1: Telas Ultra-Pequenas (<= 360px: 320px, 360px) */
-    @media screen and (max-width: 360px) {
-      html, body {
-        font-size: 13px !important;
-      }
-      .app-top-bar {
-        min-height: calc(34px + env(safe-area-inset-top, 0px)) !important;
-        padding-left: 6px !important;
-        padding-right: 6px !important;
-      }
+    /* Regras Globais de Fluidez e Centralização do Top Bar */
+    .app-top-bar {
+      width: 100% !important;
+      display: flex !important;
+      align-items: center !important;
+      justify-content: space-between !important;
+      box-sizing: border-box !important;
+      min-height: calc(44px + env(safe-area-inset-top, 0px)) !important;
+      padding-top: max(env(safe-area-inset-top, 0px), 6px) !important;
+      padding-bottom: 6px !important;
+      padding-left: max(12px, calc((100vw - 880px) / 2)) !important;
+      padding-right: max(12px, calc((100vw - 880px) / 2)) !important;
+    }
+
+    /* Todos os Containers Principais Unificados */
+    .dashboard-main-content,
+    .conference-main-content,
+    .new-product-main-content,
+    .product-detail-main-content,
+    .corridor-audit-main-content,
+    .search-main-content,
+    .expirations-main-content,
+    .blitz-main-content,
+    .blitz-history-main-content,
+    #view-blitz-dashboard main,
+    #view-blitz-history main {
+      width: 100% !important;
+      max-width: 880px !important;
+      margin: 0 auto !important;
+      padding: 12px 14px 44px !important;
+      box-sizing: border-box !important;
+      display: flex !important;
+      flex-direction: column !important;
+      gap: 12px !important;
+    }
+
+    /* Scanner Viewport e Caixa Manual */
+    .scanner-viewport-container {
+      width: 100% !important;
+      max-width: 880px !important;
+      margin: 0 auto !important;
+      box-sizing: border-box !important;
+    }
+
+    .scanner-manual-box {
+      width: 100% !important;
+      max-width: 880px !important;
+      margin: 0 auto !important;
+      padding: 12px 14px !important;
+      box-sizing: border-box !important;
+    }
+
+    /* Modais Fluidos e Responsivos */
+    .custom-modal {
+      box-sizing: border-box !important;
+      padding: 12px !important;
+    }
+
+    .modal-card {
+      width: 100% !important;
+      max-width: min(94vw, 520px) !important;
+      max-height: 92vh !important;
+      overflow-y: auto !important;
+      margin: auto !important;
+      box-sizing: border-box !important;
+    }
+
+    .modal-card.modal-card-large,
+    .modal-card.wa-modal-responsive {
+      max-width: min(96vw, 840px) !important;
+    }
+
+    /* Breakpoint Mobile Estreito (<= 440px) */
+    @media screen and (max-width: 440px) {
       .app-name-tag {
-        display: none !important; /* Libera espaço horizontal no cabeçalho */
+        font-size: 0.72rem !important;
       }
       .btn-header-db span {
-        display: none !important; /* Mostra apenas o ícone */
+        display: none !important; /* Mostra apenas o ícone economizando espaço vital */
       }
-      .login-container {
-        max-width: 290px !important;
-        padding: max(env(safe-area-inset-top, 0px), 4px) 8px max(env(safe-area-inset-bottom, 0px), 4px) !important;
+      .btn-header-db {
+        padding: 3px 5px !important;
+        font-size: 0.74rem !important;
       }
-      .login-avatar-wrapper {
-        width: 40px !important;
-        height: 40px !important;
+      .sync-badge {
+        font-size: 0.62rem !important;
+        padding: 2px 5px !important;
       }
-      .brand-title {
-        font-size: 1.05rem !important;
+      .btn-icon-link {
+        font-size: 0.68rem !important;
+        padding: 2px 5px !important;
       }
-      .login-pin-field {
-        height: 34px !important;
-        font-size: 1.15rem !important;
-        letter-spacing: 4px !important;
+      .btn-login-user-card {
+        padding: 8px 6px !important;
       }
-      .btn-numpad {
-        height: 32px !important;
-        font-size: 0.98rem !important;
-      }
-      .hero-action-card .action-card-label {
-        font-size: 0.85rem !important;
+      .btn-login-user-card span:nth-child(3) {
+        font-size: 0.62rem !important;
       }
       .secondary-actions-grid {
-        grid-template-columns: 1fr 1fr !important;
-        gap: 4px !important;
+        grid-template-columns: repeat(2, 1fr) !important;
+        gap: 6px !important;
       }
       .metrics-grid {
+        grid-template-columns: repeat(2, 1fr) !important;
+        gap: 6px !important;
+      }
+      .locations-inputs-grid {
+        grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+        gap: 5px !important;
+      }
+      .prev-locs-compact-grid {
+        grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+        gap: 3px !important;
+      }
+      .product-type-tabs {
+        grid-template-columns: repeat(2, 1fr) !important;
+        gap: 6px !important;
+      }
+    }
+
+    /* Breakpoint Mobile Médio (441px a 599px) */
+    @media screen and (min-width: 441px) and (max-width: 599px) {
+      .secondary-actions-grid {
+        grid-template-columns: repeat(2, 1fr) !important;
+        gap: 8px !important;
+      }
+      .metrics-grid {
+        grid-template-columns: repeat(2, 1fr) !important;
+        gap: 8px !important;
+      }
+      .locations-inputs-grid {
+        grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+        gap: 6px !important;
+      }
+      .prev-locs-compact-grid {
+        grid-template-columns: repeat(4, minmax(0, 1fr)) !important;
+        gap: 4px !important;
+      }
+      .product-type-tabs {
+        grid-template-columns: repeat(2, 1fr) !important;
+        gap: 6px !important;
+      }
+    }
+
+    /* Breakpoint Tablet e Telas Intermediárias (600px a 1023px) */
+    @media screen and (min-width: 600px) and (max-width: 1023px) {
+      .dashboard-main-content,
+      .conference-main-content,
+      .new-product-main-content,
+      .product-detail-main-content,
+      .corridor-audit-main-content,
+      .search-main-content,
+      .expirations-main-content,
+      .blitz-main-content,
+      .blitz-history-main-content,
+      #view-blitz-dashboard main,
+      #view-blitz-history main {
+        max-width: 740px !important;
+        padding: 16px 20px 48px !important;
+        gap: 14px !important;
+      }
+
+      .secondary-actions-grid {
+        grid-template-columns: repeat(4, 1fr) !important;
+        gap: 8px !important;
+      }
+
+      .metrics-grid {
+        grid-template-columns: repeat(4, 1fr) !important;
+        gap: 10px !important;
+      }
+
+      .locations-inputs-grid {
+        grid-template-columns: repeat(4, minmax(0, 1fr)) !important;
+        gap: 8px !important;
+      }
+
+      .prev-locs-compact-grid {
+        grid-template-columns: repeat(8, minmax(0, 1fr)) !important;
+        gap: 6px !important;
+      }
+
+      .product-type-tabs {
+        grid-template-columns: repeat(4, 1fr) !important;
+        gap: 8px !important;
+      }
+
+      .corridor-filter-selectors,
+      .search-filters-row {
         grid-template-columns: 1fr 1fr !important;
-        gap: 4px !important;
-      }
-      .prev-locs-compact-grid {
-        grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
-      }
-      .comp-summary-strip {
-        grid-template-columns: 1fr !important; /* Verticaliza resumo em tela ultracompacta */
-        gap: 4px !important;
-      }
-      .modal-card {
-        max-width: 304px !important;
-        padding: 8px !important;
+        gap: 12px !important;
       }
     }
 
-    /* Breakpoint 2: Telas Compactas (361px até 389px: 375px iPhone SE / Mini) */
-    @media screen and (min-width: 361px) and (max-width: 389px) {
-      html, body {
-        font-size: 13.5px !important;
-      }
-      .btn-header-db span {
-        display: none !important; /* Mantém cabeçalho super limpo */
-      }
-      .login-container {
-        max-width: 310px !important;
-      }
-      .prev-locs-compact-grid {
-        grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
-      }
-    }
-
-    /* Breakpoint 3: Celulares Padrão (390px até 429px: 390px, 393px iPhone 12..16, Androids médios) */
-    @media screen and (min-width: 390px) and (max-width: 429px) {
-      html, body {
-        font-size: 14px !important;
-      }
+    /* Breakpoint Desktop e Telas Grandes (>= 1024px) */
+    @media screen and (min-width: 1024px) {
       .dashboard-main-content,
       .conference-main-content,
-      .expirations-main-content {
-        padding: 8px 10px !important;
+      .new-product-main-content,
+      .product-detail-main-content,
+      .corridor-audit-main-content,
+      .search-main-content,
+      .expirations-main-content,
+      .blitz-main-content,
+      .blitz-history-main-content,
+      #view-blitz-dashboard main,
+      #view-blitz-history main {
+        max-width: 880px !important;
+        padding: 24px 28px 60px !important;
+        gap: 16px !important;
       }
-    }
 
-    /* Breakpoint 4: Celulares Grandes e Tablets (>= 430px: iPhone Pro Max, Telas 430px+) */
-    @media screen and (min-width: 430px) {
-      html, body {
-        font-size: 14.5px !important;
+      .secondary-actions-grid {
+        grid-template-columns: repeat(4, 1fr) !important;
+        gap: 10px !important;
       }
-      .dashboard-main-content,
-      .conference-main-content,
-      .expirations-main-content {
-        max-width: 460px !important;
-        margin: 0 auto !important;
+
+      .metrics-grid {
+        grid-template-columns: repeat(4, 1fr) !important;
+        gap: 12px !important;
+      }
+
+      .locations-inputs-grid {
+        grid-template-columns: repeat(4, minmax(0, 1fr)) !important;
+        gap: 10px !important;
+      }
+
+      .prev-locs-compact-grid {
+        grid-template-columns: repeat(8, minmax(0, 1fr)) !important;
+        gap: 8px !important;
+      }
+
+      .product-type-tabs {
+        grid-template-columns: repeat(4, 1fr) !important;
+        gap: 10px !important;
+      }
+
+      .corridor-filter-selectors,
+      .search-filters-row {
+        grid-template-columns: 1fr 1fr !important;
+        gap: 14px !important;
       }
     }
   </style>

@@ -2682,7 +2682,9 @@ button {
   .product-detail-main-content,
   .corridor-audit-main-content,
   .search-main-content,
-  .expirations-main-content {
+  .expirations-main-content,
+  .blitz-main-content,
+  .blitz-history-main-content {
     padding: 24px;
     gap: 24px;
   }
@@ -3676,7 +3678,9 @@ button {
   .corridor-audit-main-content,
   .search-main-content,
   .expirations-main-content,
-  .dashboard-main-content {
+  .dashboard-main-content,
+  .blitz-main-content,
+  .blitz-history-main-content {
     padding: 8px 10px;
     max-width: 100%;
     gap: 10px;
