@@ -830,44 +830,44 @@ function showStartBlitzModal() {
 
   modal.innerHTML = `
     <div class="modal-backdrop" id="modal-start-blitz-backdrop"></div>
-    <div class="modal-card" style="padding: 20px; max-width: 480px; width: 100%; box-sizing: border-box; max-height: 92vh; overflow-y: auto;">
-      <div style="display: flex; align-items: center; justify-content: space-between; border-bottom: 1px solid #27272a; padding-bottom: 10px; margin-bottom: 12px;">
-        <div style="display: flex; align-items: center; gap: 8px;">
-          <span style="font-size: 1.4rem;">📋</span>
+    <div class="modal-card" style="padding: 10px 12px; max-width: 400px; width: 100%; box-sizing: border-box; max-height: 94vh; overflow-y: auto;">
+      <div style="display: flex; align-items: center; justify-content: space-between; border-bottom: 1px solid #27272a; padding-bottom: 6px; margin-bottom: 8px;">
+        <div style="display: flex; align-items: center; gap: 6px;">
+          <span style="font-size: 1.1rem;">📋</span>
           <div>
-            <h3 style="font-size: 1.1rem; font-weight: 900; color: #f4f4f5; margin: 0;">
+            <h3 style="font-size: 0.92rem; font-weight: 900; color: #f4f4f5; margin: 0; line-height: 1.2;">
               INICIAR BLITZ
             </h3>
-            <span style="font-size: 0.72rem; color: #fbbf24; font-weight: 800;">PERÍODO, SETOR E LISTA DE PRODUTOS</span>
+            <span style="font-size: 0.64rem; color: #fbbf24; font-weight: 800;">PERÍODO, SETOR E PRODUTOS</span>
           </div>
         </div>
-        <button type="button" id="btn-close-start-blitz" class="btn-icon-control" style="font-size: 1rem; width: 30px; height: 30px;">✕</button>
+        <button type="button" id="btn-close-start-blitz" class="btn-icon-control" style="font-size: 0.85rem; width: 24px; height: 24px;">✕</button>
       </div>
 
       <!-- Identificação da Usuária Ativa Responsável -->
-      <div style="background: ${userBadgeColor}; border: 1.5px solid ${userPrimaryColor}55; border-radius: 8px; padding: 8px 12px; margin-bottom: 12px; display: flex; align-items: center; justify-content: space-between;">
-        <span style="font-size: 0.74rem; color: #a1a1aa; font-weight: 700;">Responsável por esta Blitz:</span>
-        <span style="font-size: 0.86rem; font-weight: 900; color: ${userBadgeColorText};">
+      <div style="background: ${userBadgeColor}; border: 1px solid ${userPrimaryColor}55; border-radius: 6px; padding: 4px 8px; margin-bottom: 8px; display: flex; align-items: center; justify-content: space-between;">
+        <span style="font-size: 0.68rem; color: #a1a1aa; font-weight: 700;">Responsável:</span>
+        <span style="font-size: 0.78rem; font-weight: 900; color: ${userBadgeColorText};">
           ${userBadgeText}
         </span>
       </div>
 
-      <form id="form-start-blitz-period" style="display: flex; flex-direction: column; gap: 14px;">
+      <form id="form-start-blitz-period" style="display: flex; flex-direction: column; gap: 8px;">
         
         <!-- 1. PERÍODO DA BLITZ (DATA INICIAL E DATA FINAL) -->
-        <div style="background: #18181c; border: 1px solid #27272a; border-radius: 10px; padding: 12px;">
-          <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px;">
-            <label style="font-size: 0.78rem; font-weight: 900; color: #fbbf24; text-transform: uppercase; margin: 0;">
+        <div style="background: #18181c; border: 1px solid #27272a; border-radius: 8px; padding: 8px;">
+          <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 4px;">
+            <label style="font-size: 0.7rem; font-weight: 900; color: #fbbf24; text-transform: uppercase; margin: 0;">
               📅 Período da Blitz:
             </label>
-            <span style="font-size: 0.7rem; color: #a1a1aa; font-weight: 700;">
+            <span style="font-size: 0.64rem; color: #a1a1aa; font-weight: 700;">
               Ex: 08/09/2026 até 10/10/2026
             </span>
           </div>
 
-          <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px;">
+          <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 6px;">
             <div>
-              <label for="input-blitz-start-date" style="font-size: 0.7rem; color: #a1a1aa; font-weight: 800; display: block; margin-bottom: 4px;">
+              <label for="input-blitz-start-date" style="font-size: 0.64rem; color: #a1a1aa; font-weight: 800; display: block; margin-bottom: 2px;">
                 Data Inicial:
               </label>
               <input
@@ -876,11 +876,11 @@ function showStartBlitzModal() {
                 class="form-input"
                 value="${defaultStartISO}"
                 required
-                style="height: 42px; font-size: 0.95rem; font-weight: 800; color-scheme: dark; border-color: #f59e0b;"
+                style="height: 32px; font-size: 0.78rem; font-weight: 800; color-scheme: dark; border-color: #f59e0b; padding: 0 4px;"
               />
             </div>
             <div>
-              <label for="input-blitz-end-date" style="font-size: 0.7rem; color: #a1a1aa; font-weight: 800; display: block; margin-bottom: 4px;">
+              <label for="input-blitz-end-date" style="font-size: 0.64rem; color: #a1a1aa; font-weight: 800; display: block; margin-bottom: 2px;">
                 Data Final:
               </label>
               <input
@@ -889,100 +889,96 @@ function showStartBlitzModal() {
                 class="form-input"
                 value="${defaultEndISO}"
                 required
-                style="height: 42px; font-size: 0.95rem; font-weight: 800; color-scheme: dark; border-color: #f59e0b;"
+                style="height: 32px; font-size: 0.78rem; font-weight: 800; color-scheme: dark; border-color: #f59e0b; padding: 0 4px;"
               />
             </div>
           </div>
 
-          <div style="margin-top: 8px; font-size: 0.76rem; color: #fbbf24; background: rgba(245, 158, 11, 0.1); border: 1px solid rgba(245, 158, 11, 0.25); border-radius: 6px; padding: 6px 10px; font-weight: 800; text-align: center;">
+          <div style="margin-top: 4px; font-size: 0.68rem; color: #fbbf24; background: rgba(245, 158, 11, 0.1); border: 1px solid rgba(245, 158, 11, 0.25); border-radius: 5px; padding: 4px 6px; font-weight: 800; text-align: center;">
             Período: <strong id="preview-blitz-period-label">${formatDateBR(defaultStartISO)} até ${formatDateBR(defaultEndISO)}</strong>
           </div>
         </div>
 
         <!-- 2. SETOR DA BLITZ (Personalizado para a usuária ativa) -->
-        <div style="background: #18181c; border: 1px solid #27272a; border-radius: 10px; padding: 12px;">
-          <label style="font-size: 0.78rem; font-weight: 900; color: #fbbf24; text-transform: uppercase; display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px;">
+        <div style="background: #18181c; border: 1px solid #27272a; border-radius: 8px; padding: 8px;">
+          <label style="font-size: 0.7rem; font-weight: 900; color: #fbbf24; text-transform: uppercase; display: flex; align-items: center; justify-content: space-between; margin-bottom: 6px;">
             <span>🏷️ Setor da Blitz:</span>
-            <span style="font-size: 0.68rem; color: ${userBadgeColorText}; text-transform: none; font-weight: 700;">Setores de ${currentUser?.name || 'Ana Luiza'}</span>
+            <span style="font-size: 0.64rem; color: ${userBadgeColorText}; text-transform: none; font-weight: 700;">Setores de ${currentUser?.name || 'Ana Luiza'}</span>
           </label>
 
           ${isAngelica ? `
             <!-- Setores Prioritários de Angélica -->
-            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 6px; margin-bottom: 6px;">
-              <button type="button" class="btn-start-blitz-chip btn-secondary active" data-sector="MERCEARIA" style="padding: 9px 8px; font-size: 0.82rem; font-weight: 900; justify-content: center; border-color: #10b981; background: rgba(16, 185, 129, 0.2); color: #34d399;">
+            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 4px; margin-bottom: 4px;">
+              <button type="button" class="btn-start-blitz-chip btn-secondary active" data-sector="MERCEARIA" style="padding: 6px 4px; font-size: 0.74rem; font-weight: 900; justify-content: center; border-color: #10b981; background: rgba(16, 185, 129, 0.2); color: #34d399;">
                 🥫 MERCEARIA
               </button>
-              <button type="button" class="btn-start-blitz-chip btn-secondary" data-sector="PERFUMARIA" style="padding: 9px 8px; font-size: 0.82rem; font-weight: 900; justify-content: center;">
+              <button type="button" class="btn-start-blitz-chip btn-secondary" data-sector="PERFUMARIA" style="padding: 6px 4px; font-size: 0.74rem; font-weight: 900; justify-content: center;">
                 🧴 PERFUMARIA
               </button>
             </div>
-            <div style="margin-bottom: 8px;">
-              <button type="button" class="btn-start-blitz-chip btn-secondary" data-sector="LIMPEZA" style="width: 100%; padding: 7px 8px; font-size: 0.76rem; font-weight: 800; justify-content: center;">
+            <div style="margin-bottom: 6px;">
+              <button type="button" class="btn-start-blitz-chip btn-secondary" data-sector="LIMPEZA" style="width: 100%; padding: 5px 6px; font-size: 0.7rem; font-weight: 800; justify-content: center;">
                 🧹 PRODUTOS DE LIMPEZA
               </button>
             </div>
           ` : `
             <!-- Setores Prioritários de Ana Luiza -->
-            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 6px; margin-bottom: 6px;">
-              <button type="button" class="btn-start-blitz-chip btn-secondary active" data-sector="MERCEARIA" style="padding: 9px 8px; font-size: 0.82rem; font-weight: 900; justify-content: center; border-color: #a855f7; background: rgba(168, 85, 247, 0.2); color: #c084fc;">
+            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 4px; margin-bottom: 4px;">
+              <button type="button" class="btn-start-blitz-chip btn-secondary active" data-sector="MERCEARIA" style="padding: 6px 4px; font-size: 0.74rem; font-weight: 900; justify-content: center; border-color: #a855f7; background: rgba(168, 85, 247, 0.2); color: #c084fc;">
                 🥫 MERCEARIA
               </button>
-              <button type="button" class="btn-start-blitz-chip btn-secondary" data-sector="BEBIDAS" style="padding: 9px 8px; font-size: 0.82rem; font-weight: 900; justify-content: center;">
+              <button type="button" class="btn-start-blitz-chip btn-secondary" data-sector="BEBIDAS" style="padding: 6px 4px; font-size: 0.74rem; font-weight: 900; justify-content: center;">
                 🍾 BEBIDAS
               </button>
             </div>
-            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 4px; margin-bottom: 8px;">
-              <button type="button" class="btn-start-blitz-chip btn-secondary" data-sector="ALHO" style="padding: 7px 4px; font-size: 0.74rem; font-weight: 800; justify-content: center;">🧄 Alho</button>
-              <button type="button" class="btn-start-blitz-chip btn-secondary" data-sector="BAZAR" style="padding: 7px 4px; font-size: 0.74rem; font-weight: 800; justify-content: center;">📦 Bazar</button>
+            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 4px; margin-bottom: 6px;">
+              <button type="button" class="btn-start-blitz-chip btn-secondary" data-sector="ALHO" style="padding: 5px 4px; font-size: 0.7rem; font-weight: 800; justify-content: center;">🧄 Alho</button>
+              <button type="button" class="btn-start-blitz-chip btn-secondary" data-sector="BAZAR" style="padding: 5px 4px; font-size: 0.7rem; font-weight: 800; justify-content: center;">📦 Bazar</button>
             </div>
           `}
 
-          <div style="font-size: 0.7rem; color: #71717a; margin-bottom: 6px;">
-            💡 <em>Mercearia é compartilhada entre Ana Luiza e Angélica.</em>
-          </div>
-
-          <select id="select-blitz-start-sector" class="form-input" style="font-weight: 800; height: 40px; color: #fbbf24; background: #121214; border-color: #3f3f46;">
+          <select id="select-blitz-start-sector" class="form-input" style="font-weight: 800; height: 32px; font-size: 0.76rem; color: #fbbf24; background: #121214; border-color: #3f3f46; padding: 0 6px;">
             ${SETORS.map(s => `<option value="${s}" ${s === 'MERCEARIA' ? 'selected' : ''}>SETOR: ${s}</option>`).join('')}
             <option value="GERAL">TODOS OS SETORES (GERAL)</option>
           </select>
         </div>
 
         <!-- 3. PRODUTOS QUE SERÃO CONFERIDOS (LISTAGEM EM MASSA) -->
-        <div style="background: rgba(16, 185, 129, 0.05); border: 1px solid rgba(16, 185, 129, 0.35); border-radius: 10px; padding: 12px;">
-          <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 6px;">
-            <label for="textarea-start-blitz-mass" style="font-size: 0.78rem; font-weight: 900; color: #34d399; text-transform: uppercase;">
-              📦 Produtos a Conferir (Listagem em Massa):
+        <div style="background: rgba(16, 185, 129, 0.05); border: 1px solid rgba(16, 185, 129, 0.35); border-radius: 8px; padding: 8px;">
+          <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 4px;">
+            <label for="textarea-start-blitz-mass" style="font-size: 0.7rem; font-weight: 900; color: #34d399; text-transform: uppercase;">
+              📦 Produtos (Listagem em Massa):
             </label>
-            <span id="badge-start-blitz-counter" style="font-size: 0.72rem; color: #10b981; font-weight: 800;">
-              0 produtos detectados
+            <span id="badge-start-blitz-counter" style="font-size: 0.65rem; color: #10b981; font-weight: 800;">
+              0 produtos
             </span>
           </div>
 
-          <p style="font-size: 0.72rem; color: #a1a1aa; margin: 0 0 8px 0; line-height: 1.3;">
-            Cole a listagem dos produtos (código e descrição). Ao enviar, a Blitz inicia imediatamente com todos os itens carregados!
+          <p style="font-size: 0.65rem; color: #a1a1aa; margin: 0 0 6px 0; line-height: 1.2;">
+            Cole a listagem com código e descrição para carregar tudo de uma vez.
           </p>
 
           <textarea
             id="textarea-start-blitz-mass"
             class="form-input"
-            rows="6"
-            placeholder="Cole aqui os produtos para a Blitz...&#10;&#10;Exemplo:&#10;7898530843159 - PACOCA DADINHO ZERO QUADRADA 144G - 28/09/26&#10;7897115108805 - PACOCA ROLHA AMENDUPA 1,005KG - 30/09/26&#10;7896065201079 - ACUCAR CRISTAL CORURIPE 5KG - 09/10/26"
-            style="font-family: monospace; font-size: 0.82rem; line-height: 1.4; padding: 10px; background: #121214; border-color: #3f3f46; resize: vertical;"
+            rows="3"
+            placeholder="Cole aqui os produtos para a Blitz...&#10;Ex: 7898530843159 - PACOCA DADINHO 144G - 28/09/26"
+            style="font-family: monospace; font-size: 0.74rem; line-height: 1.3; padding: 6px; background: #121214; border-color: #3f3f46; resize: vertical; border-radius: 6px;"
           ></textarea>
 
-          <div style="margin-top: 8px;">
+          <div style="margin-top: 6px;">
             <input type="file" id="input-file-start-blitz" accept=".txt,.csv" class="hidden" />
-            <button type="button" id="btn-upload-start-blitz-file" class="btn-secondary" style="width: 100%; height: 38px; font-size: 0.8rem; font-weight: 800; justify-content: center; gap: 6px; border-color: #3f3f46; background: #18181c; color: #d4d4d8;">
-              <span>📁</span> <span>Carregar arquivo pronto (.txt ou .csv)</span>
+            <button type="button" id="btn-upload-start-blitz-file" class="btn-secondary" style="width: 100%; height: 30px; font-size: 0.72rem; font-weight: 800; justify-content: center; gap: 4px; border-color: #3f3f46; background: #18181c; color: #d4d4d8;">
+              <span>📁</span> <span>Carregar arquivo (.txt ou .csv)</span>
             </button>
           </div>
         </div>
 
-        <div style="display: flex; gap: 8px; margin-top: 4px;">
-          <button type="button" id="btn-cancel-start-blitz" class="btn-secondary" style="flex: 1; height: 48px; justify-content: center; font-weight: 800;">
+        <div style="display: flex; gap: 6px; margin-top: 2px;">
+          <button type="button" id="btn-cancel-start-blitz" class="btn-secondary" style="flex: 1; height: 36px; justify-content: center; font-weight: 800; font-size: 0.8rem;">
             Cancelar
           </button>
-          <button type="submit" id="btn-confirm-start-blitz" class="btn-primary" style="flex: 1.5; height: 48px; justify-content: center; background: #10b981; color: #022c22; font-weight: 900; font-size: 1rem;">
+          <button type="submit" id="btn-confirm-start-blitz" class="btn-primary" style="flex: 1.5; height: 36px; justify-content: center; background: #10b981; color: #022c22; font-weight: 900; font-size: 0.84rem;">
             🚀 INICIAR BLITZ
           </button>
         </div>
@@ -1501,172 +1497,172 @@ export async function openBlitzDashboardView() {
       </button>
     </header>
 
-    <main style="padding: 14px 12px 40px; max-width: 640px; margin: 0 auto; display: flex; flex-direction: column; gap: 12px;">
+    <main style="padding: 6px 8px 30px; max-width: 500px; margin: 0 auto; display: flex; flex-direction: column; gap: 8px; width: 100%; box-sizing: border-box;">
       
       <!-- Card Principal da Blitz Ativa -->
-      <div style="background: #141418; border: 1px solid rgba(245, 158, 11, 0.35); border-radius: 14px; padding: 16px; display: flex; flex-direction: column; gap: 12px; box-shadow: 0 4px 20px rgba(0, 0, 0, 0.4);">
-        <div style="display: flex; align-items: flex-start; justify-content: space-between; gap: 8px;">
+      <div style="background: #141418; border: 1px solid rgba(245, 158, 11, 0.35); border-radius: 10px; padding: 8px 10px; display: flex; flex-direction: column; gap: 6px; box-shadow: 0 2px 10px rgba(0, 0, 0, 0.3);">
+        <div style="display: flex; align-items: flex-start; justify-content: space-between; gap: 6px;">
           <div>
-            <div style="display: flex; align-items: center; gap: 8px; flex-wrap: wrap;">
-              <h2 style="font-size: 1.12rem; font-weight: 900; color: #ffffff; margin: 0; letter-spacing: 0.3px;">
+            <div style="display: flex; align-items: center; gap: 6px; flex-wrap: wrap;">
+              <h2 style="font-size: 0.95rem; font-weight: 900; color: #ffffff; margin: 0; letter-spacing: 0.2px;">
                 BLITZ OFICIAL
               </h2>
-              <span style="background: rgba(245, 158, 11, 0.2); border: 1px solid rgba(245, 158, 11, 0.5); color: #fbbf24; font-size: 0.72rem; font-weight: 900; padding: 3px 8px; border-radius: 6px; text-transform: uppercase;">
+              <span style="background: rgba(245, 158, 11, 0.2); border: 1px solid rgba(245, 158, 11, 0.5); color: #fbbf24; font-size: 0.68rem; font-weight: 900; padding: 2px 6px; border-radius: 4px; text-transform: uppercase;">
                 🏷️ ${session.sector || 'GERAL'}
               </span>
             </div>
-            <div style="font-size: 0.84rem; font-weight: 800; color: #fbbf24; margin-top: 6px; display: flex; align-items: center; gap: 8px; flex-wrap: wrap;">
+            <div style="font-size: 0.74rem; font-weight: 800; color: #fbbf24; margin-top: 3px; display: flex; align-items: center; gap: 6px; flex-wrap: wrap;">
               <span>📅 Período: <strong id="blitz-active-period-text" style="cursor: pointer; text-decoration: underline dotted;">${hasValidPeriod ? periodLabel : '<span style="color: #ef4444; font-weight: 900;">Não Definido</span>'}</strong></span>
-              <button type="button" id="btn-edit-active-blitz-period" style="background: rgba(245, 158, 11, 0.15); border: 1px solid rgba(245, 158, 11, 0.4); color: #fbbf24; padding: 3px 8px; border-radius: 6px; font-size: 0.72rem; font-weight: 800; cursor: pointer; display: inline-flex; align-items: center; gap: 4px;">
+              <button type="button" id="btn-edit-active-blitz-period" style="background: rgba(245, 158, 11, 0.15); border: 1px solid rgba(245, 158, 11, 0.4); color: #fbbf24; padding: 2px 6px; border-radius: 4px; font-size: 0.66rem; font-weight: 800; cursor: pointer; display: inline-flex; align-items: center; gap: 3px;">
                 ✏️ Alterar
               </button>
             </div>
           </div>
-          <span style="background: rgba(16, 185, 129, 0.15); color: #34d399; border: 1px solid rgba(16, 185, 129, 0.35); font-size: 0.7rem; font-weight: 900; padding: 3px 8px; border-radius: 9999px; white-space: nowrap;">
-            ● EM ANDAMENTO
+          <span style="background: rgba(16, 185, 129, 0.15); color: #34d399; border: 1px solid rgba(16, 185, 129, 0.35); font-size: 0.64rem; font-weight: 900; padding: 2px 6px; border-radius: 9999px; white-space: nowrap;">
+            ● ATIVA
           </span>
         </div>
 
         <!-- Barra de Progresso Visual e Ritmo da Conferência -->
-        <div style="background: #1a1a20; border: 1px solid #27272f; border-radius: 10px; padding: 12px; display: flex; flex-direction: column; gap: 8px;">
-          <div style="display: flex; justify-content: space-between; align-items: center; font-size: 0.8rem; font-weight: 800;">
-            <span style="color: #f4f4f5;">Progresso: <strong style="color: #38bdf8;">${metrics.conferidos}</strong> de <strong>${totalCount}</strong> itens</span>
-            <span style="background: rgba(16, 185, 129, 0.2); color: #34d399; padding: 2px 8px; border-radius: 6px; font-size: 0.84rem; font-weight: 900;">${metrics.percentual}%</span>
+        <div style="background: #1a1a20; border: 1px solid #27272f; border-radius: 6px; padding: 6px 8px; display: flex; flex-direction: column; gap: 4px;">
+          <div style="display: flex; justify-content: space-between; align-items: center; font-size: 0.74rem; font-weight: 800;">
+            <span style="color: #f4f4f5;">Progresso: <strong style="color: #38bdf8;">${metrics.conferidos}</strong> de <strong>${totalCount}</strong></span>
+            <span style="background: rgba(16, 185, 129, 0.2); color: #34d399; padding: 1px 6px; border-radius: 4px; font-size: 0.74rem; font-weight: 900;">${metrics.percentual}%</span>
           </div>
-          <div style="height: 9px; border-radius: 6px; background: #27272f; overflow: hidden; width: 100%;">
-            <div style="height: 100%; width: ${metrics.percentual}%; background: linear-gradient(90deg, #10b981, #34d399); transition: width 0.3s; border-radius: 6px;"></div>
+          <div style="height: 6px; border-radius: 4px; background: #27272f; overflow: hidden; width: 100%;">
+            <div style="height: 100%; width: ${metrics.percentual}%; background: linear-gradient(90deg, #10b981, #34d399); transition: width 0.3s; border-radius: 4px;"></div>
           </div>
-          <div style="display: flex; justify-content: space-between; align-items: center; font-size: 0.74rem; color: #a1a1aa; flex-wrap: wrap; gap: 6px;">
-            <span>⚡ Ritmo: <strong style="color: ${metrics.ritmoCor};">${metrics.ritmoLabel}</strong> (${metrics.itensPorHora} itens/h)</span>
+          <div style="display: flex; justify-content: space-between; align-items: center; font-size: 0.68rem; color: #a1a1aa; flex-wrap: wrap; gap: 4px;">
+            <span>⚡ Ritmo: <strong style="color: ${metrics.ritmoCor};">${metrics.ritmoLabel}</strong> (${metrics.itensPorHora} it/h)</span>
             <span>Previsão: <strong style="color: #fef08a;">${metrics.previsaoTermino}</strong></span>
           </div>
         </div>
 
-        <div style="font-size: 0.74rem; color: #71717a; border-top: 1px solid #22222a; padding-top: 8px; display: flex; justify-content: space-between; align-items: center;">
+        <div style="font-size: 0.68rem; color: #71717a; border-top: 1px solid #22222a; padding-top: 4px; display: flex; justify-content: space-between; align-items: center;">
           <span>Auditora: <strong style="color: #d4d4d8;">${session.responsible_user_name || session.user_name || 'Ana Luiza'}</strong></span>
-          <span>Iniciada às <strong style="color: #d4d4d8;">${startTimeFormatted}</strong></span>
+          <span>Início: <strong style="color: #d4d4d8;">${startTimeFormatted}</strong></span>
         </div>
       </div>
 
-      <!-- BOTÃO GIGANTE: BIPAR PRODUTO -->
+      <!-- BOTÃO BIPAR PRODUTO COMPACTO -->
       <button type="button" id="btn-blitz-big-scan" class="btn-primary" style="
-        height: 56px;
-        font-size: 1.05rem;
+        height: 38px;
+        font-size: 0.88rem;
         font-weight: 900;
         justify-content: center;
         background: linear-gradient(135deg, #10b981 0%, #059669 100%);
         color: #ffffff;
         border: none;
-        border-radius: 12px;
-        box-shadow: 0 4px 16px rgba(16, 185, 129, 0.35);
+        border-radius: 8px;
+        box-shadow: 0 2px 8px rgba(16, 185, 129, 0.3);
         display: flex;
         align-items: center;
-        gap: 10px;
+        gap: 6px;
         cursor: pointer;
-        letter-spacing: 0.3px;
+        letter-spacing: 0.2px;
       ">
-        <span style="font-size: 1.4rem;">📷</span>
+        <span style="font-size: 1.1rem;">📷</span>
         <span>BIPAR COM A CÂMERA</span>
       </button>
 
       <!-- Entrada Manual Rápida de Código de Barras -->
-      <form id="form-blitz-manual-bip" style="display: flex; gap: 6px;">
+      <form id="form-blitz-manual-bip" style="display: flex; gap: 4px;">
         <input
           type="text"
           id="input-blitz-manual-code"
           class="form-input"
-          placeholder="🏷️ Digitar código de barras ou bipar leitor..."
-          style="height: 44px; font-size: 0.88rem; flex: 1; background: #18181d; border: 1px solid #33333d; border-radius: 8px; color: #f4f4f5; padding: 0 12px;"
+          placeholder="🏷️ Digitar código ou bipar leitor..."
+          style="height: 34px; font-size: 0.82rem; flex: 1; background: #18181d; border: 1px solid #33333d; border-radius: 6px; color: #f4f4f5; padding: 0 8px;"
         />
-        <button type="submit" class="btn-secondary" style="height: 44px; font-weight: 900; font-size: 0.84rem; padding: 0 16px; white-space: nowrap; background: #272730; border: 1px solid #3f3f4e; color: #fbbf24; border-radius: 8px; cursor: pointer;">
+        <button type="submit" class="btn-secondary" style="height: 34px; font-weight: 900; font-size: 0.78rem; padding: 0 10px; white-space: nowrap; background: #272730; border: 1px solid #3f3f4e; color: #fbbf24; border-radius: 6px; cursor: pointer;">
           ➔ Bipar
         </button>
       </form>
 
       <!-- PAINEL DE AÇÕES COMPLEMENTARES -->
-      <div style="display: grid; grid-template-columns: repeat(4, 1fr); gap: 6px;">
-        <button type="button" id="btn-blitz-dash-mass-register" class="btn-secondary" style="height: 42px; font-size: 0.74rem; font-weight: 800; justify-content: center; padding: 0 4px; text-align: center; background: #191920; border: 1px solid #2d2d38; color: #e4e4e7; border-radius: 8px; cursor: pointer;">
-          📥 + Produtos
+      <div style="display: grid; grid-template-columns: repeat(4, 1fr); gap: 4px;">
+        <button type="button" id="btn-blitz-dash-mass-register" class="btn-secondary" style="height: 32px; font-size: 0.7rem; font-weight: 800; justify-content: center; padding: 0 2px; text-align: center; background: #191920; border: 1px solid #2d2d38; color: #e4e4e7; border-radius: 6px; cursor: pointer;">
+          📥 + Prod
         </button>
-        <button type="button" id="btn-blitz-dash-exported" class="btn-secondary" style="height: 42px; font-size: 0.74rem; font-weight: 800; justify-content: center; padding: 0 4px; text-align: center; background: #191920; border: 1px solid #2d2d38; color: #e4e4e7; border-radius: 8px; cursor: pointer;">
+        <button type="button" id="btn-blitz-dash-exported" class="btn-secondary" style="height: 32px; font-size: 0.7rem; font-weight: 800; justify-content: center; padding: 0 2px; text-align: center; background: #191920; border: 1px solid #2d2d38; color: #e4e4e7; border-radius: 6px; cursor: pointer;">
           📋 Exportados
         </button>
-        <button type="button" id="btn-blitz-dash-what-changed" class="btn-secondary" style="height: 42px; font-size: 0.74rem; font-weight: 800; justify-content: center; padding: 0 4px; text-align: center; color: #fbbf24; background: #191920; border: 1px solid rgba(245, 158, 11, 0.4); border-radius: 8px; cursor: pointer;">
-          📊 O Que Mudou
+        <button type="button" id="btn-blitz-dash-what-changed" class="btn-secondary" style="height: 32px; font-size: 0.7rem; font-weight: 800; justify-content: center; padding: 0 2px; text-align: center; color: #fbbf24; background: #191920; border: 1px solid rgba(245, 158, 11, 0.4); border-radius: 6px; cursor: pointer;">
+          📊 Mudanças
         </button>
-        <button type="button" id="btn-blitz-export-wa-active" class="btn-secondary" style="height: 42px; font-size: 0.74rem; font-weight: 800; justify-content: center; padding: 0 4px; text-align: center; color: #25d366; background: #191920; border: 1px solid rgba(37, 211, 102, 0.4); border-radius: 8px; cursor: pointer;">
+        <button type="button" id="btn-blitz-export-wa-active" class="btn-secondary" style="height: 32px; font-size: 0.7rem; font-weight: 800; justify-content: center; padding: 0 2px; text-align: center; color: #25d366; background: #191920; border: 1px solid rgba(37, 211, 102, 0.4); border-radius: 6px; cursor: pointer;">
           💬 WhatsApp
         </button>
       </div>
 
       <!-- CONTADORES DA BLITZ -->
-      <div style="display: grid; grid-template-columns: repeat(4, 1fr); gap: 6px;">
-        <div style="background: #16161b; border: 1px solid #272730; border-radius: 10px; padding: 10px 4px; text-align: center;">
-          <div style="font-size: 0.65rem; color: #a1a1aa; font-weight: 800; text-transform: uppercase;">Total</div>
-          <div id="stat-total-count" style="font-size: 1.3rem; font-weight: 900; color: #f4f4f5; margin-top: 2px;">
+      <div style="display: grid; grid-template-columns: repeat(4, 1fr); gap: 4px;">
+        <div style="background: #16161b; border: 1px solid #272730; border-radius: 6px; padding: 4px 2px; text-align: center;">
+          <div style="font-size: 0.62rem; color: #a1a1aa; font-weight: 800; text-transform: uppercase;">Total</div>
+          <div id="stat-total-count" style="font-size: 1.05rem; font-weight: 900; color: #f4f4f5; margin-top: 1px;">
             ${totalCount}
           </div>
         </div>
 
-        <div style="background: rgba(16, 185, 129, 0.08); border: 1px solid rgba(16, 185, 129, 0.35); border-radius: 10px; padding: 10px 4px; text-align: center;">
-          <div style="font-size: 0.65rem; color: #34d399; font-weight: 800; text-transform: uppercase;">🟢 Com Qtd</div>
-          <div id="stat-com-qtd" style="font-size: 1.3rem; font-weight: 900; color: #34d399; margin-top: 2px;">
+        <div style="background: rgba(16, 185, 129, 0.08); border: 1px solid rgba(16, 185, 129, 0.35); border-radius: 6px; padding: 4px 2px; text-align: center;">
+          <div style="font-size: 0.62rem; color: #34d399; font-weight: 800; text-transform: uppercase;">🟢 Com Qtd</div>
+          <div id="stat-com-qtd" style="font-size: 1.05rem; font-weight: 900; color: #34d399; margin-top: 1px;">
             ${metrics.comQtd}
           </div>
         </div>
 
-        <div style="background: rgba(239, 68, 68, 0.08); border: 1px solid rgba(239, 68, 68, 0.35); border-radius: 10px; padding: 10px 4px; text-align: center;">
-          <div style="font-size: 0.65rem; color: #f87171; font-weight: 800; text-transform: uppercase;">🔴 Zerados</div>
-          <div id="stat-zerados" style="font-size: 1.3rem; font-weight: 900; color: #f87171; margin-top: 2px;">
+        <div style="background: rgba(239, 68, 68, 0.08); border: 1px solid rgba(239, 68, 68, 0.35); border-radius: 6px; padding: 4px 2px; text-align: center;">
+          <div style="font-size: 0.62rem; color: #f87171; font-weight: 800; text-transform: uppercase;">🔴 Zerados</div>
+          <div id="stat-zerados" style="font-size: 1.05rem; font-weight: 900; color: #f87171; margin-top: 1px;">
             ${metrics.zerados}
           </div>
         </div>
 
-        <div style="background: rgba(245, 158, 11, 0.08); border: 1px solid rgba(245, 158, 11, 0.35); border-radius: 10px; padding: 10px 4px; text-align: center;">
-          <div style="font-size: 0.65rem; color: #fbbf24; font-weight: 800; text-transform: uppercase;">⏳ Pendentes</div>
-          <div id="stat-pendentes" style="font-size: 1.3rem; font-weight: 900; color: #fbbf24; margin-top: 2px;">
+        <div style="background: rgba(245, 158, 11, 0.08); border: 1px solid rgba(245, 158, 11, 0.35); border-radius: 6px; padding: 4px 2px; text-align: center;">
+          <div style="font-size: 0.62rem; color: #fbbf24; font-weight: 800; text-transform: uppercase;">⏳ Pend.</div>
+          <div id="stat-pendentes" style="font-size: 1.05rem; font-weight: 900; color: #fbbf24; margin-top: 1px;">
             ${metrics.pendentes}
           </div>
         </div>
       </div>
 
       <!-- BOTÃO PARA FINALIZAR BLITZ -->
-      <button type="button" id="btn-blitz-finish-session" class="btn-primary" style="height: 48px; font-size: 0.95rem; font-weight: 900; justify-content: center; background: #f59e0b; color: #000000; border: none; border-radius: 10px; cursor: pointer; box-shadow: 0 4px 14px rgba(245, 158, 11, 0.25);">
+      <button type="button" id="btn-blitz-finish-session" class="btn-primary" style="height: 36px; font-size: 0.82rem; font-weight: 900; justify-content: center; background: #f59e0b; color: #000000; border: none; border-radius: 8px; cursor: pointer; box-shadow: 0 2px 8px rgba(245, 158, 11, 0.25);">
         🏁 FINALIZAR BLITZ
       </button>
 
       <!-- ABAS DE FILTRAGEM -->
-      <div style="display: flex; gap: 6px; overflow-x: auto; padding-bottom: 2px; margin-top: 4px; scrollbar-width: none;">
-        <button type="button" class="btn-filter-pill active" data-filter="TODOS" style="padding: 7px 14px; font-size: 0.76rem; font-weight: 800; border-radius: 9999px; background: #f59e0b; color: #000; border: none; white-space: nowrap; cursor: pointer;">
+      <div style="display: flex; gap: 4px; overflow-x: auto; padding-bottom: 2px; margin-top: 2px; scrollbar-width: none;">
+        <button type="button" class="btn-filter-pill active" data-filter="TODOS" style="padding: 4px 8px; font-size: 0.7rem; font-weight: 800; border-radius: 9999px; background: #f59e0b; color: #000; border: none; white-space: nowrap; cursor: pointer;">
           Todos (${totalCount})
         </button>
-        <button type="button" class="btn-filter-pill" data-filter="PENDENTES" style="padding: 7px 14px; font-size: 0.76rem; font-weight: 800; border-radius: 9999px; background: #272730; color: #a1a1aa; border: none; white-space: nowrap; cursor: pointer;">
+        <button type="button" class="btn-filter-pill" data-filter="PENDENTES" style="padding: 4px 8px; font-size: 0.7rem; font-weight: 800; border-radius: 9999px; background: #272730; color: #a1a1aa; border: none; white-space: nowrap; cursor: pointer;">
           ⏳ Pendentes (${metrics.pendentes})
         </button>
-        <button type="button" class="btn-filter-pill" data-filter="CONFERIDOS" style="padding: 7px 14px; font-size: 0.76rem; font-weight: 800; border-radius: 9999px; background: #272730; color: #a1a1aa; border: none; white-space: nowrap; cursor: pointer;">
+        <button type="button" class="btn-filter-pill" data-filter="CONFERIDOS" style="padding: 4px 8px; font-size: 0.7rem; font-weight: 800; border-radius: 9999px; background: #272730; color: #a1a1aa; border: none; white-space: nowrap; cursor: pointer;">
           ✅ Conferidos (${metrics.conferidos})
         </button>
-        <button type="button" class="btn-filter-pill" data-filter="COM_QTD" style="padding: 7px 14px; font-size: 0.76rem; font-weight: 800; border-radius: 9999px; background: #272730; color: #a1a1aa; border: none; white-space: nowrap; cursor: pointer;">
+        <button type="button" class="btn-filter-pill" data-filter="COM_QTD" style="padding: 4px 8px; font-size: 0.7rem; font-weight: 800; border-radius: 9999px; background: #272730; color: #a1a1aa; border: none; white-space: nowrap; cursor: pointer;">
           🟢 Com Qtd (${metrics.comQtd})
         </button>
-        <button type="button" class="btn-filter-pill" data-filter="ZERADOS" style="padding: 7px 14px; font-size: 0.76rem; font-weight: 800; border-radius: 9999px; background: #272730; color: #a1a1aa; border: none; white-space: nowrap; cursor: pointer;">
+        <button type="button" class="btn-filter-pill" data-filter="ZERADOS" style="padding: 4px 8px; font-size: 0.7rem; font-weight: 800; border-radius: 9999px; background: #272730; color: #a1a1aa; border: none; white-space: nowrap; cursor: pointer;">
           🔴 Zerados (${metrics.zerados})
         </button>
-        <button type="button" class="btn-filter-pill" data-filter="JA_CONFERIDOS" style="padding: 7px 14px; font-size: 0.76rem; font-weight: 800; border-radius: 9999px; background: #272730; color: #38bdf8; border: 1px solid rgba(56, 189, 248, 0.4); white-space: nowrap; cursor: pointer;">
-          📋 Já Conferidos (${jaConferidosCount})
+        <button type="button" class="btn-filter-pill" data-filter="JA_CONFERIDOS" style="padding: 4px 8px; font-size: 0.7rem; font-weight: 800; border-radius: 9999px; background: #272730; color: #38bdf8; border: 1px solid rgba(56, 189, 248, 0.4); white-space: nowrap; cursor: pointer;">
+          📋 Já Conf (${jaConferidosCount})
         </button>
-        <button type="button" class="btn-filter-pill" data-filter="NOVOS" style="padding: 7px 14px; font-size: 0.76rem; font-weight: 800; border-radius: 9999px; background: #272730; color: #34d399; border: 1px solid rgba(52, 211, 153, 0.4); white-space: nowrap; cursor: pointer;">
-          🆕 Produtos Novos (${novosCount})
+        <button type="button" class="btn-filter-pill" data-filter="NOVOS" style="padding: 4px 8px; font-size: 0.7rem; font-weight: 800; border-radius: 9999px; background: #272730; color: #34d399; border: 1px solid rgba(52, 211, 153, 0.4); white-space: nowrap; cursor: pointer;">
+          🆕 Novos (${novosCount})
         </button>
       </div>
 
       <!-- LISTA DE ITENS DA BLITZ -->
-      <div style="background: #141418; border: 1px solid #27272e; border-radius: 12px; padding: 14px; display: flex; flex-direction: column; gap: 10px;">
+      <div style="background: #141418; border: 1px solid #27272e; border-radius: 8px; padding: 8px; display: flex; flex-direction: column; gap: 6px;">
         <div style="display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 4px;">
-          <span id="blitz-list-header-title" style="font-size: 0.82rem; font-weight: 900; color: #ffffff; text-transform: uppercase; letter-spacing: 0.5px;">
+          <span id="blitz-list-header-title" style="font-size: 0.76rem; font-weight: 900; color: #ffffff; text-transform: uppercase; letter-spacing: 0.3px;">
             ITENS DA BLITZ (${totalCount})
           </span>
-          <span style="font-size: 0.72rem; color: #a1a1aa;">Toque para bipar ou editar</span>
+          <span style="font-size: 0.65rem; color: #a1a1aa;">Toque para bipar ou editar</span>
         </div>
 
         <!-- Barra de busca rápida em tempo real -->
@@ -1674,19 +1670,19 @@ export async function openBlitzDashboardView() {
           <input
             type="text"
             id="input-search-blitz-list"
-            placeholder="🔍 Buscar por nome ou código de barras..."
-            style="width: 100%; height: 38px; background: #1c1c22; border: 1px solid #33333e; border-radius: 8px; padding: 0 12px; font-size: 0.82rem; color: #f4f4f5; outline: none;"
+            placeholder="🔍 Buscar por nome ou código..."
+            style="width: 100%; height: 32px; background: #1c1c22; border: 1px solid #33333e; border-radius: 6px; padding: 0 8px; font-size: 0.78rem; color: #f4f4f5; outline: none; box-sizing: border-box;"
           />
         </div>
 
-        <div id="blitz-session-items-list" style="display: flex; flex-direction: column; gap: 8px; max-height: 520px; overflow-y: auto; padding-right: 2px;">
+        <div id="blitz-session-items-list" style="display: flex; flex-direction: column; gap: 6px; max-height: 520px; overflow-y: auto; padding-right: 2px;">
           <!-- Itens renderizados dinamicamente -->
         </div>
       </div>
 
       <!-- Opção secundária: Cancelar -->
-      <div style="text-align: center; margin-top: 4px; margin-bottom: 20px;">
-        <button type="button" id="btn-blitz-cancel-secondary" style="background: none; border: none; color: #ef4444; font-size: 0.78rem; font-weight: 700; cursor: pointer; text-decoration: underline; padding: 6px;">
+      <div style="text-align: center; margin-top: 2px; margin-bottom: 12px;">
+        <button type="button" id="btn-blitz-cancel-secondary" style="background: none; border: none; color: #ef4444; font-size: 0.72rem; font-weight: 700; cursor: pointer; text-decoration: underline; padding: 4px;">
           Cancelar esta Blitz
         </button>
       </div>
@@ -1959,36 +1955,38 @@ async function renderBlitzSessionItemsListFiltered(session, filter = 'TODOS', se
       <div class="blitz-item-card-row" data-id="${item.id}" data-barcode="${barcode}" data-date="${expDate || ''}" data-conferred="${isConferred}" style="
         background: #18181e;
         border: 1px solid ${!isConferred ? '#2a2a35' : isTem ? 'rgba(16, 185, 129, 0.4)' : 'rgba(239, 68, 68, 0.4)'};
-        border-radius: 10px;
-        padding: 10px 12px;
+        border-radius: 8px;
+        padding: 6px 8px;
         display: flex;
         align-items: center;
         justify-content: space-between;
-        gap: 12px;
+        gap: 6px;
         cursor: pointer;
         transition: transform 0.1s ease, border-color 0.2s ease, background 0.2s ease;
+        box-sizing: border-box;
+        width: 100%;
       ">
-        <div style="display: flex; align-items: center; gap: 10px; flex: 1; min-width: 0;">
+        <div style="display: flex; align-items: center; gap: 6px; flex: 1; min-width: 0;">
           <div style="flex-shrink: 0;">
-            ${renderProductPhotoHtml(photoUrl, name, { size: 52, rounded: '8px' })}
+            ${renderProductPhotoHtml(photoUrl, name, { size: 36, rounded: '6px' })}
           </div>
           <div style="flex: 1; min-width: 0;">
             <!-- Linha superior de status e validade -->
-            <div style="display: flex; align-items: center; gap: 6px; margin-bottom: 4px; flex-wrap: wrap;">
+            <div style="display: flex; align-items: center; gap: 4px; margin-bottom: 2px; flex-wrap: wrap;">
               ${!isConferred ? `
-                <span style="font-size: 0.68rem; font-weight: 900; padding: 2px 7px; border-radius: 9999px; background: rgba(245, 158, 11, 0.18); color: #fbbf24; border: 1px solid rgba(245, 158, 11, 0.35);">
+                <span style="font-size: 0.62rem; font-weight: 900; padding: 1px 5px; border-radius: 9999px; background: rgba(245, 158, 11, 0.18); color: #fbbf24; border: 1px solid rgba(245, 158, 11, 0.35); white-space: nowrap;">
                   ⏳ PENDENTE
                 </span>
               ` : isTem ? `
-                <span style="font-size: 0.68rem; font-weight: 900; padding: 2px 7px; border-radius: 9999px; background: rgba(16, 185, 129, 0.18); color: #34d399; border: 1px solid rgba(16, 185, 129, 0.35);">
+                <span style="font-size: 0.62rem; font-weight: 900; padding: 1px 5px; border-radius: 9999px; background: rgba(16, 185, 129, 0.18); color: #34d399; border: 1px solid rgba(16, 185, 129, 0.35); white-space: nowrap;">
                   ✓ TEM (${formatNumber(qty)} un)
                 </span>
               ` : `
-                <span style="font-size: 0.68rem; font-weight: 900; padding: 2px 7px; border-radius: 9999px; background: rgba(239, 68, 68, 0.18); color: #f87171; border: 1px solid rgba(239, 68, 68, 0.35);">
+                <span style="font-size: 0.62rem; font-weight: 900; padding: 1px 5px; border-radius: 9999px; background: rgba(239, 68, 68, 0.18); color: #f87171; border: 1px solid rgba(239, 68, 68, 0.35); white-space: nowrap;">
                   ✕ ZERADO
                 </span>
               `}
-              <span style="font-size: 0.72rem; color: #fbbf24; font-weight: 800; background: #22222a; padding: 2px 7px; border-radius: 5px; border: 1px solid #333340;">
+              <span style="font-size: 0.68rem; color: #fbbf24; font-weight: 800; background: #22222a; padding: 1px 5px; border-radius: 4px; border: 1px solid #333340; white-space: nowrap;">
                 📅 Val: ${dateFormatted}
               </span>
               ${tagHtml}
@@ -1996,13 +1994,13 @@ async function renderBlitzSessionItemsListFiltered(session, filter = 'TODOS', se
             </div>
 
             <!-- Nome do produto com alto contraste e legibilidade -->
-            <div style="font-size: 0.92rem; font-weight: 800; color: #ffffff; line-height: 1.35; margin: 2px 0 3px 0; word-break: break-word;">
+            <div style="font-size: 0.78rem; font-weight: 800; color: #ffffff; line-height: 1.25; margin: 1px 0 2px 0; word-break: break-word;">
               ${name}
             </div>
 
             <!-- Metadados: Código de barras e corredor -->
-            <div style="font-size: 0.72rem; color: #a1a1aa; display: flex; align-items: center; gap: 8px; flex-wrap: wrap;">
-              <span style="font-family: monospace; background: #121216; padding: 1px 6px; border-radius: 4px; border: 1px solid #282832; color: #d4d4d8;">
+            <div style="font-size: 0.66rem; color: #a1a1aa; display: flex; align-items: center; gap: 4px; flex-wrap: wrap;">
+              <span style="font-family: monospace; background: #121216; padding: 1px 4px; border-radius: 3px; border: 1px solid #282832; color: #d4d4d8;">
                 🏷️ ${displayBarcode}
               </span>
               ${corridor ? `<span style="color: #38bdf8; font-weight: 700;">📍 ${corridor}</span>` : ''}
@@ -2013,11 +2011,11 @@ async function renderBlitzSessionItemsListFiltered(session, filter = 'TODOS', se
         <!-- Ação do lado direito: Bipar ou Editar quantidade -->
         <div style="text-align: right; flex-shrink: 0;">
           ${!isConferred ? `
-            <span style="font-size: 0.78rem; font-weight: 900; color: #fbbf24; background: rgba(245, 158, 11, 0.15); border: 1px solid rgba(245, 158, 11, 0.4); padding: 6px 12px; border-radius: 8px; display: inline-flex; align-items: center; gap: 4px;">
-              ⚡ Bipar ➔
+            <span style="font-size: 0.72rem; font-weight: 900; color: #fbbf24; background: rgba(245, 158, 11, 0.15); border: 1px solid rgba(245, 158, 11, 0.4); padding: 4px 8px; border-radius: 6px; display: inline-flex; align-items: center; gap: 3px; white-space: nowrap;">
+              ⚡ Bipar
             </span>
           ` : `
-            <span style="font-size: 0.95rem; font-weight: 900; color: ${isTem ? '#34d399' : '#f87171'}; background: ${isTem ? 'rgba(16, 185, 129, 0.12)' : 'rgba(239, 68, 68, 0.12)'}; border: 1px solid ${isTem ? 'rgba(16, 185, 129, 0.35)' : 'rgba(239, 68, 68, 0.35)'}; padding: 6px 10px; border-radius: 8px; display: inline-flex; align-items: center; gap: 4px;">
+            <span style="font-size: 0.8rem; font-weight: 900; color: ${isTem ? '#34d399' : '#f87171'}; background: ${isTem ? 'rgba(16, 185, 129, 0.12)' : 'rgba(239, 68, 68, 0.12)'}; border: 1px solid ${isTem ? 'rgba(16, 185, 129, 0.35)' : 'rgba(239, 68, 68, 0.35)'}; padding: 4px 6px; border-radius: 6px; display: inline-flex; align-items: center; gap: 2px; white-space: nowrap;">
               ${isTem ? `${formatNumber(qty)} un` : '0 un'} ✏️
             </span>
           `}
