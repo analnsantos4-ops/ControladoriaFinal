@@ -86,14 +86,24 @@ import { getCurrentUser, getUserById, getAllowedSectorsForUser, isSectorAllowedF
 let currentActiveBlitzSession = null;
 
 export function getActiveBlitz() {
+  const currentUser = getCurrentUser();
+  if (currentActiveBlitzSession && currentUser) {
+    const sUserId = currentActiveBlitzSession.responsible_user_id || currentActiveBlitzSession.user_id || (currentActiveBlitzSession.user_name?.toLowerCase().includes('angelica') ? 'angelica' : 'ana_luiza');
+    if (sUserId && sUserId !== currentUser.id) {
+      return null;
+    }
+  }
   return currentActiveBlitzSession;
 }
 
 export function setActiveBlitz(session) {
   currentActiveBlitzSession = session;
+  const activeUser = getCurrentUser();
+  const cacheKey = activeUser ? `active_blitz_session_cache_${activeUser.id}` : 'active_blitz_session_cache';
   if (session) {
-    localStorage.setItem('active_blitz_session_cache', JSON.stringify(session));
+    localStorage.setItem(cacheKey, JSON.stringify(session));
   } else {
+    localStorage.removeItem(cacheKey);
     localStorage.removeItem('active_blitz_session_cache');
   }
   updateBlitzTopBarIndicator();
@@ -141,18 +151,23 @@ export function renderProductPhotoHtml(photoUrl, altText = '', options = {}) {
 }
 
 // Inicializa o módulo e recupera sessão ativa se houver
-export async function initBlitzModule() {
+export async function initBlitzModule(targetUserId = null) {
+  const activeUser = targetUserId ? getUserById(targetUserId) : getCurrentUser();
+  const userId = activeUser?.id || null;
+  const cacheKey = userId ? `active_blitz_session_cache_${userId}` : 'active_blitz_session_cache';
+
   try {
-    const active = await getActiveBlitzSession();
+    const active = await getActiveBlitzSession(userId);
     if (active) {
       currentActiveBlitzSession = active;
-      localStorage.setItem('active_blitz_session_cache', JSON.stringify(active));
+      localStorage.setItem(cacheKey, JSON.stringify(active));
     } else {
       currentActiveBlitzSession = null;
+      localStorage.removeItem(cacheKey);
       localStorage.removeItem('active_blitz_session_cache');
     }
   } catch (e) {
-    const cached = localStorage.getItem('active_blitz_session_cache');
+    const cached = localStorage.getItem(cacheKey);
     currentActiveBlitzSession = cached ? JSON.parse(cached) : null;
   }
   updateBlitzTopBarIndicator();
@@ -163,7 +178,9 @@ export function updateBlitzTopBarIndicator() {
   const dashBanner = document.getElementById('dashboard-active-blitz-banner');
   const scannerBar = document.getElementById('scanner-blitz-indicator-bar');
 
-  if (!currentActiveBlitzSession) {
+  const activeSession = getActiveBlitz();
+
+  if (!activeSession) {
     if (dashBanner) {
       dashBanner.classList.add('hidden');
       dashBanner.innerHTML = '';
@@ -175,10 +192,10 @@ export function updateBlitzTopBarIndicator() {
     return;
   }
 
-  let periodLabel = currentActiveBlitzSession.period_label;
+  let periodLabel = activeSession.period_label;
   if (!periodLabel || periodLabel.includes('--/--/----') || periodLabel === 'Geral') {
-    if (currentActiveBlitzSession.start_date && currentActiveBlitzSession.end_date) {
-      periodLabel = `${formatDateBR(currentActiveBlitzSession.start_date)} → ${formatDateBR(currentActiveBlitzSession.end_date)}`;
+    if (activeSession.start_date && activeSession.end_date) {
+      periodLabel = `${formatDateBR(activeSession.start_date)} → ${formatDateBR(activeSession.end_date)}`;
     } else {
       periodLabel = 'Definir Período';
     }
@@ -5723,6 +5740,7 @@ export function showBlitzFinishedSummaryModal(session, statsOrItems) {
 
   document.getElementById('btn-summary-close-all')?.addEventListener('click', () => {
     closeModal();
+    window.dispatchEvent(new CustomEvent('refresh-dashboard-trigger'));
     showView('view-dashboard');
   });
 }

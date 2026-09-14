@@ -2243,8 +2243,11 @@ export async function getActiveBlitzSession(targetUserId = null) {
             resolve(userFiltered[0]);
             return;
           }
+          // Isolamento rigoroso: se a usuária não tem sessão ativa, retorna null
+          resolve(null);
+          return;
         }
-        // Fallback: retorna a mais recente em andamento
+        // Fallback genérico apenas se não houver usuária especificada:
         list.sort((a, b) => new Date(b.started_at || 0) - new Date(a.started_at || 0));
         resolve(list[0] || null);
       };

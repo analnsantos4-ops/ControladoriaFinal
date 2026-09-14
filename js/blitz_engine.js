@@ -1197,13 +1197,19 @@ export async function getWeeklyRoutineStatus(userId = null) {
   // Adiciona sessões que possam não estar na tabela nova
   allSessions.forEach(s => {
     if (!mergedBlitzes.some(b => b.id === s.id)) {
+      const respId = s.responsible_user_id || s.user_id || (String(s.user_name || '').toLowerCase().includes('angelica') ? 'angelica' : 'ana_luiza');
+      const respName = s.responsible_user_name || s.user_name || (respId === 'angelica' ? 'Angélica' : 'Ana Luiza');
       mergedBlitzes.push({
         id: s.id,
         setor: s.sector || 'MERCEARIA',
         data_inicio: s.start_date || s.started_at?.split('T')[0] || todayISO,
         data_fim: s.end_date || todayISO,
         status: s.status === 'finished' ? 'FINALIZADA' : 'EM_ANDAMENTO',
-        responsavel: s.user_name || 'Ana Luiza',
+        responsavel: respName,
+        responsible_user_id: respId,
+        responsible_user_name: respName,
+        user_id: respId,
+        user_name: respName,
         created_at: s.started_at || new Date().toISOString()
       });
     }
@@ -1212,10 +1218,18 @@ export async function getWeeklyRoutineStatus(userId = null) {
   // Mapeia o progresso para cada um dos 3 ciclos semanais da usuária ativa
   const cyclesProgress = await Promise.all(
     userCycles.map(async (cycle) => {
-      // Busca a blitz mais recente vinculada aos setores deste ciclo
+      // Busca a blitz mais recente vinculada aos setores deste ciclo E À USUÁRIA ATIVA
       const matching = mergedBlitzes.filter(b => {
         const sectorUpper = String(b.setor || '').toUpperCase();
-        return cycle.sectors.some(s => sectorUpper.includes(s));
+        const matchesSector = cycle.sectors.some(s => sectorUpper.includes(s));
+        if (!matchesSector) return false;
+
+        // Se activeUserId estiver definido, isola por usuária para que a blitz de uma não conclua o ciclo da outra!
+        if (activeUserId) {
+          const bUserId = b.responsible_user_id || b.user_id || (String(b.responsavel || b.usuario || '').toLowerCase().includes('angelica') ? 'angelica' : 'ana_luiza');
+          if (bUserId !== activeUserId) return false;
+        }
+        return true;
       });
 
       matching.sort((a, b) => new Date(b.created_at || 0) - new Date(a.created_at || 0));

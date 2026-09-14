@@ -287,95 +287,134 @@ export function isValidCalendarDate(day, month, year) {
 // Analisa e valida estritamente datas no formato brasileiro DD/MM/AAAA, DD/MM/AA ou separadores - ou .
 export function parseStrictDateBR(dateStr) {
   if (!dateStr) return null;
-  const clean = String(dateStr).trim().replace(/[^\d\/\-.]/g, '');
-  if (!clean) return null;
+  try {
+    const clean = String(dateStr).trim().replace(/[^\d\/\-.]/g, '');
+    if (!clean) return null;
 
-  // Caso 1: Formato ISO YYYY-MM-DD
-  if (/^\d{4}[\/\-.]\d{1,2}[\/\-.]\d{1,2}$/.test(clean)) {
+    // Caso 1: Formato ISO YYYY-MM-DD
+    if (/^\d{4}[\/\-.]\d{1,2}[\/\-.]\d{1,2}$/.test(clean)) {
+      const parts = clean.split(/[\/\-.]/);
+      const y = parseInt(parts[0], 10);
+      const m = parseInt(parts[1], 10);
+      const d = parseInt(parts[2], 10);
+      if (isValidCalendarDate(d, m, y)) {
+        const dStr = String(d).padStart(2, '0');
+        const mStr = String(m).padStart(2, '0');
+        const yStr = String(y);
+        return { day: d, month: m, year: y, iso: `${yStr}-${mStr}-${dStr}`, br: `${dStr}/${mStr}/${yStr}` };
+      }
+      return null;
+    }
+
+    // Caso 2: Formato DD/MM/AAAA ou DD/MM/AA
     const parts = clean.split(/[\/\-.]/);
-    const y = parseInt(parts[0], 10);
-    const m = parseInt(parts[1], 10);
-    const d = parseInt(parts[2], 10);
-    if (isValidCalendarDate(d, m, y)) {
-      const dStr = String(d).padStart(2, '0');
-      const mStr = String(m).padStart(2, '0');
-      const yStr = String(y);
-      return { day: d, month: m, year: y, iso: `${yStr}-${mStr}-${dStr}`, br: `${dStr}/${mStr}/${yStr}` };
+    if (parts.length === 3) {
+      const d = parseInt(parts[0], 10);
+      const m = parseInt(parts[1], 10);
+      let rawYear = parts[2].trim();
+      let y = parseInt(rawYear, 10);
+      if (rawYear.length === 2) {
+        y = y < 50 ? (2000 + y) : (1900 + y);
+      }
+      if (isValidCalendarDate(d, m, y)) {
+        const dStr = String(d).padStart(2, '0');
+        const mStr = String(m).padStart(2, '0');
+        const yStr = String(y);
+        return { day: d, month: m, year: y, iso: `${yStr}-${mStr}-${dStr}`, br: `${dStr}/${mStr}/${yStr}` };
+      }
     }
-    return null;
-  }
-
-  // Caso 2: Formato DD/MM/AAAA ou DD/MM/AA
-  const parts = clean.split(/[\/\-.]/);
-  if (parts.length === 3) {
-    const d = parseInt(parts[0], 10);
-    const m = parseInt(parts[1], 10);
-    let rawYear = parts[2].trim();
-    let y = parseInt(rawYear, 10);
-    if (rawYear.length === 2) {
-      y = y < 50 ? (2000 + y) : (1900 + y);
-    }
-    if (isValidCalendarDate(d, m, y)) {
-      const dStr = String(d).padStart(2, '0');
-      const mStr = String(m).padStart(2, '0');
-      const yStr = String(y);
-      return { day: d, month: m, year: y, iso: `${yStr}-${mStr}-${dStr}`, br: `${dStr}/${mStr}/${yStr}` };
-    }
-  }
-
+  } catch (_) {}
   return null;
 }
 
 // Data formatada para visualização DD/MM/AAAA
 export function formatDateBR(dateString) {
   if (!dateString) return '--/--/----';
-  const clean = String(dateString).trim().split('T')[0];
-  if (!clean) return '--/--/----';
+  try {
+    const clean = String(dateString).trim().split('T')[0];
+    if (!clean) return '--/--/----';
 
-  const strict = parseStrictDateBR(clean);
-  if (strict) {
-    return strict.br;
-  }
-
-  // Se ISO YYYY-MM-DD padrão
-  if (clean.includes('-')) {
-    const parts = clean.split('-');
-    if (parts.length === 3 && parts[0].length === 4) {
-      return `${parts[2].padStart(2, '0')}/${parts[1].padStart(2, '0')}/${parts[0]}`;
+    const strict = parseStrictDateBR(clean);
+    if (strict) {
+      return strict.br;
     }
+
+    // Se ISO YYYY-MM-DD padrão
+    if (clean.includes('-')) {
+      const parts = clean.split('-');
+      if (parts.length === 3 && parts[0].length === 4) {
+        const d = parts[2].padStart(2, '0');
+        const m = parts[1].padStart(2, '0');
+        const y = parts[0];
+        return `${d}/${m}/${y}`;
+      }
+    }
+    return clean;
+  } catch (_) {
+    return '--/--/----';
   }
-  return clean;
 }
 
 // Converte DD/MM/AAAA ou DD/MM/AA para ISO YYYY-MM-DD com validação estrita
 export function parseDateBRtoISO(dateStringBR) {
   if (!dateStringBR) return '';
-  const clean = String(dateStringBR).trim().split('T')[0];
-  const strict = parseStrictDateBR(clean);
-  if (strict) {
-    return strict.iso;
-  }
+  try {
+    const clean = String(dateStringBR).trim().split('T')[0];
+    const strict = parseStrictDateBR(clean);
+    if (strict) {
+      return strict.iso;
+    }
+  } catch (_) {}
   return '';
 }
 
-// Retorna diferença de dias até a validade
+// Retorna diferença de dias até a validade (100% à prova de erros)
 export function getDaysUntilExpiration(expirationDateISO) {
-  if (!expirationDateISO) return 999;
-  const today = new Date();
-  today.setHours(0, 0, 0, 0);
-  
-  let expDate;
-  if (expirationDateISO.includes('/')) {
-    const [d, m, y] = expirationDateISO.split('/');
-    expDate = new Date(Number(y), Number(m) - 1, Number(d));
-  } else {
-    const [y, m, d] = expirationDateISO.split('-');
-    expDate = new Date(Number(y), Number(m) - 1, Number(d));
-  }
-  expDate.setHours(0, 0, 0, 0);
+  if (!expirationDateISO) return 9999;
+  try {
+    const clean = String(expirationDateISO).trim().split('T')[0];
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
 
-  const diffTime = expDate.getTime() - today.getTime();
-  return Math.ceil(diffTime / (1000 * 60 * 60 * 24));
+    let expDate = null;
+    if (clean.includes('/')) {
+      const parts = clean.split('/');
+      if (parts.length === 3) {
+        const d = parseInt(parts[0], 10);
+        const m = parseInt(parts[1], 10);
+        const y = parseInt(parts[2], 10);
+        if (!isNaN(d) && !isNaN(m) && !isNaN(y)) {
+          expDate = new Date(y, m - 1, d);
+        }
+      }
+    } else if (clean.includes('-')) {
+      const parts = clean.split('-');
+      if (parts.length === 3) {
+        const y = parseInt(parts[0], 10);
+        const m = parseInt(parts[1], 10);
+        const d = parseInt(parts[2], 10);
+        if (!isNaN(d) && !isNaN(m) && !isNaN(y)) {
+          expDate = new Date(y, m - 1, d);
+        }
+      }
+    }
+
+    if (!expDate || isNaN(expDate.getTime())) {
+      const fallback = new Date(clean);
+      if (!isNaN(fallback.getTime())) {
+        expDate = fallback;
+      } else {
+        return 9999;
+      }
+    }
+
+    expDate.setHours(0, 0, 0, 0);
+    const diffTime = expDate.getTime() - today.getTime();
+    const result = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
+    return isNaN(result) ? 9999 : result;
+  } catch (_) {
+    return 9999;
+  }
 }
 
 // Retorna saudação baseada na hora do dia e usuário ativo
@@ -545,10 +584,39 @@ export function triggerHaptic(duration = 80) {
   }
 }
 
-// Formata números com separador de milhar brasileiro
+// Converte e higieniza qualquer valor para número de forma segura (suporta vírgula ou ponto)
+export function safeNumber(value, fallback = 0) {
+  if (value === null || value === undefined) return fallback;
+  if (typeof value === 'number') {
+    return isNaN(value) || !isFinite(value) ? fallback : value;
+  }
+  try {
+    const str = String(value).trim().replace(/\s+/g, '').replace(',', '.');
+    const n = parseFloat(str);
+    return isNaN(n) || !isFinite(n) ? fallback : n;
+  } catch (_) {
+    return fallback;
+  }
+}
+
+// Analisa JSON de forma segura sem lançar exceções não tratadas
+export function safeJsonParse(jsonString, fallback = null) {
+  if (!jsonString || typeof jsonString !== 'string') return fallback;
+  try {
+    return JSON.parse(jsonString);
+  } catch (_) {
+    return fallback;
+  }
+}
+
+// Formata números com separador de milhar brasileiro (100% à prova de falhas)
 export function formatNumber(num) {
-  if (num === null || num === undefined || isNaN(num)) return '0';
-  return Number(num).toLocaleString('pt-BR');
+  const n = safeNumber(num, 0);
+  try {
+    return n.toLocaleString('pt-BR');
+  } catch (_) {
+    return String(n);
+  }
 }
 
 

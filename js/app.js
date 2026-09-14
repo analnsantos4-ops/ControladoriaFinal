@@ -12,15 +12,53 @@ import { openNewProductView, saveNewProduct, handleProductImageFile, openProduct
 import { openConferenceForProduct, confirmConference, openCorridorAuditView, loadCorridorAuditProducts, exportCurrentCorridorWhatsApp, setBlitzConferenceContext, getBlitzConferenceContext } from './inventory.js';
 import { SETORS, CORRIDORS, formatDateBR, formatNumber, getDaysUntilExpiration, triggerHaptic } from './utils.js';
 import { openWhatsAppImportModal, formatMultipleProductsWhatsApp, openWhatsAppExportModal } from './whatsapp.js';
-import { initBlitzModule, getActiveBlitz, promptStartBlitz, handleBlitzBarcodeScanned, openBlitzDashboardView, renderBlitzDashboard, openBlitzHistoryView, updateBlitzTopBarIndicator, promptVerifiedProductLocationModal, openBlitzQuickRegisterModal, promptRequestedExpirationDate } from './blitz.js';
+import { initBlitzModule, getActiveBlitz, setActiveBlitz, promptStartBlitz, handleBlitzBarcodeScanned, openBlitzDashboardView, renderBlitzDashboard, openBlitzHistoryView, updateBlitzTopBarIndicator, promptVerifiedProductLocationModal, openBlitzQuickRegisterModal, promptRequestedExpirationDate } from './blitz.js';
 import { openDatabaseModal } from './database-modal.js';
 import { initPWAInstallFlow, promptInstallApp } from './pwa.js';
 
+// Escudo Global de Proteção contra Falhas e Erros Não Tratados
+const APP_ERROR_LOGS = [];
 if (typeof window !== 'undefined') {
+  window.addEventListener('error', (event) => {
+    try {
+      const errInfo = {
+        message: event?.message || 'Erro desconhecido',
+        filename: event?.filename || 'desconhecido',
+        lineno: event?.lineno || 0,
+        colno: event?.colno || 0,
+        time: new Date().toISOString()
+      };
+      APP_ERROR_LOGS.push(errInfo);
+      if (APP_ERROR_LOGS.length > 50) APP_ERROR_LOGS.shift();
+      console.warn('🛡️ [Escudo de Erro Capturado]:', errInfo);
+    } catch (_) {}
+  });
+
+  window.addEventListener('unhandledrejection', (event) => {
+    try {
+      const reason = event?.reason;
+      const msg = typeof reason === 'string' ? reason : (reason?.message || 'Promise rejeitada');
+      APP_ERROR_LOGS.push({
+        type: 'unhandledrejection',
+        message: msg,
+        time: new Date().toISOString()
+      });
+      if (APP_ERROR_LOGS.length > 50) APP_ERROR_LOGS.shift();
+      console.warn('🛡️ [Promise Rejeitada Capturada]:', msg);
+    } catch (_) {}
+    // Previne que a rejeição quebre o fluxo ou lance aviso agressivo no console
+    event.preventDefault();
+  });
+
   window.renderBlitzDashboard = openBlitzDashboardView;
   window.openBlitzDashboardView = openBlitzDashboardView;
   window.openDatabaseModal = openDatabaseModal;
   window.promptInstallApp = promptInstallApp;
+  window.getAppDiagnostics = () => ({
+    logs: [...APP_ERROR_LOGS],
+    version: '3.0.0',
+    time: new Date().toISOString()
+  });
 }
 
 let torchState = false;
@@ -240,6 +278,7 @@ function showUserAccountModal(user) {
 
   document.getElementById('btn-user-switch-account')?.addEventListener('click', () => {
     closeModal();
+    setActiveBlitz(null);
     logout();
     showLoginView();
     showToast('Sessão encerrada para troca de usuária', 'info', 1500);
@@ -249,6 +288,7 @@ function showUserAccountModal(user) {
 // Configura Tela de Dashboard
 async function showDashboardView() {
   updateAppUserInterface();
+  await initBlitzModule();
   await renderDashboard();
   updateBlitzTopBarIndicator();
   showView('view-dashboard');
@@ -312,7 +352,9 @@ function setupEventListeners() {
         if (loginError) loginError.classList.add('hidden');
         const currentUser = getCurrentUser();
         updateAppUserInterface(currentUser);
-        showDashboardView();
+        initBlitzModule(currentUser.id).then(() => {
+          showDashboardView();
+        });
         showToast(`✓ Bem-vinda, ${currentUser.name}!`, 'success', 2000);
       } else {
         if (loginError) {
@@ -345,6 +387,7 @@ function setupEventListeners() {
 
   // Logout
   document.getElementById('btn-header-logout')?.addEventListener('click', () => {
+    setActiveBlitz(null);
     logout();
     showLoginView();
     showToast('Sessão encerrada', 'info', 1500);
@@ -1359,30 +1402,34 @@ async function renderSearchResults(query, sector, corridor, typeFilter = current
 
       return `
         <div class="search-result-card" data-prodid="${p.id}">
-          <div class="search-thumb-col">
-            ${
-              p.image || p.photo_url
-                ? `<img src="${p.image || p.photo_url}" alt="" class="compact-prod-thumb" />`
-                : `<div class="photo-placeholder-mini">${isReg ? 'FOTO' : 'SEM FOTO'}</div>`
-            }
+          <div class="search-card-top-row">
+            <div class="search-card-header-left">
+              <h4 class="search-prod-name" title="${p.name}">${p.name}</h4>
+              <span class="search-barcode">🏷️ ${p.barcode}</span>
+            </div>
+            <div class="search-card-header-actions" onclick="event.stopPropagation()">
+              <button type="button" class="btn-search-view" data-prodid="${p.id}">Ver</button>
+              ${
+                !isReg
+                  ? `<button type="button" class="btn-complete-reg-action" data-prodid="${p.id}">✏️ Completar</button>`
+                  : ''
+              }
+            </div>
           </div>
-          <div class="search-info-col">
-            <h4 class="search-prod-name">${p.name}</h4>
-            <span class="search-barcode">${p.barcode}</span>
+          <div class="search-card-body-row">
+            <div class="search-thumb-col">
+              ${
+                p.image || p.photo_url
+                  ? `<img src="${p.image || p.photo_url}" alt="" class="compact-prod-thumb" referrerpolicy="no-referrer" />`
+                  : `<div class="photo-placeholder-mini">${isReg ? 'FOTO' : 'SEM FOTO'}</div>`
+              }
+            </div>
             <div class="search-loc-tags">
               <span class="loc-badge sector">${p.sector}</span>
               <span class="loc-badge corridor">${p.corridor || 'Sem corredor'}</span>
               ${typeBadgeHtml}
               ${stockTagHtml}
             </div>
-          </div>
-          <div class="search-action-col" style="display: flex; flex-direction: column; gap: 6px; align-items: flex-end;">
-            <button type="button" class="btn-search-view" data-prodid="${p.id}">Ver</button>
-            ${
-              !isReg
-                ? `<button type="button" class="btn-complete-reg-action" data-prodid="${p.id}" style="background: #10b981; color: #022c22; border: none; border-radius: 4px; padding: 4px 8px; font-size: 0.72rem; font-weight: 800; cursor: pointer; white-space: nowrap;">✏️ Completar</button>`
-                : ''
-            }
           </div>
         </div>
       `;
