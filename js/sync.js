@@ -42,6 +42,19 @@ ALTER TABLE public.products ADD COLUMN IF NOT EXISTS is_verified_only BOOLEAN DE
 ALTER TABLE public.products ADD COLUMN IF NOT EXISTS photo_url TEXT;
 ALTER TABLE public.products ADD COLUMN IF NOT EXISTS status TEXT DEFAULT 'PENDENTE';
 
+-- Unificação de duplicatas e índice único para 1 Código de Barras = 1 Único Produto
+DELETE FROM public.products p1
+USING public.products p2
+WHERE p1.barcode = p2.barcode
+  AND p1.id <> p2.id
+  AND (
+    (p1.image IS NULL AND p2.image IS NOT NULL)
+    OR (p1.name LIKE 'PRODUTO %' AND p2.name NOT LIKE 'PRODUTO %')
+    OR (COALESCE(p1.updated_at, p1.created_at) < COALESCE(p2.updated_at, p2.created_at))
+  );
+
+CREATE UNIQUE INDEX IF NOT EXISTS idx_products_barcode ON public.products (barcode);
+
 -- 2. Tabela de Validades (com suporte a Triagem)
 CREATE TABLE IF NOT EXISTS public.product_expirations (
   id TEXT PRIMARY KEY,
@@ -104,6 +117,10 @@ ALTER TABLE public.blitz_sessions ADD COLUMN IF NOT EXISTS user_name TEXT DEFAUL
 ALTER TABLE public.blitz_sessions ADD COLUMN IF NOT EXISTS start_date TEXT;
 ALTER TABLE public.blitz_sessions ADD COLUMN IF NOT EXISTS end_date TEXT;
 ALTER TABLE public.blitz_sessions ADD COLUMN IF NOT EXISTS period_label TEXT;
+ALTER TABLE public.blitz_sessions ADD COLUMN IF NOT EXISTS target_dates JSONB DEFAULT '[]'::jsonb;
+ALTER TABLE public.blitz_sessions ADD COLUMN IF NOT EXISTS finalized_at TIMESTAMPTZ;
+ALTER TABLE public.blitz_sessions ADD COLUMN IF NOT EXISTS finalized_by TEXT;
+ALTER TABLE public.blitz_sessions ADD COLUMN IF NOT EXISTS finalized_by_user_id TEXT;
 
 -- 5. Tabela de Itens e Conferências da Blitz Semanal
 CREATE TABLE IF NOT EXISTS public.blitz_items (
@@ -168,8 +185,14 @@ CREATE TABLE IF NOT EXISTS public.blitz (
   observacao TEXT,
   created_at TIMESTAMPTZ DEFAULT NOW(),
   updated_at TIMESTAMPTZ DEFAULT NOW(),
-  finalized_at TIMESTAMPTZ
+  finalized_at TIMESTAMPTZ,
+  finalized_by TEXT,
+  finalized_by_user_id TEXT
 );
+
+ALTER TABLE public.blitz ADD COLUMN IF NOT EXISTS finalized_at TIMESTAMPTZ;
+ALTER TABLE public.blitz ADD COLUMN IF NOT EXISTS finalized_by TEXT;
+ALTER TABLE public.blitz ADD COLUMN IF NOT EXISTS finalized_by_user_id TEXT;
 
 -- 7. Tabela de Itens da Blitz (Identificação por EAN + Data de Validade)
 CREATE TABLE IF NOT EXISTS public.blitz_itens (
@@ -943,13 +966,30 @@ export async function pullFromSupabase() {
           p.id = local.id;
         }
 
-        if (local && local.image && !p.image) {
-          p.image = local.image;
+        if (local) {
+          if (local.image && !p.image) p.image = local.image;
+          if (local.photo_url && !p.photo_url) p.photo_url = local.photo_url;
+          if (local.corridor && !p.corridor) p.corridor = local.corridor;
+          if (local.sector && local.sector !== 'GERAL' && (!p.sector || p.sector === 'GERAL')) p.sector = local.sector;
+          if (local.name && !local.name.startsWith('PRODUTO ') && (!p.name || p.name.startsWith('PRODUTO '))) p.name = local.name;
         }
+
+        if (cleanBarcode) {
+          localBarcodeMap.set(cleanBarcode, p);
+        }
+        if (p.id) {
+          localMap.set(p.id, p);
+        }
+
         // Verifica se houve mudança antes de gravar
         if (!local || local.updated_at !== p.updated_at || local.total_quantity !== p.total_quantity) {
           hasActualChanges = true;
-          prodStore.put(p);
+          try {
+            const putReq = prodStore.put(p);
+            putReq.onerror = (e) => {
+              if (e && typeof e.preventDefault === 'function') e.preventDefault();
+            };
+          } catch (_) {}
         }
       });
     }

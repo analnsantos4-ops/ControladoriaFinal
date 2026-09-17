@@ -3041,6 +3041,11 @@ export async function promptBlitzQuantityAndHistoryStep(product, targetDateISO, 
           <div style="font-size: 0.98rem; color: #f4f4f5; font-weight: 800; line-height: 1.4;">
             Quantidade na blitz anterior: <span style="font-size: 1.35rem; font-weight: 900; color: #38bdf8;">${previousQuantity}</span> unidades
           </div>
+          ${lastRecord.responsible ? `
+            <div style="font-size: 0.76rem; color: #cbd5e1; margin-top: 3px;">
+              👤 Conferido por: <strong style="color: #f1f5f9;">${lastRecord.responsible}</strong>
+            </div>
+          ` : ''}
           ${lastRecord.locations && lastRecord.locations.length > 0 ? `
             <div style="font-size: 0.75rem; color: #a1a1aa; margin-top: 4px;">
               Locais anteriores: ${lastRecord.locations.map(l => `${l.location}: ${l.quantity}`).join(' | ')}
