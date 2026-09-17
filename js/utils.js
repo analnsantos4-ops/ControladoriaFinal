@@ -584,6 +584,147 @@ export function triggerHaptic(duration = 80) {
   }
 }
 
+// ===================================================================
+// SISTEMA DE ÁUDIO & FEEDBACK SONORO (Web Audio API - 100% Offline)
+// Funciona instantaneamente em iPhone (iOS Safari) e Android
+// ===================================================================
+let globalAudioCtx = null;
+
+function getSafeAudioContext() {
+  if (typeof window === 'undefined') return null;
+  if (!globalAudioCtx) {
+    const AudioContextClass = window.AudioContext || window.webkitAudioContext;
+    if (AudioContextClass) {
+      globalAudioCtx = new AudioContextClass();
+    }
+  }
+  if (globalAudioCtx && globalAudioCtx.state === 'suspended') {
+    globalAudioCtx.resume().catch(() => {});
+  }
+  return globalAudioCtx;
+}
+
+// Desbloqueia o áudio no iOS Safari no primeiro toque ou clique
+export function initAudioUnlock() {
+  if (typeof window === 'undefined') return;
+  const unlock = () => {
+    const ctx = getSafeAudioContext();
+    if (ctx && ctx.state === 'suspended') {
+      ctx.resume().catch(() => {});
+    }
+    window.removeEventListener('touchstart', unlock, true);
+    window.removeEventListener('touchend', unlock, true);
+    window.removeEventListener('click', unlock, true);
+  };
+  window.addEventListener('touchstart', unlock, { capture: true, passive: true });
+  window.addEventListener('touchend', unlock, { capture: true, passive: true });
+  window.addEventListener('click', unlock, { capture: true, passive: true });
+}
+
+// Bip de Leitura do Scanner de Varejo (1250Hz limpo por 75ms)
+export function playBeepSuccess() {
+  try {
+    const ctx = getSafeAudioContext();
+    if (!ctx) return;
+    const osc = ctx.createOscillator();
+    const gain = ctx.createGain();
+    const now = ctx.currentTime;
+
+    osc.type = 'sine';
+    osc.frequency.setValueAtTime(1250, now);
+    osc.frequency.exponentialRampToValueAtTime(1450, now + 0.07);
+
+    gain.gain.setValueAtTime(0.25, now);
+    gain.gain.exponentialRampToValueAtTime(0.001, now + 0.075);
+
+    osc.connect(gain);
+    gain.connect(ctx.destination);
+
+    osc.start(now);
+    osc.stop(now + 0.08);
+  } catch (_) {}
+}
+
+// Bip de Alerta Crítico (Dois tons para vencimento próximo < 15d ou estoque zerado: 880Hz -> 520Hz)
+export function playBeepWarning() {
+  try {
+    const ctx = getSafeAudioContext();
+    if (!ctx) return;
+    const now = ctx.currentTime;
+
+    // Primeiro tom
+    const osc1 = ctx.createOscillator();
+    const gain1 = ctx.createGain();
+    osc1.type = 'triangle';
+    osc1.frequency.setValueAtTime(880, now);
+    gain1.gain.setValueAtTime(0.3, now);
+    gain1.gain.exponentialRampToValueAtTime(0.001, now + 0.08);
+    osc1.connect(gain1);
+    gain1.connect(ctx.destination);
+    osc1.start(now);
+    osc1.stop(now + 0.085);
+
+    // Segundo tom (mais grave)
+    const osc2 = ctx.createOscillator();
+    const gain2 = ctx.createGain();
+    osc2.type = 'triangle';
+    osc2.frequency.setValueAtTime(520, now + 0.095);
+    gain2.gain.setValueAtTime(0.32, now + 0.095);
+    gain2.gain.exponentialRampToValueAtTime(0.001, now + 0.22);
+    osc2.connect(gain2);
+    gain2.connect(ctx.destination);
+    osc2.start(now + 0.095);
+    osc2.stop(now + 0.225);
+  } catch (_) {}
+}
+
+// Bip de Ação / Confirmação de Salvamento (Tom suave ascendente 650Hz -> 980Hz)
+export function playBeepConfirm() {
+  try {
+    const ctx = getSafeAudioContext();
+    if (!ctx) return;
+    const osc = ctx.createOscillator();
+    const gain = ctx.createGain();
+    const now = ctx.currentTime;
+
+    osc.type = 'sine';
+    osc.frequency.setValueAtTime(650, now);
+    osc.frequency.exponentialRampToValueAtTime(980, now + 0.09);
+
+    gain.gain.setValueAtTime(0.2, now);
+    gain.gain.exponentialRampToValueAtTime(0.001, now + 0.095);
+
+    osc.connect(gain);
+    gain.connect(ctx.destination);
+
+    osc.start(now);
+    osc.stop(now + 0.1);
+  } catch (_) {}
+}
+
+// Clique tátil sutil para seleções rápidas
+export function playBeepClick() {
+  try {
+    const ctx = getSafeAudioContext();
+    if (!ctx) return;
+    const osc = ctx.createOscillator();
+    const gain = ctx.createGain();
+    const now = ctx.currentTime;
+
+    osc.type = 'sine';
+    osc.frequency.setValueAtTime(750, now);
+
+    gain.gain.setValueAtTime(0.12, now);
+    gain.gain.exponentialRampToValueAtTime(0.001, now + 0.03);
+
+    osc.connect(gain);
+    gain.connect(ctx.destination);
+
+    osc.start(now);
+    osc.stop(now + 0.035);
+  } catch (_) {}
+}
+
 // Converte e higieniza qualquer valor para número de forma segura (suporta vírgula ou ponto)
 export function safeNumber(value, fallback = 0) {
   if (value === null || value === undefined) return fallback;

@@ -28,7 +28,7 @@ import {
   getExpirationByProductAndDate
 } from './db.js';
 
-import { getCurrentUser, getUserById } from './auth.js';
+import { getCurrentUser, getUserById, normalizeUserId } from './auth.js';
 
 /**
  * 1. PARSER ROBUSTO DA LISTA DA BLITZ (Item 13 e 14 e Requisito 5)
@@ -662,8 +662,8 @@ export async function saveBlitzConference({
   const numQtd = Number(quantidade) || 0;
 
   const activeUser = typeof getCurrentUser === 'function' ? getCurrentUser() : null;
-  const effUserId = responsible_user_id || (usuario === 'Angélica' ? 'angelica' : (activeUser ? activeUser.id : 'ana_luiza'));
-  const effUserName = responsible_user_name || (usuario && usuario !== 'Ana Luiza' ? usuario : (effUserId === 'angelica' ? 'Angélica' : (activeUser ? activeUser.name : 'Ana Luiza')));
+  const effUserId = normalizeUserId(responsible_user_id || user_id || usuario || (activeUser ? activeUser.id : 'ana_luiza'));
+  const effUserName = responsible_user_name || user_name || (usuario && usuario !== 'Ana Luiza' && usuario !== 'Angélica' ? usuario : (effUserId === 'angelica' ? 'Angélica' : 'Ana Luiza'));
 
   // 1. Busca o item da Blitz
   let blitzItem = null;
@@ -836,8 +836,8 @@ export async function finalizeBlitzWithAutoZeros(blitzId, usuario = null) {
   const now = new Date().toISOString();
 
   const currentUser = getCurrentUser();
-  const effectiveUserId = (usuario && usuario.toLowerCase().includes('angelica')) ? 'angelica' : (currentUser?.id || 'ana_luiza');
-  const effectiveUserName = (usuario && usuario !== 'Ana Luiza') ? usuario : (effectiveUserId === 'angelica' ? 'Angélica' : (currentUser?.name || 'Ana Luiza'));
+  const effectiveUserId = normalizeUserId(usuario || currentUser?.id || 'ana_luiza');
+  const effectiveUserName = (usuario && usuario !== 'Ana Luiza' && usuario !== 'Angélica') ? usuario : (effectiveUserId === 'angelica' ? 'Angélica' : (currentUser?.name || 'Ana Luiza'));
 
   let blitz = await getRecordById('blitz', blitzId);
   let session = await getRecordById('blitz_sessions', blitzId);
@@ -1197,7 +1197,7 @@ export async function getWeeklyRoutineStatus(userId = null) {
   // Adiciona sessões que possam não estar na tabela nova
   allSessions.forEach(s => {
     if (!mergedBlitzes.some(b => b.id === s.id)) {
-      const respId = s.responsible_user_id || s.user_id || (String(s.user_name || '').toLowerCase().includes('angelica') ? 'angelica' : 'ana_luiza');
+      const respId = normalizeUserId(s);
       const respName = s.responsible_user_name || s.user_name || (respId === 'angelica' ? 'Angélica' : 'Ana Luiza');
       mergedBlitzes.push({
         id: s.id,
@@ -1226,7 +1226,7 @@ export async function getWeeklyRoutineStatus(userId = null) {
 
         // Se activeUserId estiver definido, isola por usuária para que a blitz de uma não conclua o ciclo da outra!
         if (activeUserId) {
-          const bUserId = b.responsible_user_id || b.user_id || (String(b.responsavel || b.usuario || '').toLowerCase().includes('angelica') ? 'angelica' : 'ana_luiza');
+          const bUserId = normalizeUserId(b);
           if (bUserId !== activeUserId) return false;
         }
         return true;
@@ -1516,8 +1516,8 @@ export async function recordAudit({
 }) {
   try {
     const active = typeof getCurrentUser === 'function' ? getCurrentUser() : null;
-    const effId = responsible_user_id || user_id || (usuario === 'Angélica' ? 'angelica' : (active ? active.id : 'ana_luiza'));
-    const effName = responsible_user_name || user_name || (usuario && usuario !== 'Ana Luiza' ? usuario : (effId === 'angelica' ? 'Angélica' : (active ? active.name : 'Ana Luiza')));
+    const effId = normalizeUserId(responsible_user_id || user_id || usuario || (active ? active.id : 'ana_luiza'));
+    const effName = responsible_user_name || user_name || (usuario && usuario !== 'Ana Luiza' && usuario !== 'Angélica' ? usuario : (effId === 'angelica' ? 'Angélica' : (active ? active.name : 'Ana Luiza')));
     const now = new Date().toISOString();
     const finalDesc = descricao || detalhes || `${acao} realizada por ${effName}`;
 

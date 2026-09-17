@@ -5,7 +5,7 @@ import { verifyMasterSecurityPin } from './auth.js';
 
 let activeViewId = 'view-login';
 
-export function showView(viewId) {
+export function showView(viewId, pushHistory = true) {
   const views = document.querySelectorAll('.app-view');
   views.forEach((v) => {
     v.classList.remove('active');
@@ -16,11 +16,45 @@ export function showView(viewId) {
     target.classList.add('active');
     activeViewId = viewId;
     window.scrollTo(0, 0);
+
+    // Gerencia o histórico do navegador para navegação nativa no Android e iPhone
+    if (pushHistory && typeof window !== 'undefined' && window.history) {
+      if (viewId === 'view-login' || viewId === 'view-dashboard') {
+        window.history.replaceState({ viewId }, '');
+      } else {
+        window.history.pushState({ viewId }, '');
+      }
+    }
   }
 }
 
 export function getActiveView() {
   return activeViewId;
+}
+
+// Inicializa a navegação com botão voltar nativo do Android e gesto de voltar do iPhone
+export function initHistoryNavigation() {
+  if (typeof window === 'undefined') return;
+  try {
+    window.history.replaceState({ viewId: activeViewId }, '');
+
+    window.addEventListener('popstate', (e) => {
+      // 1. Se houver algum modal aberto na tela, fecha o modal primeiro
+      const openModals = document.querySelectorAll('.custom-modal.open, .photo-modal.open, .database-modal-backdrop.open');
+      if (openModals.length > 0) {
+        openModals.forEach((m) => m.classList.remove('open'));
+        return;
+      }
+
+      // 2. Navega para a tela do histórico ou volta para o dashboard
+      const state = e.state;
+      if (state && state.viewId) {
+        showView(state.viewId, false);
+      } else {
+        showView('view-dashboard', false);
+      }
+    });
+  } catch (_) {}
 }
 
 // Sistema de Notificações Toast

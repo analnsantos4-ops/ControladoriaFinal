@@ -348,6 +348,14 @@ export async function openProductDetailView(productId) {
           ${formatNumber(totalActiveStock)} <span class="unit-label">UNIDADES NA LOJA</span>
         </div>
         ${
+          product.last_count_date
+            ? `<div style="margin-top: 6px; font-size: 0.78rem; color: #a1a1aa; display: flex; align-items: center; gap: 5px; flex-wrap: wrap;">
+                <span>🕒 Última conferência: <strong>${formatDateBR(product.last_count_date.split('T')[0])}</strong></span>
+                ${product.last_count_user ? `<span>por <strong style="color: ${product.last_count_user_id === 'angelica' ? '#34d399' : '#d8b4fe'};">👤 ${product.last_count_user}</strong></span>` : ''}
+              </div>`
+            : ''
+        }
+        ${
           totalTriagedStock > 0
             ? `<div style="margin-top: 6px; font-size: 0.8rem; font-weight: 700; color: #eab308; background: rgba(234, 179, 8, 0.1); padding: 4px 8px; border-radius: 6px; display: inline-flex; align-items: center; gap: 4px;">
                 📦 ${formatNumber(totalTriagedStock)} unidades retiradas para a triagem
@@ -433,9 +441,10 @@ export async function openProductDetailView(productId) {
                 const isBlitz = h.origin === 'blitz';
                 return `
                 <div class="history-item" style="${isBlitz ? 'border-left: 3px solid #3b82f6; padding-left: 8px;' : ''}">
-                  <div class="history-item-header" style="display: flex; justify-content: space-between; align-items: center;">
-                    <div style="display: flex; align-items: center; gap: 6px;">
+                  <div class="history-item-header" style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 4px;">
+                    <div style="display: flex; align-items: center; gap: 6px; flex-wrap: wrap;">
                       <span class="history-date">${dateBR}${timeStr ? ` às ${timeStr}` : ''}</span>
+                      ${h.userName ? `<span class="user-audit-badge" style="font-size: 0.68rem; font-weight: 800; padding: 1px 6px; border-radius: 4px; display: inline-flex; align-items: center; gap: 3px; ${h.userId === 'angelica' ? 'background: rgba(16, 185, 129, 0.18); color: #34d399; border: 1px solid rgba(16, 185, 129, 0.4);' : 'background: rgba(168, 85, 247, 0.18); color: #d8b4fe; border: 1px solid rgba(168, 85, 247, 0.4);'}">👤 ${h.userName}</span>` : ''}
                       ${isBlitz ? `<span style="background: rgba(59, 130, 246, 0.2); color: #60a5fa; font-size: 0.68rem; font-weight: 800; padding: 1px 6px; border-radius: 4px; border: 1px solid rgba(59, 130, 246, 0.4);">⚡ BLITZ SEMANAL</span>` : ''}
                     </div>
                     <span class="history-total" style="${h.result === 'NAO_TEM' ? 'color: #ef4444;' : ''}">
@@ -444,7 +453,7 @@ export async function openProductDetailView(productId) {
                   </div>
                   ${isBlitz && h.requestedDate ? `
                     <div style="font-size: 0.74rem; color: #fbbf24; font-weight: 700; margin-top: 2px;">
-                      Validade conferida: ${formatDateBR(h.requestedDate)} ${h.userName ? `• Conferente: ${h.userName}` : ''}
+                      Validade conferida: ${formatDateBR(h.requestedDate)}
                     </div>
                   ` : ''}
                   <div class="history-locations-tags">

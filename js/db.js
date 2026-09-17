@@ -1,9 +1,9 @@
 // Banco de Dados Local com IndexedDB para Controladoria - Ana Luiza & Angélica
 import { generateId, getTodayISO, getDaysUntilExpiration, LOCATIONS, formatDateBR, parseDateBRtoISO } from './utils.js';
-import { getCurrentUser } from './auth.js';
+import { getCurrentUser, normalizeUserId } from './auth.js';
 
 const DB_NAME = 'ControladoriaAnaLuizaDB';
-const DB_VERSION = 5;
+const DB_VERSION = 7;
 
 let dbInstance = null;
 let dbInitPromise = null;
@@ -35,136 +35,216 @@ export function initDB(force = false) {
 
       request.onupgradeneeded = (event) => {
         const db = event.target.result;
+        const tx = event.target.transaction;
 
-        // 1. Tabela products (barcode UNIQUE)
+        // 1. Tabela products (barcode index non-unique para evitar ConstraintError em sync/importações)
+        let productStore;
         if (!db.objectStoreNames.contains('products')) {
-          const productStore = db.createObjectStore('products', { keyPath: 'id' });
-          productStore.createIndex('barcode', 'barcode', { unique: true });
-          productStore.createIndex('sector', 'sector', { unique: false });
-          productStore.createIndex('corridor', 'corridor', { unique: false });
-          productStore.createIndex('name', 'name', { unique: false });
-          productStore.createIndex('updated_at', 'updated_at', { unique: false });
+          productStore = db.createObjectStore('products', { keyPath: 'id' });
+        } else {
+          productStore = tx.objectStore('products');
         }
+        try {
+          if (productStore.indexNames.contains('barcode')) {
+            const curIdx = productStore.index('barcode');
+            if (curIdx.unique) {
+              productStore.deleteIndex('barcode');
+              productStore.createIndex('barcode', 'barcode', { unique: false });
+            }
+          } else {
+            productStore.createIndex('barcode', 'barcode', { unique: false });
+          }
+          if (!productStore.indexNames.contains('sector')) productStore.createIndex('sector', 'sector', { unique: false });
+          if (!productStore.indexNames.contains('corridor')) productStore.createIndex('corridor', 'corridor', { unique: false });
+          if (!productStore.indexNames.contains('name')) productStore.createIndex('name', 'name', { unique: false });
+          if (!productStore.indexNames.contains('updated_at')) productStore.createIndex('updated_at', 'updated_at', { unique: false });
+        } catch (_) {}
 
-        // 2. Tabela product_expirations (product_id + expiration_date UNIQUE)
+        // 2. Tabela product_expirations (product_id + expiration_date)
+        let expStore;
         if (!db.objectStoreNames.contains('product_expirations')) {
-          const expStore = db.createObjectStore('product_expirations', { keyPath: 'id' });
-          expStore.createIndex('product_id', 'product_id', { unique: false });
-          expStore.createIndex('expiration_date', 'expiration_date', { unique: false });
-          expStore.createIndex('product_and_date', ['product_id', 'expiration_date'], { unique: true });
+          expStore = db.createObjectStore('product_expirations', { keyPath: 'id' });
+        } else {
+          expStore = tx.objectStore('product_expirations');
         }
+        try {
+          if (!expStore.indexNames.contains('product_id')) expStore.createIndex('product_id', 'product_id', { unique: false });
+          if (!expStore.indexNames.contains('expiration_date')) expStore.createIndex('expiration_date', 'expiration_date', { unique: false });
+          if (expStore.indexNames.contains('product_and_date')) {
+            const curIdx = expStore.index('product_and_date');
+            if (curIdx.unique) {
+              expStore.deleteIndex('product_and_date');
+              expStore.createIndex('product_and_date', ['product_id', 'expiration_date'], { unique: false });
+            }
+          } else {
+            expStore.createIndex('product_and_date', ['product_id', 'expiration_date'], { unique: false });
+          }
+        } catch (_) {}
 
         // 3. Tabela count_sessions
+        let sessionStore;
         if (!db.objectStoreNames.contains('count_sessions')) {
-          const sessionStore = db.createObjectStore('count_sessions', { keyPath: 'id' });
-          sessionStore.createIndex('date', 'date', { unique: false });
-          sessionStore.createIndex('status', 'status', { unique: false });
-          sessionStore.createIndex('sector_corridor', ['sector', 'corridor'], { unique: false });
+          sessionStore = db.createObjectStore('count_sessions', { keyPath: 'id' });
+        } else {
+          sessionStore = tx.objectStore('count_sessions');
         }
+        try {
+          if (!sessionStore.indexNames.contains('date')) sessionStore.createIndex('date', 'date', { unique: false });
+          if (!sessionStore.indexNames.contains('status')) sessionStore.createIndex('status', 'status', { unique: false });
+          if (!sessionStore.indexNames.contains('sector_corridor')) sessionStore.createIndex('sector_corridor', ['sector', 'corridor'], { unique: false });
+        } catch (_) {}
 
         // 4. Tabela inventory_counts
+        let countStore;
         if (!db.objectStoreNames.contains('inventory_counts')) {
-          const countStore = db.createObjectStore('inventory_counts', { keyPath: 'id' });
-          countStore.createIndex('product_id', 'product_id', { unique: false });
-          countStore.createIndex('expiration_id', 'expiration_id', { unique: false });
-          countStore.createIndex('count_session_id', 'count_session_id', { unique: false });
-          countStore.createIndex('counted_at', 'counted_at', { unique: false });
+          countStore = db.createObjectStore('inventory_counts', { keyPath: 'id' });
+        } else {
+          countStore = tx.objectStore('inventory_counts');
         }
+        try {
+          if (!countStore.indexNames.contains('product_id')) countStore.createIndex('product_id', 'product_id', { unique: false });
+          if (!countStore.indexNames.contains('expiration_id')) countStore.createIndex('expiration_id', 'expiration_id', { unique: false });
+          if (!countStore.indexNames.contains('count_session_id')) countStore.createIndex('count_session_id', 'count_session_id', { unique: false });
+          if (!countStore.indexNames.contains('counted_at')) countStore.createIndex('counted_at', 'counted_at', { unique: false });
+        } catch (_) {}
 
         // 5. Tabela sync_queue
+        let syncStore;
         if (!db.objectStoreNames.contains('sync_queue')) {
-          const syncStore = db.createObjectStore('sync_queue', { keyPath: 'id' });
-          syncStore.createIndex('synced', 'synced', { unique: false });
-          syncStore.createIndex('created_at', 'created_at', { unique: false });
+          syncStore = db.createObjectStore('sync_queue', { keyPath: 'id' });
+        } else {
+          syncStore = tx.objectStore('sync_queue');
         }
+        try {
+          if (!syncStore.indexNames.contains('synced')) syncStore.createIndex('synced', 'synced', { unique: false });
+          if (!syncStore.indexNames.contains('created_at')) syncStore.createIndex('created_at', 'created_at', { unique: false });
+        } catch (_) {}
 
         // 6. Tabela blitz_sessions (Sessões de Blitz Semanal)
+        let blitzStore;
         if (!db.objectStoreNames.contains('blitz_sessions')) {
-          const blitzStore = db.createObjectStore('blitz_sessions', { keyPath: 'id' });
-          blitzStore.createIndex('status', 'status', { unique: false });
-          blitzStore.createIndex('blitz_type', 'blitz_type', { unique: false });
-          blitzStore.createIndex('started_at', 'started_at', { unique: false });
+          blitzStore = db.createObjectStore('blitz_sessions', { keyPath: 'id' });
+        } else {
+          blitzStore = tx.objectStore('blitz_sessions');
         }
+        try {
+          if (!blitzStore.indexNames.contains('status')) blitzStore.createIndex('status', 'status', { unique: false });
+          if (!blitzStore.indexNames.contains('blitz_type')) blitzStore.createIndex('blitz_type', 'blitz_type', { unique: false });
+          if (!blitzStore.indexNames.contains('started_at')) blitzStore.createIndex('started_at', 'started_at', { unique: false });
+        } catch (_) {}
 
         // 7. Tabela blitz_items (Itens e conferências da Blitz)
+        let itemStore;
         if (!db.objectStoreNames.contains('blitz_items')) {
-          const itemStore = db.createObjectStore('blitz_items', { keyPath: 'id' });
-          itemStore.createIndex('blitz_session_id', 'blitz_session_id', { unique: false });
-          itemStore.createIndex('product_id', 'product_id', { unique: false });
-          itemStore.createIndex('session_product', ['blitz_session_id', 'product_id'], { unique: false });
-          itemStore.createIndex('checked_at', 'checked_at', { unique: false });
+          itemStore = db.createObjectStore('blitz_items', { keyPath: 'id' });
+        } else {
+          itemStore = tx.objectStore('blitz_items');
         }
+        try {
+          if (!itemStore.indexNames.contains('blitz_session_id')) itemStore.createIndex('blitz_session_id', 'blitz_session_id', { unique: false });
+          if (!itemStore.indexNames.contains('product_id')) itemStore.createIndex('product_id', 'product_id', { unique: false });
+          if (!itemStore.indexNames.contains('session_product')) itemStore.createIndex('session_product', ['blitz_session_id', 'product_id'], { unique: false });
+          if (!itemStore.indexNames.contains('checked_at')) itemStore.createIndex('checked_at', 'checked_at', { unique: false });
+        } catch (_) {}
 
         // 8. Tabela oficial blitz (Especificação Completa e Auditável)
+        let bStore;
         if (!db.objectStoreNames.contains('blitz')) {
-          const blitzStore = db.createObjectStore('blitz', { keyPath: 'id' });
-          blitzStore.createIndex('status', 'status', { unique: false });
-          blitzStore.createIndex('setor', 'setor', { unique: false });
-          blitzStore.createIndex('data_inicio', 'data_inicio', { unique: false });
-          blitzStore.createIndex('data_fim', 'data_fim', { unique: false });
-          blitzStore.createIndex('created_at', 'created_at', { unique: false });
+          bStore = db.createObjectStore('blitz', { keyPath: 'id' });
+        } else {
+          bStore = tx.objectStore('blitz');
         }
+        try {
+          if (!bStore.indexNames.contains('status')) bStore.createIndex('status', 'status', { unique: false });
+          if (!bStore.indexNames.contains('setor')) bStore.createIndex('setor', 'setor', { unique: false });
+          if (!bStore.indexNames.contains('data_inicio')) bStore.createIndex('data_inicio', 'data_inicio', { unique: false });
+          if (!bStore.indexNames.contains('data_fim')) bStore.createIndex('data_fim', 'data_fim', { unique: false });
+          if (!bStore.indexNames.contains('created_at')) bStore.createIndex('created_at', 'created_at', { unique: false });
+        } catch (_) {}
 
         // 9. Tabela oficial blitz_itens (EAN + DATA_DE_VALIDADE)
+        let bItensStore;
         if (!db.objectStoreNames.contains('blitz_itens')) {
-          const bItensStore = db.createObjectStore('blitz_itens', { keyPath: 'id' });
-          bItensStore.createIndex('blitz_id', 'blitz_id', { unique: false });
-          bItensStore.createIndex('ean', 'ean', { unique: false });
-          bItensStore.createIndex('produto_id', 'produto_id', { unique: false });
-          bItensStore.createIndex('status', 'status', { unique: false });
-          bItensStore.createIndex('blitz_ean_data', ['blitz_id', 'ean', 'data_validade'], { unique: true });
+          bItensStore = db.createObjectStore('blitz_itens', { keyPath: 'id' });
+        } else {
+          bItensStore = tx.objectStore('blitz_itens');
         }
+        try {
+          if (!bItensStore.indexNames.contains('blitz_id')) bItensStore.createIndex('blitz_id', 'blitz_id', { unique: false });
+          if (!bItensStore.indexNames.contains('ean')) bItensStore.createIndex('ean', 'ean', { unique: false });
+          if (!bItensStore.indexNames.contains('produto_id')) bItensStore.createIndex('produto_id', 'produto_id', { unique: false });
+          if (!bItensStore.indexNames.contains('status')) bItensStore.createIndex('status', 'status', { unique: false });
+          if (bItensStore.indexNames.contains('blitz_ean_data')) {
+            const curIdx = bItensStore.index('blitz_ean_data');
+            if (curIdx.unique) {
+              bItensStore.deleteIndex('blitz_ean_data');
+              bItensStore.createIndex('blitz_ean_data', ['blitz_id', 'ean', 'data_validade'], { unique: false });
+            }
+          } else {
+            bItensStore.createIndex('blitz_ean_data', ['blitz_id', 'ean', 'data_validade'], { unique: false });
+          }
+        } catch (_) {}
 
         // 10. Tabela oficial conferencias_blitz (Registro de cada conferência física)
+        let confStore;
         if (!db.objectStoreNames.contains('conferencias_blitz')) {
-          const confStore = db.createObjectStore('conferencias_blitz', { keyPath: 'id' });
-          confStore.createIndex('blitz_id', 'blitz_id', { unique: false });
-          confStore.createIndex('blitz_item_id', 'blitz_item_id', { unique: false });
-          confStore.createIndex('produto_id', 'produto_id', { unique: false });
-          confStore.createIndex('ean', 'ean', { unique: false });
-          confStore.createIndex('blitz_produto', ['blitz_id', 'produto_id'], { unique: false });
-          confStore.createIndex('blitz_ean', ['blitz_id', 'ean'], { unique: false });
-          confStore.createIndex('conferido_em', 'conferido_em', { unique: false });
-          confStore.createIndex('sync_status', 'sync_status', { unique: false });
-          confStore.createIndex('tipo_conferencia', 'tipo_conferencia', { unique: false });
+          confStore = db.createObjectStore('conferencias_blitz', { keyPath: 'id' });
         } else {
-          try {
-            const confStore = event.target.transaction.objectStore('conferencias_blitz');
-            if (confStore) {
-              if (!confStore.indexNames.contains('produto_id')) confStore.createIndex('produto_id', 'produto_id', { unique: false });
-              if (!confStore.indexNames.contains('blitz_produto')) confStore.createIndex('blitz_produto', ['blitz_id', 'produto_id'], { unique: false });
-              if (!confStore.indexNames.contains('blitz_ean')) confStore.createIndex('blitz_ean', ['blitz_id', 'ean'], { unique: false });
-              if (!confStore.indexNames.contains('sync_status')) confStore.createIndex('sync_status', 'sync_status', { unique: false });
-            }
-          } catch (_) {}
+          confStore = tx.objectStore('conferencias_blitz');
         }
+        try {
+          if (!confStore.indexNames.contains('blitz_id')) confStore.createIndex('blitz_id', 'blitz_id', { unique: false });
+          if (!confStore.indexNames.contains('blitz_item_id')) confStore.createIndex('blitz_item_id', 'blitz_item_id', { unique: false });
+          if (!confStore.indexNames.contains('produto_id')) confStore.createIndex('produto_id', 'produto_id', { unique: false });
+          if (!confStore.indexNames.contains('ean')) confStore.createIndex('ean', 'ean', { unique: false });
+          if (!confStore.indexNames.contains('blitz_produto')) confStore.createIndex('blitz_produto', ['blitz_id', 'produto_id'], { unique: false });
+          if (!confStore.indexNames.contains('blitz_ean')) confStore.createIndex('blitz_ean', ['blitz_id', 'ean'], { unique: false });
+          if (!confStore.indexNames.contains('conferido_em')) confStore.createIndex('conferido_em', 'conferido_em', { unique: false });
+          if (!confStore.indexNames.contains('sync_status')) confStore.createIndex('sync_status', 'sync_status', { unique: false });
+          if (!confStore.indexNames.contains('tipo_conferencia')) confStore.createIndex('tipo_conferencia', 'tipo_conferencia', { unique: false });
+        } catch (_) {}
 
         // 11. Tabela oficial historico_alteracoes (Auditoria Completa e Permanente)
+        let histStore;
         if (!db.objectStoreNames.contains('historico_alteracoes')) {
-          const histStore = db.createObjectStore('historico_alteracoes', { keyPath: 'id' });
-          histStore.createIndex('registro_id', 'registro_id', { unique: false });
-          histStore.createIndex('tabela', 'tabela', { unique: false });
-          histStore.createIndex('created_at', 'created_at', { unique: false });
-          histStore.createIndex('usuario', 'usuario', { unique: false });
+          histStore = db.createObjectStore('historico_alteracoes', { keyPath: 'id' });
+        } else {
+          histStore = tx.objectStore('historico_alteracoes');
         }
+        try {
+          if (!histStore.indexNames.contains('registro_id')) histStore.createIndex('registro_id', 'registro_id', { unique: false });
+          if (!histStore.indexNames.contains('tabela')) histStore.createIndex('tabela', 'tabela', { unique: false });
+          if (!histStore.indexNames.contains('created_at')) histStore.createIndex('created_at', 'created_at', { unique: false });
+          if (!histStore.indexNames.contains('usuario')) histStore.createIndex('usuario', 'usuario', { unique: false });
+        } catch (_) {}
 
         // 12. Tabela fotos_produtos (Fotos de cadastro e conferência)
+        let fotoStore;
         if (!db.objectStoreNames.contains('fotos_produtos')) {
-          const fotoStore = db.createObjectStore('fotos_produtos', { keyPath: 'id' });
-          fotoStore.createIndex('produto_id', 'produto_id', { unique: false });
-          fotoStore.createIndex('blitz_id', 'blitz_id', { unique: false });
-          fotoStore.createIndex('created_at', 'created_at', { unique: false });
+          fotoStore = db.createObjectStore('fotos_produtos', { keyPath: 'id' });
+        } else {
+          fotoStore = tx.objectStore('fotos_produtos');
         }
+        try {
+          if (!fotoStore.indexNames.contains('produto_id')) fotoStore.createIndex('produto_id', 'produto_id', { unique: false });
+          if (!fotoStore.indexNames.contains('blitz_id')) fotoStore.createIndex('blitz_id', 'blitz_id', { unique: false });
+          if (!fotoStore.indexNames.contains('created_at')) fotoStore.createIndex('created_at', 'created_at', { unique: false });
+        } catch (_) {}
 
         // 13. Tabela oficial auditoria_blitz (Auditoria multiusuária detalhada)
+        let audStore;
         if (!db.objectStoreNames.contains('auditoria_blitz')) {
-          const audStore = db.createObjectStore('auditoria_blitz', { keyPath: 'id' });
-          audStore.createIndex('blitz_id', 'blitz_id', { unique: false });
-          audStore.createIndex('tabela', 'tabela', { unique: false });
-          audStore.createIndex('acao', 'acao', { unique: false });
-          audStore.createIndex('responsible_user_id', 'responsible_user_id', { unique: false });
-          audStore.createIndex('created_at', 'created_at', { unique: false });
+          audStore = db.createObjectStore('auditoria_blitz', { keyPath: 'id' });
+        } else {
+          audStore = tx.objectStore('auditoria_blitz');
         }
+        try {
+          if (!audStore.indexNames.contains('blitz_id')) audStore.createIndex('blitz_id', 'blitz_id', { unique: false });
+          if (!audStore.indexNames.contains('tabela')) audStore.createIndex('tabela', 'tabela', { unique: false });
+          if (!audStore.indexNames.contains('acao')) audStore.createIndex('acao', 'acao', { unique: false });
+          if (!audStore.indexNames.contains('responsible_user_id')) audStore.createIndex('responsible_user_id', 'responsible_user_id', { unique: false });
+          if (!audStore.indexNames.contains('created_at')) audStore.createIndex('created_at', 'created_at', { unique: false });
+        } catch (_) {}
       };
 
       request.onsuccess = (event) => {
@@ -188,17 +268,29 @@ export function initDB(force = false) {
         };
 
         db.onerror = (e) => {
-          console.warn('Aviso de erro no IndexedDB:', e);
+          if (e && typeof e.preventDefault === 'function') {
+            e.preventDefault();
+          }
+          const target = e.target || {};
+          const err = target.error || e.error;
+          const storeName = target.source?.name || (target.transaction?.objectStoreNames ? Array.from(target.transaction.objectStoreNames).join(', ') : '');
+          if (err && err.name !== 'AbortError') {
+            console.warn(`[IndexedDB] Aviso${storeName ? ' na tabela ' + storeName : ''}:`, err.name || 'Erro', err.message || '');
+          }
         };
 
         resolve(db);
+        // Limpeza e saneamento assíncrono em segundo plano para unificar eventuais duplicatas anteriores
+        setTimeout(() => {
+          cleanupDuplicateProducts().catch(() => {});
+        }, 150);
       };
 
       request.onerror = (event) => {
-        console.error('Erro ao abrir IndexedDB:', event.target.error);
+        console.error('Erro ao abrir IndexedDB:', event.target?.error?.message || event.target?.error);
         dbInstance = null;
         dbInitPromise = null;
-        reject(event.target.error);
+        reject(event.target?.error);
       };
     } catch (err) {
       console.error('Exceção ao inicializar IndexedDB:', err);
@@ -216,8 +308,15 @@ export function initDB(force = false) {
  */
 export async function getSafeTransaction(storeNames, mode = 'readonly') {
   let db = await initDB();
+  const names = Array.isArray(storeNames) ? storeNames : [storeNames];
+  const availableStores = names.filter((n) => db.objectStoreNames.contains(n));
+  if (availableStores.length === 0) {
+    throw new Error(`Nenhuma store válida encontrada no IndexedDB: ${names.join(', ')}`);
+  }
+  const target = Array.isArray(storeNames) ? availableStores : availableStores[0];
+
   try {
-    const tx = db.transaction(storeNames, mode);
+    const tx = db.transaction(target, mode);
     return { db, tx };
   } catch (err) {
     const errMsg = (err && err.message) ? String(err.message).toLowerCase() : '';
@@ -232,7 +331,9 @@ export async function getSafeTransaction(storeNames, mode = 'readonly') {
       dbInstance = null;
       dbInitPromise = null;
       db = await initDB(true);
-      const tx = db.transaction(storeNames, mode);
+      const reAvailable = names.filter((n) => db.objectStoreNames.contains(n));
+      const reTarget = Array.isArray(storeNames) ? reAvailable : reAvailable[0];
+      const tx = db.transaction(reTarget, mode);
       return { db, tx };
     }
     throw err;
@@ -242,18 +343,18 @@ export async function getSafeTransaction(storeNames, mode = 'readonly') {
 // Leitura atômica de todos os itens de uma store
 export async function getAllFromStore(storeName) {
   try {
-    const { tx } = await getSafeTransaction(storeName, 'readonly');
+    const { tx, db } = await getSafeTransaction(storeName, 'readonly');
+    if (!db.objectStoreNames.contains(storeName)) return [];
     const store = tx.objectStore(storeName);
     return new Promise((resolve) => {
       const req = store.getAll();
       req.onsuccess = () => resolve(req.result || []);
       req.onerror = (e) => {
-        console.warn(`Erro no getAll de ${storeName}:`, e.target?.error || e);
+        if (e && typeof e.preventDefault === 'function') e.preventDefault();
         resolve([]);
       };
     });
   } catch (err) {
-    console.warn(`Falha de transação em ${storeName}:`, err);
     return [];
   }
 }
@@ -370,20 +471,29 @@ export async function searchProducts(searchTerm = '', sectorFilter = '', corrido
 
 // Salva ou atualiza produto garantindo código de barras ÚNICO e mantendo quantidades
 export async function saveProduct(product) {
-  if (!product.barcode) {
+  if (!product || !product.barcode) {
     throw new Error('Código de barras é obrigatório.');
   }
 
-  // Verifica se já existe outro produto com o mesmo barcode
-  const existingWithBarcode = await getProductByBarcode(product.barcode);
-  if (existingWithBarcode && existingWithBarcode.id !== product.id) {
-    const error = new Error('Este código de barras já pertence a outro produto.');
-    error.existingProduct = existingWithBarcode;
-    throw error;
+  const cleanBarcode = String(product.barcode).trim();
+  if (!cleanBarcode) {
+    throw new Error('Código de barras é obrigatório.');
+  }
+
+  // Verifica se já existe produto cadastrado com o mesmo barcode
+  const existingWithBarcode = await getProductByBarcode(cleanBarcode);
+  let effectiveId = product.id;
+
+  if (existingWithBarcode) {
+    // Se o produto que estamos salvando não tem ID ou tinha ID temporário diferente,
+    // adota o ID do produto já existente no banco para garantir consistência e evitar registros duplicados
+    effectiveId = existingWithBarcode.id;
+  } else if (!effectiveId) {
+    effectiveId = generateId();
   }
 
   const now = new Date().toISOString();
-  const existing = product.id ? await getProductById(product.id) : null;
+  const existing = existingWithBarcode || (effectiveId ? await getProductById(effectiveId) : null);
 
   const depositQty = Number(product.deposit_qty !== undefined ? product.deposit_qty : (existing?.deposit_qty || 0));
   const fridgeQty = Number(product.fridge_qty !== undefined ? product.fridge_qty : (existing?.fridge_qty || 0));
@@ -414,9 +524,9 @@ export async function saveProduct(product) {
 
   const photoVal = product.image || product.photo_url || existing?.image || existing?.photo_url || '';
   const productData = {
-    id: product.id || generateId(),
-    barcode: product.barcode.trim(),
-    name: product.name ? product.name.trim() : '',
+    id: effectiveId,
+    barcode: cleanBarcode,
+    name: product.name ? product.name.trim() : (existing?.name || ''),
     image: photoVal,
     photo_url: photoVal,
     sector: product.sector || existing?.sector || 'MERCEARIA',
@@ -912,8 +1022,11 @@ export async function saveProductExpiration(productIdOrObj, expirationDateArg = 
   }
 
   // Normaliza formato da data se vier como YYYY-MM-DDTHH... ou DD/MM/YYYY
+  expirationDate = String(expirationDate).trim();
   if (expirationDate.includes('T')) {
     expirationDate = expirationDate.split('T')[0];
+  } else if (expirationDate.includes('/')) {
+    expirationDate = parseDateBRtoISO(expirationDate) || expirationDate;
   }
 
   const existing = await getExpirationByProductAndDate(productId, expirationDate);
@@ -932,31 +1045,35 @@ export async function saveProductExpiration(productIdOrObj, expirationDateArg = 
 
   try {
     const { tx } = await getSafeTransaction(['product_expirations', 'sync_queue'], 'readwrite');
-    return new Promise((resolve, reject) => {
+    return new Promise((resolve) => {
       try {
         const expStore = tx.objectStore('product_expirations');
         const syncStore = tx.objectStore('sync_queue');
 
         expStore.put(expData);
 
-        syncStore.add({
-          id: generateId(),
-          operation: 'INSERT',
-          table_name: 'product_expirations',
-          record_id: expData.id,
-          payload: expData,
-          created_at: now,
-          synced: 0
-        });
+        try {
+          syncStore.add({
+            id: generateId(),
+            operation: 'INSERT',
+            table_name: 'product_expirations',
+            record_id: expData.id,
+            payload: expData,
+            created_at: now,
+            synced: 0
+          });
+        } catch (_) {}
 
         tx.oncomplete = () => resolve({ isNew: true, expiration: expData });
-        tx.onerror = (e) => reject(e.target?.error || e);
+        tx.onerror = () => resolve({ isNew: false, expiration: expData });
       } catch (e) {
-        reject(e);
+        console.warn('Aviso ao salvar validade do produto:', e);
+        resolve({ isNew: false, expiration: expData });
       }
     });
   } catch (err) {
-    throw err;
+    console.warn('Erro na transação de validade:', err);
+    return { isNew: false, expiration: expData };
   }
 }
 
@@ -1027,6 +1144,9 @@ export async function getLatestCountsForExpiration(expirationId) {
 // Salva uma nova rodada de conferência para um produto e validade, atualizando também a tabela de produtos
 export async function saveInventoryCounts(productId, expirationId, locationCounts, sessionId = null) {
   const now = new Date().toISOString();
+  const currentUser = getCurrentUser();
+  const userId = currentUser?.id || 'ana_luiza';
+  const userName = currentUser?.name || 'Ana Luiza';
 
   const countRecords = [];
   let totalCount = 0;
@@ -1055,6 +1175,10 @@ export async function saveInventoryCounts(productId, expirationId, locationCount
       count_session_id: sessionId || null,
       location_type: locationType,
       quantity,
+      user_id: userId,
+      user_name: userName,
+      responsible_user_id: userId,
+      responsible_user_name: userName,
       counted_at: now,
       created_at: now,
       updated_at: now
@@ -1084,6 +1208,8 @@ export async function saveInventoryCounts(productId, expirationId, locationCount
             prod.cart_qty = locQtyMap['CARRINHO'] || 0;
             prod.checkout_qty = locQtyMap['FRENTE DE LOJA'] || 0;
             prod.last_count_date = now;
+            prod.last_count_user = userName;
+            prod.last_count_user_id = userId;
             prod.updated_at = now;
 
             prodStore.put(prod);
@@ -1132,6 +1258,32 @@ export async function saveInventoryCounts(productId, expirationId, locationCount
 export async function saveCompleteProductWithCounts({ product, expirationDate, locationCounts }) {
   const now = new Date().toISOString();
 
+  const cleanBarcode = String(product?.barcode || '').trim();
+  if (!cleanBarcode) {
+    throw new Error('Código de barras é obrigatório.');
+  }
+
+  // Busca se já existe produto cadastrado com esse código de barras para não duplicar ID
+  let existing = product.id ? await getProductById(product.id) : null;
+  if (!existing) {
+    existing = await getProductByBarcode(cleanBarcode);
+  }
+  const productId = existing ? existing.id : (product.id || generateId());
+
+  // Normaliza data de validade
+  let finalExpDate = expirationDate ? String(expirationDate).trim() : '';
+  if (!finalExpDate) {
+    finalExpDate = getTodayISO();
+  } else if (finalExpDate.includes('T')) {
+    finalExpDate = finalExpDate.split('T')[0];
+  } else if (finalExpDate.includes('/')) {
+    finalExpDate = parseDateBRtoISO(finalExpDate);
+  }
+
+  // Busca se já existe registro desta validade para não duplicar
+  const existingExp = await getExpirationByProductAndDate(productId, finalExpDate);
+  const expirationId = existingExp ? existingExp.id : generateId();
+
   let deposit = Number(locationCounts['DEPÓSITO'] || 0);
   let fridge = Number(locationCounts['GELADEIRA'] || 0);
   let shelf = Number(locationCounts['PRATELEIRA'] || 0);
@@ -1142,16 +1294,14 @@ export async function saveCompleteProductWithCounts({ product, expirationDate, l
   let checkout = Number(locationCounts['FRENTE DE LOJA'] || 0);
   let totalQty = deposit + fridge + shelf + gondola + ear + island + cart + checkout;
 
-  const productId = product.id || generateId();
-  const expirationId = generateId();
-
   const productData = {
     id: productId,
-    barcode: product.barcode.trim(),
-    name: product.name ? product.name.trim().toUpperCase() : '',
-    image: product.image || '',
-    sector: product.sector || 'MERCEARIA',
-    corridor: product.corridor || 'Corredor 1',
+    barcode: cleanBarcode,
+    name: product.name ? product.name.trim().toUpperCase() : (existing?.name || ''),
+    image: product.image || existing?.image || '',
+    photo_url: product.image || product.photo_url || existing?.photo_url || '',
+    sector: product.sector || existing?.sector || 'MERCEARIA',
+    corridor: product.corridor || existing?.corridor || 'Corredor 1',
     total_quantity: totalQty,
     deposit_qty: deposit,
     fridge_qty: fridge,
@@ -1161,17 +1311,17 @@ export async function saveCompleteProductWithCounts({ product, expirationDate, l
     island_qty: island,
     cart_qty: cart,
     checkout_qty: checkout,
-    last_expiration_date: expirationDate || null,
+    last_expiration_date: finalExpDate || null,
     last_count_date: now,
-    created_at: product.created_at || now,
+    created_at: product.created_at || existing?.created_at || now,
     updated_at: now
   };
 
   const expirationData = {
     id: expirationId,
     product_id: productId,
-    expiration_date: expirationDate || getTodayISO(),
-    created_at: now,
+    expiration_date: finalExpDate,
+    created_at: existingExp?.created_at || now,
     updated_at: now
   };
 
@@ -1272,12 +1422,16 @@ export async function getHistoryForProduct(productId, barcode = null) {
 
       counts.forEach((item) => {
         const dateKey = item.counted_at ? item.counted_at.substring(0, 16) : (item.created_at ? item.created_at.substring(0, 16) : 'data');
+        const itemUserName = item.user_name || item.responsible_user_name || (item.user_id === 'angelica' || item.responsible_user_id === 'angelica' ? 'Angélica' : 'Ana Luiza');
+        const itemUserId = item.user_id || (itemUserName === 'Angélica' ? 'angelica' : 'ana_luiza');
         if (!historyMap[dateKey]) {
           historyMap[dateKey] = {
             date: item.counted_at || item.created_at,
             locations: {},
             total: 0,
             expirationId: item.expiration_id,
+            userName: itemUserName,
+            userId: itemUserId,
             origin: 'inventario'
           };
         }
@@ -1347,6 +1501,130 @@ export async function getLocationHistoryForProduct(productId) {
   });
 
   return locationBreakdown;
+}
+
+// Retorna métricas de conferência do dia com cruzamento entre Ana Luiza e Angélica
+export async function getCollaborationMetricsToday() {
+  try {
+    const today = getTodayISO();
+    const [counts, blitzItems] = await Promise.all([
+      getAllFromStore('inventory_counts'),
+      getAllFromStore('blitz_items')
+    ]);
+
+    let anaCount = 0;
+    let angelicaCount = 0;
+
+    const countedKeysAna = new Set();
+    const countedKeysAng = new Set();
+
+    (counts || []).forEach((c) => {
+      const d = c.counted_at || c.created_at;
+      if (d && d.startsWith(today)) {
+        const isAng = (c.user_id === 'angelica' || c.responsible_user_id === 'angelica' || String(c.user_name || '').toLowerCase().includes('angelica'));
+        const key = `${c.product_id}_${c.expiration_id || 'exp'}`;
+        if (isAng) {
+          countedKeysAng.add(key);
+        } else {
+          countedKeysAna.add(key);
+        }
+      }
+    });
+
+    anaCount = countedKeysAna.size;
+    angelicaCount = countedKeysAng.size;
+
+    (blitzItems || []).forEach((b) => {
+      const d = b.checked_at || b.created_at;
+      if (d && d.startsWith(today)) {
+        const isAng = (b.user_id === 'angelica' || b.responsible_user_id === 'angelica' || String(b.user_name || '').toLowerCase().includes('angelica'));
+        if (isAng) angelicaCount++;
+        else anaCount++;
+      }
+    });
+
+    return {
+      today,
+      anaCount,
+      angelicaCount,
+      totalToday: anaCount + angelicaCount
+    };
+  } catch (err) {
+    return { today: getTodayISO(), anaCount: 0, angelicaCount: 0, totalToday: 0 };
+  }
+}
+
+// Retorna as atividades compartilhadas mais recentes realizadas na loja por Ana Luiza ou Angélica
+export async function getRecentSharedActivity(limit = 4) {
+  try {
+    const [counts, blitzItems, products] = await Promise.all([
+      getAllFromStore('inventory_counts'),
+      getAllFromStore('blitz_items'),
+      getAllProducts()
+    ]);
+
+    const prodMap = new Map();
+    (products || []).forEach((p) => prodMap.set(p.id, p));
+
+    const activities = [];
+
+    // Agrupa inventory_counts por conferência (timestamp e produto)
+    const groupedCounts = new Map();
+    (counts || []).forEach((c) => {
+      const d = c.counted_at || c.created_at;
+      if (!d) return;
+      const key = `${c.product_id}_${d.substring(0, 16)}`;
+      if (!groupedCounts.has(key)) {
+        groupedCounts.set(key, {
+          id: c.id,
+          date: d,
+          productId: c.product_id,
+          userId: c.user_id || 'ana_luiza',
+          userName: c.user_name || (c.user_id === 'angelica' ? 'Angélica' : 'Ana Luiza'),
+          total: 0
+        });
+      }
+      groupedCounts.get(key).total += (Number(c.quantity) || 0);
+    });
+
+    groupedCounts.forEach((item) => {
+      const prod = prodMap.get(item.productId);
+      activities.push({
+        id: item.id,
+        date: item.date,
+        userName: item.userName,
+        userId: item.userId,
+        productName: prod?.name || 'Produto',
+        sector: prod?.sector || 'Loja',
+        corridor: prod?.corridor || '',
+        description: `conferiu ${item.total} un`,
+        type: 'conference'
+      });
+    });
+
+    (blitzItems || []).forEach((b) => {
+      const d = b.checked_at || b.created_at;
+      if (!d) return;
+      const isAng = (b.user_id === 'angelica' || b.responsible_user_id === 'angelica' || String(b.user_name || '').toLowerCase().includes('angelica'));
+      const prod = prodMap.get(b.product_id);
+      activities.push({
+        id: b.id,
+        date: d,
+        userName: b.user_name || (isAng ? 'Angélica' : 'Ana Luiza'),
+        userId: isAng ? 'angelica' : 'ana_luiza',
+        productName: prod?.name || b.barcode || 'Item da Blitz',
+        sector: prod?.sector || 'Blitz',
+        corridor: prod?.corridor || '',
+        description: `marcou na blitz como [${b.result || 'OK'}]`,
+        type: 'blitz'
+      });
+    });
+
+    activities.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
+    return activities.slice(0, limit);
+  } catch (err) {
+    return [];
+  }
 }
 
 // ----------------------------------------------------
@@ -2154,7 +2432,7 @@ export async function createBlitzSession({ blitz_type, sector, user_name, user_i
         getAllReq.onsuccess = () => {
           const allSessions = getAllReq.result || [];
           allSessions.forEach((s) => {
-            const sUserId = s.responsible_user_id || s.user_id || (s.user_name?.toLowerCase().includes('angelica') ? 'angelica' : 'ana_luiza');
+            const sUserId = normalizeUserId(s);
             if (s.status === 'em_andamento' && sUserId === effectiveUserId) {
               s.status = 'finalizada';
               s.finished_at = now;
@@ -2235,8 +2513,7 @@ export async function getActiveBlitzSession(targetUserId = null) {
         const effectiveUserId = targetUserId || getCurrentUser()?.id;
         if (effectiveUserId) {
           const userFiltered = list.filter(s => {
-            const sUserId = s.responsible_user_id || s.user_id || (s.user_name?.toLowerCase().includes('angelica') ? 'angelica' : 'ana_luiza');
-            return sUserId === effectiveUserId;
+            return normalizeUserId(s) === effectiveUserId;
           });
           if (userFiltered.length > 0) {
             userFiltered.sort((a, b) => new Date(b.started_at || 0) - new Date(a.started_at || 0));
@@ -2368,7 +2645,7 @@ export async function finishBlitzSession(sessionId = null, userId = null, userNa
         getAllReq.onsuccess = () => {
           const allSessions = getAllReq.result || [];
           allSessions.forEach((session) => {
-            const sUserId = session.responsible_user_id || session.user_id || (session.user_name?.toLowerCase().includes('angelica') ? 'angelica' : 'ana_luiza');
+            const sUserId = normalizeUserId(session);
             const matchesTarget = sessionId ? session.id === sessionId : (session.status === 'em_andamento' && sUserId === currentUserId);
 
             if (matchesTarget && session.status === 'em_andamento') {
@@ -2445,7 +2722,7 @@ export async function cancelBlitzSession(sessionId = null, userId = null) {
         getAllReq.onsuccess = () => {
           const allSessions = getAllReq.result || [];
           allSessions.forEach((session) => {
-            const sUserId = session.responsible_user_id || session.user_id || (session.user_name?.toLowerCase().includes('angelica') ? 'angelica' : 'ana_luiza');
+            const sUserId = normalizeUserId(session);
             const matchesTarget = sessionId ? session.id === sessionId : (session.status === 'em_andamento' && sUserId === currentUserId);
 
             if (matchesTarget && session.status === 'em_andamento') {
@@ -3057,14 +3334,22 @@ export async function saveBlitzConferenceRecord({
     const bItensReq = bItensStore.getAll();
     bItensReq.onsuccess = () => {
       const allBItens = bItensReq.result || [];
-      const targetBItem = allBItens.find(it => 
-        it.blitz_id === sessionId &&
-        String(it.ean || '').trim() === cleanBar &&
-        String(it.data_validade || '').split('T')[0] === cleanReqDate
-      );
+      const targetBItem = allBItens.find(it => {
+        if (it.blitz_id !== sessionId) return false;
+        const itBarcode = String(it.ean || it.barcode || '').trim();
+        if (cleanBar && itBarcode !== cleanBar) return false;
+        const rawDate = String(it.data_validade || it.requested_expiration_date || '').trim();
+        const itDateIso = rawDate.includes('/') ? parseDateBRtoISO(rawDate) : rawDate.split('T')[0];
+        if (!cleanReqDate) return true;
+        return itDateIso === cleanReqDate || rawDate === cleanReqDate || formatDateBR(rawDate) === cleanReqDateBR;
+      });
+
+      const nowIso = new Date().toISOString();
       if (targetBItem) {
         targetBItem.status = 'CONFERIDO';
         targetBItem.quantidade = Number(newQuantity) || 0;
+        targetBItem.total_quantity = Number(newQuantity) || 0;
+        targetBItem.result = result;
         targetBItem.locations = locations;
         if (photoData) targetBItem.foto_url = photoData;
         if (corridor) targetBItem.corredor = corridor;
@@ -3072,9 +3357,35 @@ export async function saveBlitzConferenceRecord({
         targetBItem.usuario = effectiveUserName;
         targetBItem.responsible_user_id = effectiveUserId;
         targetBItem.responsible_user_name = effectiveUserName;
-        targetBItem.conferido_em = new Date().toISOString();
-        targetBItem.updated_at = new Date().toISOString();
+        targetBItem.conferido_em = nowIso;
+        targetBItem.updated_at = nowIso;
         bItensStore.put(targetBItem);
+      } else if (cleanBar && cleanReqDate) {
+        // Se o produto foi adicionado durante a Blitz e não estava na importação inicial
+        const newBItem = {
+          id: generateId('bi_'),
+          blitz_id: sessionId,
+          ean: cleanBar,
+          barcode: cleanBar,
+          produto_id: effectiveProductId || null,
+          data_validade: cleanReqDate,
+          requested_expiration_date: cleanReqDate,
+          quantidade: Number(newQuantity) || 0,
+          total_quantity: Number(newQuantity) || 0,
+          result: result,
+          locations: locations,
+          corredor: corridor || '',
+          status: 'CONFERIDO',
+          foto_url: photoData || null,
+          user_id: effectiveUserId,
+          usuario: effectiveUserName,
+          responsible_user_id: effectiveUserId,
+          responsible_user_name: effectiveUserName,
+          conferido_em: nowIso,
+          created_at: nowIso,
+          updated_at: nowIso
+        };
+        bItensStore.put(newBItem);
       }
     };
 
@@ -3285,7 +3596,7 @@ export async function getPreviousFinalizedBlitzConference({ currentBlitzId, barc
 
     allSessions.forEach(s => {
       if (s.id && s.id !== currentBlitzId) {
-        const respId = s.responsible_user_id || s.user_id || (s.user_name?.toLowerCase().includes('angelica') ? 'angelica' : 'ana_luiza');
+        const respId = normalizeUserId(s);
         const respName = s.responsible_user_name || s.user_name || (respId === 'angelica' ? 'Angélica' : 'Ana Luiza');
         priorBlitzMap.set(s.id, {
           id: s.id,
@@ -3302,7 +3613,7 @@ export async function getPreviousFinalizedBlitzConference({ currentBlitzId, barc
     allBlitzes.forEach(b => {
       if (b.id && b.id !== currentBlitzId) {
         if (!priorBlitzMap.has(b.id)) {
-          const respId = b.responsible_user_id || b.user_id || (b.responsavel?.toLowerCase().includes('angelica') ? 'angelica' : 'ana_luiza');
+          const respId = normalizeUserId(b);
           const respName = b.responsible_user_name || b.responsavel || (respId === 'angelica' ? 'Angélica' : 'Ana Luiza');
           priorBlitzMap.set(b.id, {
             id: b.id,
@@ -4006,5 +4317,111 @@ export async function exportDatabaseSQL() {
   }, 500);
 
   return sql;
+}
+
+/**
+ * Remove duplicidades em 'products' caso existam múltiplos registros com o mesmo código de barras,
+ * preservando o registro mais completo e atualizando as referências em validades e contagens.
+ */
+export async function cleanupDuplicateProducts() {
+  try {
+    const { tx } = await getSafeTransaction(['products', 'product_expirations', 'inventory_counts'], 'readwrite');
+    const prodStore = tx.objectStore('products');
+    const expStore = tx.objectStore('product_expirations');
+    const countStore = tx.objectStore('inventory_counts');
+
+    const allProdsReq = prodStore.getAll();
+    const allProds = await new Promise(r => {
+      allProdsReq.onsuccess = () => r(allProdsReq.result || []);
+      allProdsReq.onerror = () => r([]);
+    });
+
+    if (!allProds || allProds.length === 0) return { removed: 0 };
+
+    const byBarcode = new Map();
+    const toDeleteIds = new Set();
+    const idRemap = new Map(); // oldId -> canonicalId
+
+    // Agrupa produtos por código de barras limpo
+    for (const p of allProds) {
+      const cleanBarcode = String(p.barcode || '').trim();
+      // Remove produtos inválidos (sem barcode, 'undefined', '')
+      if (!cleanBarcode || cleanBarcode === 'undefined' || cleanBarcode === 'null') {
+        toDeleteIds.add(p.id);
+        continue;
+      }
+
+      if (!byBarcode.has(cleanBarcode)) {
+        byBarcode.set(cleanBarcode, [p]);
+      } else {
+        byBarcode.get(cleanBarcode).push(p);
+      }
+    }
+
+    // Para cada grupo com mais de 1 produto, escolhe o canônico e deleta os duplicados
+    for (const [barcode, list] of byBarcode.entries()) {
+      if (list.length <= 1) continue;
+
+      // Classifica para achar o melhor: prefere com imagem, nome não genérico, mais recente
+      list.sort((a, b) => {
+        const aHasImg = a.image || a.photo_url ? 1 : 0;
+        const bHasImg = b.image || b.photo_url ? 1 : 0;
+        if (aHasImg !== bHasImg) return bHasImg - aHasImg;
+
+        const aGeneric = (!a.name || a.name.startsWith('PRODUTO ')) ? 1 : 0;
+        const bGeneric = (!b.name || b.name.startsWith('PRODUTO ')) ? 1 : 0;
+        if (aGeneric !== bGeneric) return aGeneric - bGeneric;
+
+        const aTime = new Date(a.updated_at || a.created_at || 0).getTime();
+        const bTime = new Date(b.updated_at || b.created_at || 0).getTime();
+        return bTime - aTime;
+      });
+
+      const canonical = list[0];
+      for (let i = 1; i < list.length; i++) {
+        const dup = list[i];
+        toDeleteIds.add(dup.id);
+        idRemap.set(dup.id, canonical.id);
+      }
+    }
+
+    if (toDeleteIds.size === 0) return { removed: 0 };
+
+    // Deleta os produtos duplicados
+    for (const delId of toDeleteIds) {
+      try { prodStore.delete(delId); } catch (_) {}
+    }
+
+    // Se houve remapeamento de ID, atualiza referências em product_expirations e inventory_counts
+    if (idRemap.size > 0) {
+      const allExpsReq = expStore.getAll();
+      const allExps = await new Promise(r => {
+        allExpsReq.onsuccess = () => r(allExpsReq.result || []);
+        allExpsReq.onerror = () => r([]);
+      });
+      for (const exp of allExps) {
+        if (exp.product_id && idRemap.has(exp.product_id)) {
+          exp.product_id = idRemap.get(exp.product_id);
+          try { expStore.put(exp); } catch (_) {}
+        }
+      }
+
+      const allCountsReq = countStore.getAll();
+      const allCounts = await new Promise(r => {
+        allCountsReq.onsuccess = () => r(allCountsReq.result || []);
+        allCountsReq.onerror = () => r([]);
+      });
+      for (const cnt of allCounts) {
+        if (cnt.product_id && idRemap.has(cnt.product_id)) {
+          cnt.product_id = idRemap.get(cnt.product_id);
+          try { countStore.put(cnt); } catch (_) {}
+        }
+      }
+    }
+
+    return { removed: toDeleteIds.size };
+  } catch (err) {
+    return { removed: 0, error: err };
+  }
 }
 

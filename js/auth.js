@@ -45,11 +45,44 @@ export function getCurrentUser() {
   return SYSTEM_USERS.ana_luiza;
 }
 
+export function normalizeUserId(userOrNameOrId) {
+  if (!userOrNameOrId) return 'ana_luiza';
+  if (typeof userOrNameOrId === 'object') {
+    return normalizeUserId(
+      userOrNameOrId.responsible_user_id ||
+      userOrNameOrId.user_id ||
+      userOrNameOrId.responsible_user_name ||
+      userOrNameOrId.user_name ||
+      userOrNameOrId.usuario ||
+      userOrNameOrId.responsavel
+    );
+  }
+  const str = String(userOrNameOrId)
+    .trim()
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '');
+
+  if (str.includes('angelica') || str.includes('ang') || str === '160926') {
+    return 'angelica';
+  }
+  return 'ana_luiza';
+}
+
+export function isAngelicaUser(userOrNameOrId) {
+  return normalizeUserId(userOrNameOrId) === 'angelica';
+}
+
+export function isSessionOfUser(session, targetUserId = null) {
+  if (!session) return false;
+  const targetId = targetUserId || getCurrentUser()?.id || 'ana_luiza';
+  return normalizeUserId(session) === targetId;
+}
+
 export function getUserById(userId) {
   if (!userId) return null;
-  const cleanId = String(userId).trim().toLowerCase();
-  if (cleanId === 'angelica' || cleanId.includes('ang')) return SYSTEM_USERS.angelica;
-  return SYSTEM_USERS[cleanId] || SYSTEM_USERS.ana_luiza;
+  const norm = normalizeUserId(userId);
+  return SYSTEM_USERS[norm] || SYSTEM_USERS.ana_luiza;
 }
 
 export function getAllowedSectorsForUser(userId = null) {

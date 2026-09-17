@@ -494,11 +494,19 @@ function cleanPayloadForSupabase(tableName, payload) {
   }
 
   if (tableName === 'blitz_sessions') {
+    const rawUserId = payload.responsible_user_id || payload.user_id;
+    const isAng = (rawUserId === 'angelica' || String(payload.user_name || payload.responsible_user_name || '').toLowerCase().includes('angelica'));
+    const resolvedUserId = isAng ? 'angelica' : 'ana_luiza';
+    const resolvedUserName = isAng ? 'Angélica' : (payload.user_name || payload.responsible_user_name || 'Ana Luiza');
+
     return {
       id: String(payload.id),
       blitz_type: String(payload.blitz_type || 'periodo'),
       sector: String(payload.sector || 'GERAL'),
-      user_name: String(payload.user_name || 'Ana Luiza'),
+      user_id: resolvedUserId,
+      responsible_user_id: resolvedUserId,
+      user_name: resolvedUserName,
+      responsible_user_name: resolvedUserName,
       start_date: payload.start_date ? String(payload.start_date) : null,
       end_date: payload.end_date ? String(payload.end_date) : null,
       period_label: payload.period_label ? String(payload.period_label) : null,
@@ -535,12 +543,19 @@ function cleanPayloadForSupabase(tableName, payload) {
   }
 
   if (tableName === 'blitz') {
+    const rawUserId = payload.responsible_user_id || payload.user_id;
+    const isAng = (rawUserId === 'angelica' || String(payload.responsavel || payload.usuario || '').toLowerCase().includes('angelica'));
+    const resolvedUserId = isAng ? 'angelica' : 'ana_luiza';
+    const resolvedUserName = isAng ? 'Angélica' : (payload.responsavel || payload.usuario || 'Ana Luiza');
+
     return {
       id: String(payload.id),
       data_inicio: payload.data_inicio || null,
       data_fim: payload.data_fim || null,
       setor: String(payload.setor || 'MERCEARIA'),
-      responsavel: String(payload.responsavel || 'Ana Luiza'),
+      responsavel: resolvedUserName,
+      user_id: resolvedUserId,
+      responsible_user_id: resolvedUserId,
       status: String(payload.status || 'EM_ANDAMENTO'),
       observacao: payload.observacao || '',
       created_at: payload.created_at || new Date().toISOString(),
@@ -894,7 +909,21 @@ export async function pullFromSupabase() {
       localBlitzSessions = await getAllFromStore('blitz_sessions');
     }
     const localMap = new Map(localProducts.map((p) => [p.id, p]));
+    const localBarcodeMap = new Map();
+    localProducts.forEach((p) => {
+      const b = p.barcode ? String(p.barcode).trim() : '';
+      if (b) localBarcodeMap.set(b, p);
+    });
+
     const localExpMap = new Map(localExps.map((e) => [e.id, e]));
+    const localExpKeyMap = new Map();
+    localExps.forEach((e) => {
+      if (e.product_id && e.expiration_date) {
+        const key = `${e.product_id}_${String(e.expiration_date).split('T')[0]}`;
+        localExpKeyMap.set(key, e);
+      }
+    });
+
     const localBlitzMap = new Map(localBlitzSessions.map((s) => [s.id, s]));
 
     const { db, tx } = await getSafeTransaction(['products', 'product_expirations', 'inventory_counts', 'blitz_sessions', 'blitz_items', 'blitz', 'blitz_itens', 'conferencias_blitz'], 'readwrite');
@@ -904,7 +933,16 @@ export async function pullFromSupabase() {
 
     if (Array.isArray(products) && products.length > 0) {
       products.forEach((p) => {
-        const local = localMap.get(p.id);
+        const cleanBarcode = p.barcode ? String(p.barcode).trim() : '';
+        let local = localMap.get(p.id);
+
+        // Se não achou pelo ID remoto, busca se o mesmo código de barras já existe localmente
+        if (!local && cleanBarcode && localBarcodeMap.has(cleanBarcode)) {
+          local = localBarcodeMap.get(cleanBarcode);
+          // Adota o ID local para preservar integridade com contagens e validades já salvas
+          p.id = local.id;
+        }
+
         if (local && local.image && !p.image) {
           p.image = local.image;
         }
@@ -918,7 +956,15 @@ export async function pullFromSupabase() {
 
     if (Array.isArray(expirations) && expirations.length > 0) {
       expirations.forEach((e) => {
-        const local = localExpMap.get(e.id);
+        let local = localExpMap.get(e.id);
+        if (!local && e.product_id && e.expiration_date) {
+          const key = `${e.product_id}_${String(e.expiration_date).split('T')[0]}`;
+          if (localExpKeyMap.has(key)) {
+            local = localExpKeyMap.get(key);
+            e.id = local.id;
+          }
+        }
+
         if (local) {
           if (local.is_triaged && (e.is_triaged === undefined || e.is_triaged === null)) {
             e.is_triaged = true;
@@ -944,14 +990,21 @@ export async function pullFromSupabase() {
         if (local && (local.status === 'finalizada' || local.status === 'cancelada') && s.status === 'em_andamento') {
           return;
         }
+        const isAng = (s.responsible_user_id === 'angelica' || s.user_id === 'angelica' || local?.responsible_user_id === 'angelica' || local?.user_id === 'angelica' || String(s.user_name || local?.user_name || '').toLowerCase().includes('angelica'));
+        const resolvedUserId = isAng ? 'angelica' : 'ana_luiza';
+        const resolvedUserName = isAng ? 'Angélica' : (s.user_name || local?.user_name || 'Ana Luiza');
+
         // Preserva datas e período locais caso o Supabase não os tenha
         const merged = {
           ...s,
+          responsible_user_id: resolvedUserId,
+          user_id: resolvedUserId,
+          responsible_user_name: resolvedUserName,
+          user_name: resolvedUserName,
           start_date: s.start_date || local?.start_date || null,
           end_date: s.end_date || local?.end_date || null,
           period_label: s.period_label || local?.period_label || (local?.start_date && local?.end_date ? `${formatDateBR(local.start_date)} → ${formatDateBR(local.end_date)}` : null),
-          sector: s.sector || local?.sector || 'GERAL',
-          user_name: s.user_name || local?.user_name || 'Ana Luiza'
+          sector: s.sector || local?.sector || 'GERAL'
         };
         blitzStore.put(merged);
       });
@@ -964,7 +1017,18 @@ export async function pullFromSupabase() {
 
     if (Array.isArray(blitzList) && blitzList.length > 0 && db.objectStoreNames.contains('blitz')) {
       const blitzStore = tx.objectStore('blitz');
-      blitzList.forEach((b) => blitzStore.put(b));
+      blitzList.forEach((b) => {
+        const isAng = (b.responsible_user_id === 'angelica' || b.user_id === 'angelica' || String(b.responsavel || b.usuario || '').toLowerCase().includes('angelica'));
+        const resolvedUserId = isAng ? 'angelica' : 'ana_luiza';
+        const resolvedUserName = isAng ? 'Angélica' : (b.responsavel || b.usuario || 'Ana Luiza');
+        blitzStore.put({
+          ...b,
+          user_id: resolvedUserId,
+          responsible_user_id: resolvedUserId,
+          responsavel: resolvedUserName,
+          responsible_user_name: resolvedUserName
+        });
+      });
     }
 
     if (Array.isArray(blitzItensList) && blitzItensList.length > 0 && db.objectStoreNames.contains('blitz_itens')) {

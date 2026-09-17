@@ -1,6 +1,6 @@
 // Dashboard Inteligente para Controladoria - Ana Luiza & Angélica
 import { getGreeting, getFormattedFullDate, formatNumber, formatDateBR } from './utils.js';
-import { getDashboardMetrics, getActiveSession, clearActiveSession, getProductById } from './db.js';
+import { getDashboardMetrics, getActiveSession, clearActiveSession, getProductById, getCollaborationMetricsToday, getRecentSharedActivity } from './db.js';
 import { showView, showToast } from './ui.js';
 import { openConferenceForProduct, openCorridorAuditView } from './inventory.js';
 import { getWeeklyRoutineStatus } from './blitz_engine.js';
@@ -196,6 +196,12 @@ export async function renderDashboard() {
   if (routineContainer) {
     await renderWeeklyRoutine(routineContainer, currentUser);
   }
+
+  // 8. Painel de Trabalho em Equipe & Informações Cruzadas (Ana Luiza & Angélica)
+  const collabContainer = document.getElementById('dashboard-collaboration-content');
+  if (collabContainer) {
+    await renderCollaborationSection(collabContainer, currentUser);
+  }
 }
 
 function renderUserWorkspaceBanner(user) {
@@ -389,6 +395,95 @@ async function renderWeeklyRoutine(container, user = null) {
 
   } catch (e) {
     console.warn('Aviso ao renderizar rotina semanal:', e);
+    container.innerHTML = '';
+  }
+}
+
+/**
+ * Renderiza o painel de colaboração mútua e informações cruzadas do dia
+ */
+async function renderCollaborationSection(container, currentUser) {
+  try {
+    const [metrics, activities] = await Promise.all([
+      getCollaborationMetricsToday(),
+      getRecentSharedActivity(4)
+    ]);
+
+    const isAna = currentUser.id !== 'angelica';
+
+    container.innerHTML = `
+      <div class="collaboration-summary-card" style="background: #121215; border: 1px solid #2a2a30; border-radius: 12px; padding: 14px; margin-bottom: 8px;">
+        <!-- Indicadores de Contagem de Hoje -->
+        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-bottom: 12px;">
+          <div style="background: rgba(168, 85, 247, 0.08); border: 1px solid rgba(168, 85, 247, 0.3); border-radius: 8px; padding: 10px; text-align: center;">
+            <div style="font-size: 0.72rem; font-weight: 800; color: #d8b4fe; margin-bottom: 4px; display: flex; align-items: center; justify-content: center; gap: 4px;">
+              <span>🟣</span> Ana Luiza ${isAna ? '(Você)' : ''}
+            </div>
+            <div style="font-size: 1.35rem; font-weight: 900; color: #f4f4f5; line-height: 1.1;">
+              ${metrics.anaCount}
+            </div>
+            <div style="font-size: 0.68rem; color: #a1a1aa; margin-top: 2px;">conferências hoje</div>
+          </div>
+
+          <div style="background: rgba(16, 185, 129, 0.08); border: 1px solid rgba(16, 185, 129, 0.3); border-radius: 8px; padding: 10px; text-align: center;">
+            <div style="font-size: 0.72rem; font-weight: 800; color: #34d399; margin-bottom: 4px; display: flex; align-items: center; justify-content: center; gap: 4px;">
+              <span>🟢</span> Angélica ${!isAna ? '(Você)' : ''}
+            </div>
+            <div style="font-size: 1.35rem; font-weight: 900; color: #f4f4f5; line-height: 1.1;">
+              ${metrics.angelicaCount}
+            </div>
+            <div style="font-size: 0.68rem; color: #a1a1aa; margin-top: 2px;">conferências hoje</div>
+          </div>
+        </div>
+
+        <!-- Dica de Apoio Sozinha vs Juntas -->
+        <div style="background: #18181c; border-radius: 8px; padding: 10px 12px; margin-bottom: 12px; border-left: 3px solid #38bdf8; display: flex; align-items: flex-start; gap: 8px;">
+          <span style="font-size: 1.1rem; line-height: 1;">💡</span>
+          <div style="font-size: 0.75rem; color: #d4d4d8; line-height: 1.4;">
+            <strong style="color: #38bdf8;">Quando estiver sozinha:</strong> Toque em <em>"🌐 Loja Toda"</em> no banner acima para assumir e auditar qualquer corredor. Quando estiverem juntas, cada uma foca nos seus setores e Blitz pessoal, e os estoques se cruzam e somam automaticamente em tempo real!
+          </div>
+        </div>
+
+        <!-- Atividades Recentes Cruzadas -->
+        <div>
+          <div style="font-size: 0.74rem; font-weight: 800; color: #a1a1aa; letter-spacing: 0.5px; margin-bottom: 8px; text-transform: uppercase;">
+            Últimas Movimentações na Loja
+          </div>
+          ${activities.length === 0 ? `
+            <div style="font-size: 0.74rem; color: #71717a; text-align: center; padding: 10px 0;">
+              Nenhuma conferência registrada hoje ainda. Bipe um produto para começar!
+            </div>
+          ` : `
+            <div style="display: flex; flex-direction: column; gap: 6px;">
+              ${activities.map((act) => {
+                const isAng = act.userId === 'angelica';
+                const timeStr = act.date && act.date.includes('T')
+                  ? new Date(act.date).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })
+                  : '';
+                return `
+                  <div style="background: #18181b; border: 1px solid #27272a; border-radius: 6px; padding: 6px 10px; display: flex; align-items: center; justify-content: space-between; gap: 8px; font-size: 0.74rem;">
+                    <div style="display: flex; align-items: center; gap: 6px; overflow: hidden;">
+                      <span style="font-size: 0.7rem; padding: 2px 6px; border-radius: 4px; font-weight: 800; flex-shrink: 0; ${isAng ? 'background: rgba(16, 185, 129, 0.2); color: #34d399;' : 'background: rgba(168, 85, 247, 0.2); color: #d8b4fe;'}">
+                        ${isAng ? '🟢 Angélica' : '🟣 Ana Luiza'}
+                      </span>
+                      <span style="color: #f4f4f5; font-weight: 700; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">
+                        ${act.productName}
+                      </span>
+                    </div>
+                    <div style="color: #a1a1aa; flex-shrink: 0; font-size: 0.7rem; text-align: right;">
+                      <span>${act.description}</span>
+                      ${timeStr ? `<span style="margin-left: 4px; color: #71717a;">(${timeStr})</span>` : ''}
+                    </div>
+                  </div>
+                `;
+              }).join('')}
+            </div>
+          `}
+        </div>
+      </div>
+    `;
+  } catch (err) {
+    console.warn('Erro ao renderizar seção de colaboração:', err);
     container.innerHTML = '';
   }
 }

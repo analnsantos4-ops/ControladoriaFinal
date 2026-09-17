@@ -81,29 +81,41 @@ import { startCameraScanner, stopCameraScanner } from './scanner.js';
 import { openWhatsAppExportModal } from './whatsapp.js';
 import { triggerSyncNow } from './sync.js';
 import { openConferenceForProduct } from './inventory.js';
-import { getCurrentUser, getUserById, getAllowedSectorsForUser, isSectorAllowedForUser } from './auth.js';
+import { getCurrentUser, getUserById, getAllowedSectorsForUser, isSectorAllowedForUser, normalizeUserId } from './auth.js';
 
 let currentActiveBlitzSession = null;
 
 export function getActiveBlitz() {
   const currentUser = getCurrentUser();
-  if (currentActiveBlitzSession && currentUser) {
-    const sUserId = currentActiveBlitzSession.responsible_user_id || currentActiveBlitzSession.user_id || (currentActiveBlitzSession.user_name?.toLowerCase().includes('angelica') ? 'angelica' : 'ana_luiza');
-    if (sUserId && sUserId !== currentUser.id) {
-      return null;
-    }
+  if (!currentActiveBlitzSession || !currentUser) {
+    return null;
+  }
+  const sUserId = normalizeUserId(currentActiveBlitzSession);
+  if (sUserId !== currentUser.id) {
+    // A sessão ativa em memória pertence à outra usuária. Limpa para isolamento rigoroso.
+    currentActiveBlitzSession = null;
+    return null;
   }
   return currentActiveBlitzSession;
 }
 
 export function setActiveBlitz(session) {
-  currentActiveBlitzSession = session;
   const activeUser = getCurrentUser();
-  const cacheKey = activeUser ? `active_blitz_session_cache_${activeUser.id}` : 'active_blitz_session_cache';
   if (session) {
+    const sessionUserId = normalizeUserId(session);
+    // Se a sessão sendo definida pertence a outra pessoa, bloqueia
+    if (activeUser && sessionUserId !== activeUser.id) {
+      console.warn(`[Isolamento de Blitz] Acesso bloqueado: sessão de ${sessionUserId} não pode ser ativada para ${activeUser.id}`);
+      return;
+    }
+    currentActiveBlitzSession = session;
+    const cacheKey = activeUser ? `active_blitz_session_cache_${activeUser.id}` : 'active_blitz_session_cache';
     localStorage.setItem(cacheKey, JSON.stringify(session));
   } else {
-    localStorage.removeItem(cacheKey);
+    currentActiveBlitzSession = null;
+    if (activeUser) {
+      localStorage.removeItem(`active_blitz_session_cache_${activeUser.id}`);
+    }
     localStorage.removeItem('active_blitz_session_cache');
   }
   updateBlitzTopBarIndicator();
@@ -153,12 +165,38 @@ export function renderProductPhotoHtml(photoUrl, altText = '', options = {}) {
 // Inicializa o módulo e recupera sessão ativa se houver
 export async function initBlitzModule(targetUserId = null) {
   const activeUser = targetUserId ? getUserById(targetUserId) : getCurrentUser();
-  const userId = activeUser?.id || null;
-  const cacheKey = userId ? `active_blitz_session_cache_${userId}` : 'active_blitz_session_cache';
+  const userId = activeUser?.id || 'ana_luiza';
+  const cacheKey = `active_blitz_session_cache_${userId}`;
+
+  // Purga cache global que possa conter dados de outra usuária
+  const legacyGlobal = localStorage.getItem('active_blitz_session_cache');
+  if (legacyGlobal) {
+    try {
+      const parsed = JSON.parse(legacyGlobal);
+      if (normalizeUserId(parsed) !== userId) {
+        localStorage.removeItem('active_blitz_session_cache');
+      }
+    } catch (_) {
+      localStorage.removeItem('active_blitz_session_cache');
+    }
+  }
+
+  // Purga cache deste usuário se contiver sessão de outra usuária
+  const userCached = localStorage.getItem(cacheKey);
+  if (userCached) {
+    try {
+      const parsed = JSON.parse(userCached);
+      if (normalizeUserId(parsed) !== userId) {
+        localStorage.removeItem(cacheKey);
+      }
+    } catch (_) {
+      localStorage.removeItem(cacheKey);
+    }
+  }
 
   try {
     const active = await getActiveBlitzSession(userId);
-    if (active) {
+    if (active && normalizeUserId(active) === userId) {
       currentActiveBlitzSession = active;
       localStorage.setItem(cacheKey, JSON.stringify(active));
     } else {
@@ -168,7 +206,20 @@ export async function initBlitzModule(targetUserId = null) {
     }
   } catch (e) {
     const cached = localStorage.getItem(cacheKey);
-    currentActiveBlitzSession = cached ? JSON.parse(cached) : null;
+    if (cached) {
+      try {
+        const parsed = JSON.parse(cached);
+        if (normalizeUserId(parsed) === userId) {
+          currentActiveBlitzSession = parsed;
+        } else {
+          currentActiveBlitzSession = null;
+        }
+      } catch (_) {
+        currentActiveBlitzSession = null;
+      }
+    } else {
+      currentActiveBlitzSession = null;
+    }
   }
   updateBlitzTopBarIndicator();
 }
@@ -200,8 +251,8 @@ export function updateBlitzTopBarIndicator() {
       periodLabel = 'Definir Período';
     }
   }
-  const startedAtTime = currentActiveBlitzSession.started_at
-    ? new Date(currentActiveBlitzSession.started_at).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })
+  const startedAtTime = activeSession.started_at
+    ? new Date(activeSession.started_at).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })
     : '--:--';
 
   const bannerHtml = `
@@ -223,14 +274,14 @@ export function updateBlitzTopBarIndicator() {
               BLITZ ATIVA
             </span>
             <span style="background: rgba(245, 158, 11, 0.2); border: 1px solid rgba(245, 158, 11, 0.4); color: #fbbf24; font-size: 0.68rem; font-weight: 900; padding: 2px 6px; border-radius: 4px; text-transform: uppercase;">
-              SETOR: ${currentActiveBlitzSession.sector || 'GERAL'}
+              SETOR: ${activeSession.sector || 'GERAL'}
             </span>
             <span style="font-size: 0.78rem; color: #fbbf24; font-weight: 800;">
               Período: ${periodLabel}
             </span>
           </div>
           <div style="font-size: 0.72rem; color: #a1a1aa; margin-top: 2px;">
-            Por ${currentActiveBlitzSession.responsible_user_name || currentActiveBlitzSession.user_name || 'Ana Luiza'} • Iniciada às ${startedAtTime}
+            Por ${activeSession.responsible_user_name || activeSession.user_name || 'Ana Luiza'} • Iniciada às ${startedAtTime}
           </div>
         </div>
       </div>
@@ -252,7 +303,7 @@ export function updateBlitzTopBarIndicator() {
       openBlitzDashboardView();
     });
     document.getElementById('btn-dash-finish-blitz-top')?.addEventListener('click', async () => {
-      await finishActiveBlitzSession(currentActiveBlitzSession?.id);
+      await finishActiveBlitzSession(activeSession?.id);
     });
   }
 
@@ -261,7 +312,7 @@ export function updateBlitzTopBarIndicator() {
       <div style="display: flex; align-items: center; gap: 6px; min-width: 0;">
         <span style="font-size: 1rem;">🔍</span>
         <span style="font-size: 0.74rem; font-weight: 900; color: #fbbf24; text-transform: uppercase; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">
-          BLITZ [${currentActiveBlitzSession.sector || 'GERAL'}]: ${periodLabel}
+          BLITZ [${activeSession.sector || 'GERAL'}]: ${periodLabel}
         </span>
       </div>
       <div style="display: flex; gap: 6px; align-items: center; flex-shrink: 0;">
@@ -280,7 +331,7 @@ export function updateBlitzTopBarIndicator() {
     });
     document.getElementById('btn-scanner-blitz-finish')?.addEventListener('click', async () => {
       stopCameraScanner();
-      await finishActiveBlitzSession(currentActiveBlitzSession?.id);
+      await finishActiveBlitzSession(activeSession?.id);
     });
   }
 }
@@ -290,7 +341,8 @@ export function updateBlitzTopBarIndicator() {
 // ----------------------------------------------------
 
 export async function promptStartBlitz() {
-  if (currentActiveBlitzSession) {
+  const activeSession = getActiveBlitz();
+  if (activeSession) {
     showActiveBlitzDialog();
     return;
   }
@@ -298,6 +350,12 @@ export async function promptStartBlitz() {
 }
 
 function showActiveBlitzDialog() {
+  const activeSession = getActiveBlitz();
+  if (!activeSession) {
+    showStartBlitzModal();
+    return;
+  }
+
   let modal = document.getElementById('modal-active-blitz-dialog');
   if (!modal) {
     modal = document.createElement('div');
@@ -306,9 +364,10 @@ function showActiveBlitzDialog() {
     document.body.appendChild(modal);
   }
 
-  const periodLabel = currentActiveBlitzSession.period_label || 'Geral';
-  const startedAt = new Date(currentActiveBlitzSession.started_at).toLocaleString('pt-BR');
-  const sectorLabel = currentActiveBlitzSession.sector || 'GERAL';
+  const periodLabel = activeSession.period_label || 'Geral';
+  const startedAt = new Date(activeSession.started_at).toLocaleString('pt-BR');
+  const sectorLabel = activeSession.sector || 'GERAL';
+  const respName = activeSession.responsible_user_name || activeSession.user_name || 'Ana Luiza';
 
   modal.innerHTML = `
     <div class="modal-backdrop" id="modal-active-blitz-backdrop"></div>
@@ -328,7 +387,7 @@ function showActiveBlitzDialog() {
           ${periodLabel}
         </div>
         <div style="font-size: 0.72rem; color: #71717a; margin-top: 4px;">
-          Iniciada em ${startedAt} por ${currentActiveBlitzSession.responsible_user_name || currentActiveBlitzSession.user_name || 'Ana Luiza'}
+          Iniciada em ${startedAt} por ${respName}
         </div>
       </div>
 
@@ -361,12 +420,12 @@ function showActiveBlitzDialog() {
 
   document.getElementById('btn-dialog-config-blitz')?.addEventListener('click', () => {
     closeModal();
-    promptEditActiveBlitzPeriod(currentActiveBlitzSession);
+    promptEditActiveBlitzPeriod(activeSession);
   });
 
   document.getElementById('btn-dialog-finish-blitz')?.addEventListener('click', async () => {
     closeModal();
-    await finishActiveBlitzSession(currentActiveBlitzSession?.id);
+    await finishActiveBlitzSession(activeSession?.id);
   });
 
   document.getElementById('btn-dialog-new-blitz')?.addEventListener('click', async () => {
@@ -1464,12 +1523,13 @@ export async function promptEditActiveBlitzPeriod(session) {
 // ----------------------------------------------------
 
 export async function openBlitzDashboardView() {
-  if (!currentActiveBlitzSession) {
+  const activeSession = getActiveBlitz();
+  if (!activeSession) {
     promptStartBlitz();
     return;
   }
 
-  const session = await getBlitzSessionById(currentActiveBlitzSession.id) || currentActiveBlitzSession;
+  const session = await getBlitzSessionById(activeSession.id) || activeSession;
   currentActiveBlitzSession = session;
 
   // Auto-reparo prévio para normalizar quaisquer itens antigos gravados com undefined
@@ -1800,14 +1860,21 @@ async function renderBlitzSessionItemsListFiltered(session, filter = 'TODOS', se
   const sessionItems = await getSessionBlitzItems(session.id);
   const conferences = await getBlitzItemsBySessionId(session.id);
 
-  // Mapeia conferências por (barcode + data) para conferência rápida
+  // Mapeia conferências por (barcode + data) para conferência rápida e precisa
   const confMap = new Map();
   conferences.forEach(c => {
     const b = String(c.barcode || c.ean || '').trim();
-    const d = String(c.requested_expiration_date || c.data_validade || '').trim();
+    const rawD = String(c.requested_expiration_date || c.data_validade || '').trim();
+    const dIso = rawD.includes('/') ? parseDateBRtoISO(rawD) : rawD.split('T')[0];
+    const dBr = formatDateBR(dIso);
     if (b) {
-      confMap.set(`${b}_${d}`, c);
-      confMap.set(b, c);
+      if (dIso) {
+        confMap.set(`${b}_${dIso}`, c);
+        confMap.set(`${b}_${dBr}`, c);
+      }
+      if (!confMap.has(b)) {
+        confMap.set(b, c);
+      }
     }
   });
 
@@ -1817,7 +1884,11 @@ async function renderBlitzSessionItemsListFiltered(session, filter = 'TODOS', se
     itemsToRender = sessionItems.map(it => {
       const barcode = String(it.ean || it.barcode || '').trim();
       const expDate = String(it.data_validade || it.requested_expiration_date || '').trim();
-      const conf = confMap.get(`${barcode}_${expDate}`) || confMap.get(barcode);
+      const expDateIso = expDate.includes('/') ? parseDateBRtoISO(expDate) : expDate.split('T')[0];
+      const expDateBr = formatDateBR(expDateIso);
+      const conf = (expDateIso ? confMap.get(`${barcode}_${expDateIso}`) : null) ||
+                   (expDateBr ? confMap.get(`${barcode}_${expDateBr}`) : null) ||
+                   confMap.get(barcode);
 
       const isConferred = it.status === 'CONFERIDO' || it.status === 'conferido' || Boolean(conf) || Boolean(it.conferido_em);
       const qty = conf ? (Number(conf.total_quantity) || 0) : (Number(it.total_quantity || it.quantidade) || 0);
@@ -2026,8 +2097,24 @@ async function renderBlitzSessionItemsListFiltered(session, filter = 'TODOS', se
         </div>
 
         <!-- Ação do lado direito: Bipar ou Editar quantidade -->
-        <div style="text-align: right; flex-shrink: 0;">
+        <div style="display: flex; align-items: center; gap: 6px; flex-shrink: 0;">
           ${!isConferred ? `
+            <button type="button" class="btn-quick-zero-item" data-id="${item.id}" data-barcode="${barcode}" data-date="${expDate || ''}" title="Marcar como NÃO TEM (0 un)" style="
+              background: rgba(239, 68, 68, 0.12);
+              border: 1px solid rgba(239, 68, 68, 0.35);
+              color: #f87171;
+              font-size: 0.68rem;
+              font-weight: 800;
+              padding: 4px 6px;
+              border-radius: 6px;
+              cursor: pointer;
+              display: inline-flex;
+              align-items: center;
+              gap: 2px;
+              white-space: nowrap;
+            ">
+              ✕ Zerar
+            </button>
             <span style="font-size: 0.72rem; font-weight: 900; color: #fbbf24; background: rgba(245, 158, 11, 0.15); border: 1px solid rgba(245, 158, 11, 0.4); padding: 4px 8px; border-radius: 6px; display: inline-flex; align-items: center; gap: 3px; white-space: nowrap;">
               ⚡ Bipar
             </span>
@@ -2043,6 +2130,48 @@ async function renderBlitzSessionItemsListFiltered(session, filter = 'TODOS', se
 
   container.innerHTML = cardsHtml.join('');
 
+  // Adiciona atalho de zerar rápido (1 clique com confirmação)
+  container.querySelectorAll('.btn-quick-zero-item').forEach(btn => {
+    btn.addEventListener('click', async (e) => {
+      e.stopPropagation();
+      const barcode = btn.getAttribute('data-barcode');
+      const dateISO = btn.getAttribute('data-date');
+      const itemObj = itemsToRender.find(i => i.barcode === barcode && (i.data_validade === dateISO || i.requested_expiration_date === dateISO));
+      const prodName = itemObj?.nome_produto || itemObj?.nome || itemObj?.name || 'este produto';
+      const dateLabel = dateISO ? (dateISO.includes('/') ? dateISO : formatDateBR(dateISO)) : 'esta validade';
+
+      if (!confirm(`Confirmar que NÃO TEM (${prodName}) na loja?\nValidade: ${dateLabel}`)) {
+        return;
+      }
+
+      showToast(`Zerando ${prodName}...`, 'info', 800);
+      try {
+        let p = await getProductByBarcode(barcode);
+        await saveBlitzConferenceRecord({
+          sessionId: session.id,
+          productId: p?.id || itemObj?.produto_id || itemObj?.product_id || null,
+          barcode: barcode,
+          sector: session.sector || p?.sector || 'MERCEARIA',
+          corridor: p?.corridor || itemObj?.corredor || '',
+          requestedDate: dateISO,
+          previousQuantity: Number(itemObj?.previous_quantity) || 0,
+          newQuantity: 0,
+          result: 'NAO_TEM',
+          locations: [],
+          userName: getCurrentUser()?.name || 'Ana Luiza',
+          userId: getCurrentUser()?.id || 'ana_luiza'
+        });
+
+        triggerHaptic(40);
+        showToast(`✓ Gravado como ZERADO (0 un)`, 'success', 1200);
+        await renderBlitzSessionItemsListFiltered(session, filter, searchQuery);
+      } catch (err) {
+        console.error('Erro no quick zero:', err);
+        showToast('Erro ao zerar produto', 'warning');
+      }
+    });
+  });
+
   // Adiciona click nos cards para abrir edição rápida ou conferir
   container.querySelectorAll('.blitz-item-card-row').forEach(row => {
     row.addEventListener('click', async () => {
@@ -2057,7 +2186,32 @@ async function renderBlitzSessionItemsListFiltered(session, filter = 'TODOS', se
           renderBlitzSessionItemsListFiltered(session, filter, searchQuery);
         });
       } else {
-        // Se pendente -> bipa ou abre a conferência diretamente
+        // Se pendente: se já temos a data específica deste card, vamos direto para a conferência!
+        if (dateISO && itemObj) {
+          let p = await getProductByBarcode(barcode);
+          if (!p && barcode && barcode !== 'undefined') {
+            const draftId = generateId();
+            const itemName = itemObj.nome_produto || itemObj.descricao || itemObj.nome || itemObj.name || `PRODUTO ${barcode}`;
+            p = {
+              id: draftId,
+              barcode: barcode,
+              name: itemName,
+              sector: session?.sector || 'MERCEARIA',
+              corridor: itemObj.corredor || itemObj.corridor || '',
+              status: 'LISTA_DE_BLITZ',
+              is_blitz_import: true,
+              origin: 'BLITZ_IMPORT',
+              total_quantity: 0
+            };
+            try { await saveProduct(p); } catch (_) {}
+          }
+          if (p) {
+            routeProductCorridorAndConference(p, dateISO, itemObj);
+            return;
+          }
+        }
+
+        // Se pendente genérico -> bipa ou abre a conferência diretamente
         if (barcode && barcode !== 'undefined') {
           await handleBlitzBarcodeScanned(barcode);
         } else if (itemObj) {
@@ -2100,20 +2254,44 @@ export async function handleBlitzBarcodeScanned(cleanBarcode) {
 
   // Para o scanner temporariamente enquanto a conferência está na tela
   stopCameraScanner();
+
+  // Limpa o código de barras de caracteres e quebras de linha invisíveis
+  cleanBarcode = String(cleanBarcode || '').trim().replace(/\s+/g, '');
+  if (!cleanBarcode) {
+    showToast('Código de barras vazio ou inválido', 'warning');
+    return false;
+  }
+
   showToast(`Código: ${cleanBarcode}`, 'info', 800);
 
-  // 1. Pesquisa se o produto está cadastrado no banco
+  // 1. Busca itens na Blitz ativa para este código de barras antecipadamente
+  let blitzItems = [];
+  try {
+    const allItems = await getBlitzItens(currentActiveBlitzSession.id);
+    blitzItems = allItems.filter(it => 
+      String(it.ean || '').trim() === cleanBarcode ||
+      String(it.barcode || '').trim() === cleanBarcode
+    );
+  } catch (err) {
+    console.warn('Erro ao consultar itens da blitz:', err);
+  }
+
+  const blitzFirst = blitzItems[0];
+  const blitzName = blitzFirst?.nome_produto || blitzFirst?.descricao || blitzFirst?.nome || blitzFirst?.name || '';
+  const blitzCorridor = blitzFirst?.corredor || blitzFirst?.corridor || '';
+
+  // 2. Pesquisa se o produto está cadastrado no banco
   let product = await getProductByBarcode(cleanBarcode);
 
   if (!product) {
-    // Cria produto no banco para não travar o fluxo da Blitz
+    // Cria produto no banco usando o nome vindo da lista de blitz para não ficar genérico
     const draftId = generateId();
     product = {
       id: draftId,
       barcode: cleanBarcode,
-      name: `PRODUTO ${cleanBarcode}`,
+      name: blitzName || `PRODUTO ${cleanBarcode}`,
       sector: currentActiveBlitzSession?.sector || 'MERCEARIA',
-      corridor: '', // Sem corredor inicialmente para produtos novos
+      corridor: blitzCorridor || '',
       status: 'LISTA_DE_BLITZ',
       is_blitz_import: true,
       origin: 'BLITZ_IMPORT',
@@ -2122,24 +2300,30 @@ export async function handleBlitzBarcodeScanned(cleanBarcode) {
     try {
       await saveProduct(product);
     } catch (_) {}
-  }
-
-  // 2. Busca itens na Blitz ativa para este código de barras
-  let blitzItems = [];
-  try {
-    const allItems = await getBlitzItens(currentActiveBlitzSession.id);
-    blitzItems = allItems.filter(it => 
-      String(it.ean).trim() === cleanBarcode ||
-      String(it.barcode || '').trim() === cleanBarcode
-    );
-  } catch (err) {
-    console.warn('Erro ao consultar itens da blitz:', err);
+  } else {
+    // Se produto já existia com nome provisório/indefinido e temos o nome real da lista da blitz
+    let needsUpdate = false;
+    if (blitzName && (!product.name || product.name.startsWith('PRODUTO ') || product.name.includes('undefined'))) {
+      product.name = blitzName;
+      needsUpdate = true;
+    }
+    if (!product.corridor && blitzCorridor) {
+      product.corridor = blitzCorridor;
+      needsUpdate = true;
+    }
+    if (needsUpdate) {
+      try { await saveProduct(product); } catch (_) {}
+    }
   }
 
   // SITUAÇÃO A: O produto está na lista da Blitz com UMA única data
   if (blitzItems.length === 1) {
     const item = blitzItems[0];
     const targetDateISO = item.data_validade || item.requested_expiration_date;
+    if (!targetDateISO) {
+      promptBlitzDateInputStep(product);
+      return true;
+    }
     routeProductCorridorAndConference(product, targetDateISO, item);
     return true;
   }
@@ -2159,6 +2343,15 @@ export async function handleBlitzBarcodeScanned(cleanBarcode) {
  * Roteia a verificação do corredor e prossegue para a conferência
  */
 function routeProductCorridorAndConference(product, targetDateISO, blitzItem = null) {
+  if (targetDateISO) {
+    targetDateISO = String(targetDateISO).trim();
+    if (targetDateISO.includes('T')) {
+      targetDateISO = targetDateISO.split('T')[0];
+    } else if (targetDateISO.includes('/')) {
+      targetDateISO = parseDateBRtoISO(targetDateISO) || targetDateISO;
+    }
+  }
+
   if (!product.corridor && (blitzItem?.corredor || blitzItem?.corridor)) {
     product.corridor = blitzItem.corredor || blitzItem.corridor;
   }
@@ -6319,7 +6512,10 @@ export async function openBlitzHistoryView() {
   const container = document.getElementById('view-blitz-history');
   if (!container) return;
 
-  const sessions = await getAllBlitzSessions();
+  const currentUser = getCurrentUser();
+  const allSessions = await getAllBlitzSessions();
+  // Isola as sessões estritamente por perfil: as sessões de Angélica não aparecem para Ana Luiza
+  const sessions = allSessions.filter(s => normalizeUserId(s) === currentUser.id);
 
   container.innerHTML = `
     <header class="app-top-bar">

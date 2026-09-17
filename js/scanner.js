@@ -3,7 +3,7 @@
 import Quagga from '@ericblade/quagga2';
 import { Html5Qrcode, Html5QrcodeSupportedFormats } from 'html5-qrcode';
 import { BrowserMultiFormatReader } from '@zxing/library';
-import { triggerHaptic } from './utils.js';
+import { triggerHaptic, playBeepSuccess } from './utils.js';
 import { showToast } from './ui.js';
 
 let isScanning = false;
@@ -282,6 +282,17 @@ function startQuaggaScanner(containerEl, onDetectedCallback) {
           Quagga.start();
           isQuaggaRunning = true;
 
+          // Garante que o elemento de vídeo no iOS Safari respeite playsinline e não abra fullscreen
+          if (containerEl) {
+            const vids = containerEl.querySelectorAll('video');
+            vids.forEach((v) => {
+              v.setAttribute('playsinline', 'true');
+              v.setAttribute('webkit-playsinline', 'true');
+              v.setAttribute('muted', 'true');
+              v.muted = true;
+            });
+          }
+
           Quagga.onDetected((data) => {
             if (!isScanning) return;
             if (data && data.codeResult && data.codeResult.code) {
@@ -509,6 +520,7 @@ async function handleCodeDetected(barcode, callback) {
   isScanning = false;
   await stopCameraScanner();
   triggerHaptic(90);
+  playBeepSuccess();
   if (typeof callback === 'function') {
     callback(barcode);
   }

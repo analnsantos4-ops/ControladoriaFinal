@@ -5,12 +5,12 @@ import '../style.css';
 import { isAuthenticated, verifyCode, verifyMasterSecurityPin, logout, getCurrentUser, SYSTEM_USERS } from './auth.js';
 import { initDB, getProductByBarcode, getProductById, searchProducts, getAllProducts, getProductExpirations, getLatestCountsForExpiration, clearAllDatabaseData, toggleExpirationTriaged, sendProductExpirationToTriage, restoreProductExpirationFromTriage, runAutomaticTriageCleanup, getDatabaseStorageStats, TRIAGE_RETENTION_MS, isProductRegistered, isProductVerifiedOnly, isProductBlitzImport, saveProduct } from './db.js';
 import { initSyncEngine, registerSyncStatusListener, wipeSupabaseCloudData, triggerSyncNow, checkSupabaseHealth, syncAllLocalDataToSupabase, SUPABASE_SETUP_SQL, getSyncStatus, getSyncDiagnostics } from './sync.js';
-import { showView, showToast, setupButtonFeedbacks, openPhotoModal, getActiveView, promptTriageBarcodeConfirmation, promptSecurityPin } from './ui.js';
+import { showView, showToast, setupButtonFeedbacks, openPhotoModal, getActiveView, promptTriageBarcodeConfirmation, promptSecurityPin, initHistoryNavigation } from './ui.js';
 import { startCameraScanner, stopCameraScanner, toggleTorch, switchCamera, toggleCameraZoom, scanBarcodeFromImageFile } from './scanner.js';
 import { renderDashboard } from './dashboard.js';
 import { openNewProductView, saveNewProduct, handleProductImageFile, openProductDetailView, updateNewProductTotalCalculation, populateSectorAndCorridorSelects, openEditProductModal } from './products.js';
 import { openConferenceForProduct, confirmConference, openCorridorAuditView, loadCorridorAuditProducts, exportCurrentCorridorWhatsApp, setBlitzConferenceContext, getBlitzConferenceContext } from './inventory.js';
-import { SETORS, CORRIDORS, formatDateBR, formatNumber, getDaysUntilExpiration, triggerHaptic } from './utils.js';
+import { SETORS, CORRIDORS, formatDateBR, formatNumber, getDaysUntilExpiration, triggerHaptic, initAudioUnlock } from './utils.js';
 import { openWhatsAppImportModal, formatMultipleProductsWhatsApp, openWhatsAppExportModal } from './whatsapp.js';
 import { initBlitzModule, getActiveBlitz, setActiveBlitz, promptStartBlitz, handleBlitzBarcodeScanned, openBlitzDashboardView, renderBlitzDashboard, openBlitzHistoryView, updateBlitzTopBarIndicator, promptVerifiedProductLocationModal, openBlitzQuickRegisterModal, promptRequestedExpirationDate } from './blitz.js';
 import { openDatabaseModal } from './database-modal.js';
@@ -67,6 +67,8 @@ let currentProductTypeFilter = 'REGISTERED'; // 'REGISTERED' | 'VERIFIED'
 // Inicialização da Aplicação
 async function initApp() {
   setupButtonFeedbacks();
+  initAudioUnlock();
+  initHistoryNavigation();
   initPWAInstallFlow();
 
   // Listeners de instalação PWA (Android / iPhone)
@@ -85,7 +87,8 @@ async function initApp() {
   // Inicializa Banco IndexedDB e executa limpeza automática de triagem (3 dias)
   try {
     await initDB();
-    await initBlitzModule();
+    const initialUser = getCurrentUser();
+    await initBlitzModule(initialUser?.id);
     runAutomaticTriageCleanup().catch((err) => console.warn('Auto triage cleanup on init error:', err));
   } catch (e) {
     console.error('Falha ao inicializar IndexedDB / Blitz:', e);
@@ -287,8 +290,9 @@ function showUserAccountModal(user) {
 
 // Configura Tela de Dashboard
 async function showDashboardView() {
-  updateAppUserInterface();
-  await initBlitzModule();
+  const currentUser = getCurrentUser();
+  updateAppUserInterface(currentUser);
+  await initBlitzModule(currentUser?.id);
   await renderDashboard();
   updateBlitzTopBarIndicator();
   showView('view-dashboard');
