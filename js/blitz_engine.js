@@ -29,6 +29,7 @@ import {
 } from './db.js';
 
 import { getCurrentUser, getUserById, normalizeUserId } from './auth.js';
+import { logAppEvent } from './diagnostic_console.js';
 
 /**
  * 1. PARSER ROBUSTO DA LISTA DA BLITZ (Item 13 e 14 e Requisito 5)
@@ -381,8 +382,23 @@ export async function importBlitzItemsWithHistory(blitzId, parsedItems, defaultS
   const distinctDatesSet = new Set();
   const importedItems = [];
 
-  for (const item of parsedItems) {
-    distinctDatesSet.add(item.dataValidade);
+  for (const rawItem of parsedItems) {
+    const eanClean = String(rawItem.ean || rawItem.codigo || rawItem.barcode || '').trim();
+    const dateISO = String(rawItem.dataValidade || rawItem.data_validade || '').split('T')[0];
+    const dateBR = rawItem.dataValidadeBR || rawItem.data_validade_br || (dateISO ? formatDateBR(dateISO) : '');
+    const nomeProd = rawItem.nome || rawItem.descricao || rawItem.nome_produto || rawItem.name || `PRODUTO ${eanClean}`;
+
+    const item = {
+      ...rawItem,
+      ean: eanClean,
+      dataValidade: dateISO,
+      dataValidadeBR: dateBR,
+      nome: nomeProd
+    };
+
+    if (item.dataValidade) {
+      distinctDatesSet.add(item.dataValidade);
+    }
 
     // 1. Garante que o produto existe na tabela 'products'
     let product = await getProductByBarcode(item.ean);
@@ -812,6 +828,15 @@ export async function saveBlitzConference({
     }
   }
 
+  logAppEvent('BLITZ', `Conferência: EAN ${cleanEan} | Validade ${dataValidade} | Qtd: ${numQtd} un (${tipoConferencia}) por ${effUserName}`, {
+    ean: cleanEan,
+    dataValidade,
+    quantidade: numQtd,
+    tipoConferencia,
+    usuario: effUserName,
+    userId: effUserId
+  });
+
   return { conferenceRecord, blitzItem };
 }
 
@@ -954,6 +979,15 @@ export async function finalizeBlitzWithAutoZeros(blitzId, usuario = null, userId
     descricao: `Blitz finalizada por ${effectiveUserName}. Total de ${allItems.length} itens (${manualCount} conferidos manualmente, ${autoZeroCount} finalizados com zero automático)`
   });
 
+  logAppEvent('BLITZ', `Blitz finalizada por ${effectiveUserName} (${effectiveUserId}). Total ${allItems.length} itens (${manualCount} manuais, ${autoZeroCount} com zero automático).`, {
+    blitzId,
+    totalItens: allItems.length,
+    conferidosManualmente: manualCount,
+    zerosAutomaticos: autoZeroCount,
+    usuario: effectiveUserName,
+    userId: effectiveUserId
+  });
+
   return {
     total: allItems.length,
     totalItens: allItems.length,
@@ -1003,25 +1037,67 @@ export async function reopenBlitzRecord(blitzId, usuario = 'Ana Luiza', motivo =
 /**
  * 8. CORREÇÃO DE QUANTIDADE COM AUDITORIA (Item 29)
  */
-export async function correctConferenceQuantity({
-  blitzId,
-  itemId,
-  newQuantity,
-  usuario = 'Ana Luiza',
-  motivo = ''
-}) {
+export async function correctConferenceQuantity(arg1, arg2, arg3, arg4) {
+  let blitzId, itemId, newQuantity, usuario, motivo, locations;
+  if (arg1 && typeof arg1 === 'object') {
+    ({
+      blitzId,
+      itemId,
+      newQuantity,
+      usuario = 'Ana Luiza',
+      motivo = '',
+      locations = null
+    } = arg1);
+  } else {
+    itemId = arg1;
+    newQuantity = arg2;
+    motivo = arg3 || '';
+    usuario = arg4 || 'Ana Luiza';
+  }
+
   const db = await initDB();
   const now = new Date().toISOString();
 
-  const item = await getRecordById('blitz_itens', itemId);
+  let item = await getRecordById('blitz_itens', itemId);
+  if (!item) {
+    const conf = await getRecordById('conferencias_blitz', itemId);
+    if (conf) {
+      blitzId = blitzId || conf.blitz_id;
+      item = await getRecordById('blitz_itens', conf.blitz_item_id) || {
+        id: conf.blitz_item_id,
+        blitz_id: conf.blitz_id,
+        ean: conf.ean,
+        data_validade: conf.data_validade,
+        corredor: conf.corredor,
+        quantidade: conf.quantidade,
+        locations: conf.locations
+      };
+    }
+  }
   if (!item) throw new Error('Item não encontrado');
+  blitzId = blitzId || item.blitz_id;
 
   const oldQuantity = Number(item.quantidade || 0);
   const correctedQty = Number(newQuantity) || 0;
 
+  // Preserva locais se já existirem ou define a localização
+  let targetLocations = locations;
+  if (!targetLocations) {
+    if (Array.isArray(item.locations) && item.locations.length > 0) {
+      if (item.locations.length === 1) {
+        targetLocations = [{ location: item.locations[0].location, quantity: correctedQty }];
+      } else {
+        targetLocations = item.locations;
+      }
+    } else {
+      targetLocations = [{ location: item.corredor || 'Área de venda', quantity: correctedQty }];
+    }
+  }
+
   // Salva alteração no item
   item.quantidade = correctedQty;
   item.tipo_conferencia = 'CORRECAO';
+  item.locations = targetLocations;
   item.updated_at = now;
   await putRecord('blitz_itens', item);
 
@@ -1034,16 +1110,19 @@ export async function correctConferenceQuantity({
     quantidade: correctedQty,
     tipoConferencia: 'CORRECAO',
     corredor: item.corredor,
-    locations: [{ location: 'Área de venda', quantity: correctedQty }],
+    locations: targetLocations,
     usuario,
     observacao: `Correção de quantidade de ${oldQuantity} para ${correctedQty}. Motivo: ${motivo}`
   });
 
   // Registra no histórico de alterações (Item 29 e 62)
   await recordAudit({
+    blitz_id: blitzId,
     registro_id: item.id,
     tabela: 'conferencias_blitz',
     acao: 'CORRECAO_QUANTIDADE',
+    responsible_user_id: normalizeUserId(usuario),
+    responsible_user_name: usuario,
     usuario,
     motivo,
     valor_anterior: oldQuantity,
@@ -1593,14 +1672,46 @@ async function getAllRecords(storeName) {
 async function getItemByBlitzEanAndDate(blitzId, ean, dateISO) {
   const db = await initDB();
   try {
+    const cleanBlitzId = String(blitzId || '');
+    const cleanEan = String(ean || '').trim();
+    const cleanDate = String(dateISO || '').split('T')[0];
+
+    if (!cleanBlitzId || !cleanEan) return null;
+
     const { tx } = await getSafeTx(['blitz_itens'], 'readonly');
     const store = tx.objectStore('blitz_itens');
-    const index = store.index('blitz_ean_data');
-    return new Promise((resolve) => {
-      const req = index.get([blitzId, ean, dateISO]);
-      req.onsuccess = () => resolve(req.result || null);
-      req.onerror = () => resolve(null);
-    });
+
+    if (store.indexNames.contains('blitz_ean_data') && cleanDate) {
+      return new Promise((resolve) => {
+        try {
+          const index = store.index('blitz_ean_data');
+          const req = index.get([cleanBlitzId, cleanEan, cleanDate]);
+          req.onsuccess = () => resolve(req.result || null);
+          req.onerror = () => resolve(null);
+        } catch (_) {
+          resolve(null);
+        }
+      });
+    } else if (store.indexNames.contains('blitz_id')) {
+      return new Promise((resolve) => {
+        try {
+          const index = store.index('blitz_id');
+          const req = index.getAll(cleanBlitzId);
+          req.onsuccess = () => {
+            const list = req.result || [];
+            const found = list.find(i => 
+              String(i.ean).trim() === cleanEan && 
+              (!cleanDate || String(i.data_validade || '').split('T')[0] === cleanDate)
+            );
+            resolve(found || null);
+          };
+          req.onerror = () => resolve(null);
+        } catch (_) {
+          resolve(null);
+        }
+      });
+    }
+    return null;
   } catch (e) {
     return null;
   }

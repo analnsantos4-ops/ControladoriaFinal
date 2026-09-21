@@ -2018,6 +2018,13 @@
           </button>
         </form>
 
+        <!-- Acesso ao Console de Diagnóstico na Tela de Login (Código de 6 Dígitos) -->
+        <div style="margin-top: 10px; text-align: center;">
+          <button type="button" id="btn-login-open-console" class="btn-login-console-link" title="Acessar Console de Diagnóstico (Código 200902)">
+            📟 Console de Diagnóstico & Erros (6 Dígitos)
+          </button>
+        </div>
+
         <!-- Banner de Instalação PWA no Login (Requisito 17) -->
         <div id="login-pwa-install-banner" style="margin-top: 14px; padding: 10px 12px; background: rgba(16, 185, 129, 0.08); border: 1px dashed rgba(16, 185, 129, 0.35); border-radius: 10px; display: flex; align-items: center; justify-content: space-between; gap: 8px;">
           <div style="display: flex; align-items: center; gap: 8px;">
@@ -2048,6 +2055,7 @@
       <div class="top-bar-right" style="display: flex; align-items: center; gap: 6px;">
         <button type="button" id="btn-header-install-app" class="btn-header-db" title="Instalar Aplicativo na Tela Inicial">📲 <span>Instalar</span></button>
         <button type="button" id="btn-header-database" class="btn-header-db" title="Acessar e Baixar Banco de Dados">💾 <span>Banco</span></button>
+        <button type="button" id="btn-header-console" class="btn-header-console" title="Console de Erros e Diagnóstico (PIN 6 Dígitos)">📟 <span>Console</span><span id="console-error-pill" class="console-error-badge hidden">0</span></button>
         <div id="header-user-badge-container"></div>
         <span id="sync-status-badge" class="sync-badge status-offline">● Offline</span>
         <button id="btn-header-logout" class="btn-icon-link" title="Sair">Sair</button>

@@ -2959,7 +2959,15 @@ export async function promptBlitzQuantityAndHistoryStep(product, targetDateISO, 
 
   const defaultLocs = ['DEPÓSITO', 'GELADEIRA', 'PRATELEIRA', 'PONTA DE GÔNDOLA', 'ORELHA', 'ILHA', 'CARRINHO NA FRENTE DE LOJA'];
 
-  // Função para resgatar a contagem já existente por local (caso o usuário esteja revisando a mesma blitz)
+  // Resgata todos os locais já gravados nesta mesma Blitz para esta validade específica
+  const existingLocsList = (isAlreadyInCurrentBlitz && currentBlitzRecord?.locations && Array.isArray(currentBlitzRecord.locations))
+    ? currentBlitzRecord.locations.map(l => String(l.location || '').trim().toUpperCase()).filter(Boolean)
+    : [];
+
+  // Unifica preservando a ordem padrão e incluindo eventuais locais já registrados
+  const allLocs = Array.from(new Set([...defaultLocs, ...existingLocsList]));
+
+  // Função para resgatar a contagem já existente por local (nesta mesma blitz)
   const getInitialQtyForLoc = (loc) => {
     if (isAlreadyInCurrentBlitz && currentBlitzRecord?.locations && Array.isArray(currentBlitzRecord.locations)) {
       const found = currentBlitzRecord.locations.find(l => String(l.location || '').trim().toUpperCase() === loc);
@@ -3094,29 +3102,47 @@ export async function promptBlitzQuantityAndHistoryStep(product, targetDateISO, 
             </div>
           </div>
 
-          <div style="display: flex; flex-direction: column; gap: 8px; max-height: 260px; overflow-y: auto; padding-right: 4px;">
-            ${defaultLocs.map(loc => {
+          <div id="step-locations-list" style="display: flex; flex-direction: column; gap: 8px; max-height: 280px; overflow-y: auto; padding-right: 4px;">
+            ${allLocs.map(loc => {
               const initVal = getInitialQtyForLoc(loc);
               return `
-                <div style="display: flex; align-items: center; justify-content: space-between; background: #18181c; border: 1px solid #27272a; border-radius: 8px; padding: 8px 10px;">
-                  <span style="font-size: 0.82rem; font-weight: 800; color: #e4e4e7;">${loc}</span>
-                  <div style="display: flex; align-items: center; gap: 8px;">
-                    <button type="button" class="btn-step-qty btn-secondary" data-loc="${loc}" data-delta="-1" style="min-width: 44px; min-height: 44px; width: 44px; height: 44px; padding: 0; font-size: 1.25rem; font-weight: 900; justify-content: center; border-radius: 8px;">-</button>
-                    <input
-                      type="number"
-                      class="input-loc-qty form-input"
-                      data-loc="${loc}"
-                      min="0"
-                      step="1"
-                      value="${initVal}"
-                      style="width: 64px; height: 44px; text-align: center; font-size: 1.15rem; font-weight: 900; padding: 2px; border-radius: 8px;"
-                    />
-                    <button type="button" class="btn-step-qty btn-secondary" data-loc="${loc}" data-delta="1" style="min-width: 44px; min-height: 44px; width: 44px; height: 44px; padding: 0; font-size: 1.25rem; font-weight: 900; justify-content: center; border-radius: 8px;">+</button>
+                <div class="loc-card-row" data-loc="${loc}" style="background: #18181c; border: 1px solid #27272a; border-radius: 8px; padding: 8px 10px; display: flex; flex-direction: column; gap: 6px;">
+                  <div style="display: flex; align-items: center; justify-content: space-between;">
+                    <div style="display: flex; align-items: center; gap: 6px;">
+                      <span style="font-size: 0.82rem; font-weight: 800; color: #e4e4e7;">${loc}</span>
+                      ${initVal > 0 ? `
+                        <span style="font-size: 0.65rem; font-weight: 800; color: #38bdf8; background: rgba(56, 189, 248, 0.15); border: 1px solid rgba(56, 189, 248, 0.3); padding: 1px 5px; border-radius: 4px;">
+                          Nesta Blitz: ${initVal} un
+                        </span>
+                      ` : ''}
+                    </div>
+                    <button type="button" class="btn-step-add-more btn-secondary" data-loc="${loc}" title="Somar mais unidades a este local" style="height: 28px; padding: 0 8px; font-size: 0.72rem; font-weight: 800; color: #38bdf8; border-color: rgba(56, 189, 248, 0.35); border-radius: 6px; display: inline-flex; align-items: center; gap: 3px;">
+                      <span>➕ Somar</span>
+                    </button>
+                  </div>
+                  <div style="display: flex; align-items: center; justify-content: space-between; gap: 8px;">
+                    <span style="font-size: 0.72rem; color: #a1a1aa;">Contagem neste local:</span>
+                    <div style="display: flex; align-items: center; gap: 6px;">
+                      <button type="button" class="btn-step-qty btn-secondary" data-loc="${loc}" data-delta="-1" style="min-width: 44px; min-height: 44px; width: 44px; height: 44px; padding: 0; font-size: 1.25rem; font-weight: 900; justify-content: center; border-radius: 8px;">-</button>
+                      <input
+                        type="number"
+                        class="input-loc-qty form-input"
+                        data-loc="${loc}"
+                        min="0"
+                        step="1"
+                        value="${initVal}"
+                        style="width: 64px; height: 44px; text-align: center; font-size: 1.15rem; font-weight: 900; padding: 2px; border-radius: 8px;"
+                      />
+                      <button type="button" class="btn-step-qty btn-secondary" data-loc="${loc}" data-delta="1" style="min-width: 44px; min-height: 44px; width: 44px; height: 44px; padding: 0; font-size: 1.25rem; font-weight: 900; justify-content: center; border-radius: 8px;">+</button>
+                    </div>
                   </div>
                 </div>
               `;
             }).join('')}
           </div>
+          <button type="button" id="btn-step-add-custom-loc" class="btn-secondary" style="width: 100%; height: 38px; font-size: 0.8rem; font-weight: 800; justify-content: center; border: 1.5px dashed #3f3f46; color: #a1a1aa; border-radius: 8px; margin-top: 6px;">
+            ➕ Adicionar Outro Local (ex: Corredor, Check-out)
+          </button>
         </div>
 
         <!-- FOTO DO PRODUTO (OPCIONAL) -->
@@ -3180,11 +3206,10 @@ export async function promptBlitzQuantityAndHistoryStep(product, targetDateISO, 
 
   // Cálculo automático do total ao vivo
   const totalSpan = document.getElementById('step-calc-total');
-  const qtyInputs = modal.querySelectorAll('.input-loc-qty');
 
   const updateTotal = () => {
     let tot = 0;
-    qtyInputs.forEach(inp => {
+    modal.querySelectorAll('.input-loc-qty').forEach(inp => {
       const v = parseInt(inp.value, 10);
       if (!isNaN(v) && v > 0) tot += v;
     });
@@ -3196,27 +3221,121 @@ export async function promptBlitzQuantityAndHistoryStep(product, targetDateISO, 
     return tot;
   };
 
-  // Inicializa o total com eventuais valores pré-carregados
+  const bindLocationEvents = (container = modal) => {
+    container.querySelectorAll('.btn-step-qty').forEach(btn => {
+      if (btn.dataset.bound) return;
+      btn.dataset.bound = 'true';
+      btn.addEventListener('click', () => {
+        triggerHaptic(25);
+        const loc = btn.getAttribute('data-loc');
+        const delta = parseInt(btn.getAttribute('data-delta'), 10) || 0;
+        const inp = modal.querySelector(`.input-loc-qty[data-loc="${loc}"]`);
+        if (inp) {
+          let current = parseInt(inp.value, 10) || 0;
+          current = Math.max(0, current + delta);
+          inp.value = current;
+          updateTotal();
+        }
+      });
+    });
+
+    container.querySelectorAll('.input-loc-qty').forEach(inp => {
+      if (inp.dataset.bound) return;
+      inp.dataset.bound = 'true';
+      inp.addEventListener('input', updateTotal);
+      inp.addEventListener('change', updateTotal);
+    });
+
+    container.querySelectorAll('.btn-step-add-more').forEach(btn => {
+      if (btn.dataset.bound) return;
+      btn.dataset.bound = 'true';
+      btn.addEventListener('click', () => {
+        const loc = btn.getAttribute('data-loc');
+        const inp = modal.querySelector(`.input-loc-qty[data-loc="${loc}"]`);
+        const current = inp ? (parseInt(inp.value, 10) || 0) : 0;
+        promptCustomInputDialog({
+          title: `Somar à contagem: ${loc}`,
+          message: `Quantas unidades adicionais você deseja somar à ${loc}? (Atualmente: ${current} un)`,
+          placeholder: 'Ex: 3',
+          type: 'number',
+          confirmText: 'Somar',
+          cancelText: 'Cancelar',
+          onConfirm: (val) => {
+            const toAdd = parseInt(val, 10);
+            if (!isNaN(toAdd) && toAdd > 0 && inp) {
+              inp.value = current + toAdd;
+              updateTotal();
+              triggerHaptic(30);
+              showToast(`✓ Somadas +${toAdd} un na ${loc} (Total: ${current + toAdd} un)`, 'success', 1500);
+            }
+          }
+        });
+      });
+    });
+  };
+
+  // Liga eventos dos locais iniciais
+  bindLocationEvents();
   updateTotal();
 
-  modal.querySelectorAll('.btn-step-qty').forEach(btn => {
-    btn.addEventListener('click', () => {
-      triggerHaptic(25);
-      const loc = btn.getAttribute('data-loc');
-      const delta = parseInt(btn.getAttribute('data-delta'), 10) || 0;
-      const inp = modal.querySelector(`.input-loc-qty[data-loc="${loc}"]`);
-      if (inp) {
-        let current = parseInt(inp.value, 10) || 0;
-        current = Math.max(0, current + delta);
-        inp.value = current;
-        updateTotal();
+  // Botão para adicionar outro local customizado
+  document.getElementById('btn-step-add-custom-loc')?.addEventListener('click', () => {
+    promptCustomInputDialog({
+      title: 'Adicionar Local de Conferência',
+      message: 'Digite o nome do local onde o produto foi encontrado (ex: Check-out 3, Corredor 4, Ponta 2):',
+      placeholder: 'Nome do local...',
+      confirmText: 'Adicionar Local',
+      cancelText: 'Cancelar',
+      onConfirm: (locName) => {
+        const cleanName = String(locName || '').trim().toUpperCase();
+        if (!cleanName) return;
+        const exists = modal.querySelector(`.input-loc-qty[data-loc="${cleanName}"]`);
+        if (exists) {
+          exists.focus();
+          showToast(`Local ${cleanName} já está na lista`, 'info', 1500);
+          return;
+        }
+        const listEl = document.getElementById('step-locations-list');
+        if (listEl) {
+          const newCard = document.createElement('div');
+          newCard.className = 'loc-card-row';
+          newCard.setAttribute('data-loc', cleanName);
+          newCard.style.cssText = 'background: #18181c; border: 1px solid #27272a; border-radius: 8px; padding: 8px 10px; display: flex; flex-direction: column; gap: 6px;';
+          newCard.innerHTML = `
+            <div style="display: flex; align-items: center; justify-content: space-between;">
+              <span style="font-size: 0.82rem; font-weight: 800; color: #38bdf8;">${cleanName}</span>
+              <button type="button" class="btn-step-add-more btn-secondary" data-loc="${cleanName}" title="Somar mais unidades a este local" style="height: 28px; padding: 0 8px; font-size: 0.72rem; font-weight: 800; color: #38bdf8; border-color: rgba(56, 189, 248, 0.35); border-radius: 6px; display: inline-flex; align-items: center; gap: 3px;">
+                <span>➕ Somar</span>
+              </button>
+            </div>
+            <div style="display: flex; align-items: center; justify-content: space-between; gap: 8px;">
+              <span style="font-size: 0.72rem; color: #a1a1aa;">Contagem neste local:</span>
+              <div style="display: flex; align-items: center; gap: 6px;">
+                <button type="button" class="btn-step-qty btn-secondary" data-loc="${cleanName}" data-delta="-1" style="min-width: 44px; min-height: 44px; width: 44px; height: 44px; padding: 0; font-size: 1.25rem; font-weight: 900; justify-content: center; border-radius: 8px;">-</button>
+                <input
+                  type="number"
+                  class="input-loc-qty form-input"
+                  data-loc="${cleanName}"
+                  min="0"
+                  step="1"
+                  value="0"
+                  style="width: 64px; height: 44px; text-align: center; font-size: 1.15rem; font-weight: 900; padding: 2px; border-radius: 8px;"
+                />
+                <button type="button" class="btn-step-qty btn-secondary" data-loc="${cleanName}" data-delta="1" style="min-width: 44px; min-height: 44px; width: 44px; height: 44px; padding: 0; font-size: 1.25rem; font-weight: 900; justify-content: center; border-radius: 8px;">+</button>
+              </div>
+            </div>
+          `;
+          listEl.appendChild(newCard);
+          bindLocationEvents(newCard);
+          const inp = newCard.querySelector('.input-loc-qty');
+          if (inp) {
+            inp.focus();
+            inp.select();
+          }
+          showToast(`✓ Local ${cleanName} adicionado!`, 'success', 1500);
+        }
       }
     });
-  });
-
-  qtyInputs.forEach(inp => {
-    inp.addEventListener('input', updateTotal);
-    inp.addEventListener('change', updateTotal);
   });
 
   // Handlers de Foto
@@ -3426,7 +3545,7 @@ export async function promptBlitzQuantityAndHistoryStep(product, targetDateISO, 
 
     try {
       const locations = [];
-      qtyInputs.forEach(inp => {
+      modal.querySelectorAll('.input-loc-qty').forEach(inp => {
         const q = parseInt(inp.value, 10);
         if (!isNaN(q) && q > 0) {
           locations.push({
@@ -3694,12 +3813,12 @@ export async function showBlitzProductDatesVerification(product) {
                   Quantidade cadastrada: <strong style="color: #34d399; font-size: 0.95rem;">${formatNumber(evalItem.registeredQty)} unidades</strong>
                 </div>
 
-                <div id="date-actions-${safeKey}" style="display: grid; grid-template-columns: 1fr 1.2fr; gap: 8px; margin-top: 10px;">
-                  <button type="button" class="btn-primary btn-confirm-date" data-key="${safeKey}" data-date="${evalItem.dateISO}" data-qty="${evalItem.registeredQty}" style="height: 44px; font-weight: 900; justify-content: center; background: #10b981; color: #022c22; font-size: 0.85rem;">
-                    ✓ CONFIRMAR
+                <div id="date-actions-${safeKey}" style="display: grid; grid-template-columns: 1.4fr 1fr; gap: 8px; margin-top: 10px;">
+                  <button type="button" class="btn-primary btn-conferir-date" data-key="${safeKey}" data-date="${evalItem.dateISO}" style="height: 44px; font-weight: 900; justify-content: center; background: #10b981; color: #022c22; font-size: 0.85rem;">
+                    📦 CONFERIR DATA
                   </button>
-                  <button type="button" class="btn-secondary btn-edit-qty-date" data-key="${safeKey}" data-date="${evalItem.dateISO}" data-qty="${evalItem.registeredQty}" style="height: 44px; font-weight: 800; justify-content: center; color: #fbbf24; border-color: rgba(245, 158, 11, 0.4); font-size: 0.8rem;">
-                    ✏️ EDITAR QUANTIDADE
+                  <button type="button" class="btn-secondary btn-nao-tem-date" data-key="${safeKey}" data-date="${evalItem.dateISO}" style="height: 44px; font-weight: 800; justify-content: center; color: #ef4444; border-color: rgba(239, 68, 68, 0.4); background: rgba(239, 68, 68, 0.08); font-size: 0.8rem;">
+                    ❌ NÃO TEM
                   </button>
                 </div>
                 <div id="date-resolved-${safeKey}" class="${evalItem.resolved ? '' : 'hidden'}" style="margin-top: 8px;">
@@ -3790,57 +3909,12 @@ export async function showBlitzProductDatesVerification(product) {
     startBlitzScanning();
   });
 
-  // Ação: CONFIRMAR (Data cadastrada)
-  modal.querySelectorAll('.btn-confirm-date').forEach(btn => {
-    btn.addEventListener('click', async () => {
-      const key = btn.getAttribute('data-key');
+  // Ação: CONFERIR DATA (Abre contagem física por local da Blitz atual)
+  modal.querySelectorAll('.btn-conferir-date').forEach(btn => {
+    btn.addEventListener('click', () => {
+      closeModal();
       const targetDate = btn.getAttribute('data-date');
-      const qty = Number(btn.getAttribute('data-qty')) || 0;
-
-      showToast('Confirmando data...', 'sync', 600);
-
-      try {
-        await saveBlitzConferenceRecord({
-          sessionId: session?.id,
-          productId: product.id,
-          barcode: product.barcode,
-          sector: prodSector,
-          requestedDate: targetDate,
-          previousQuantity: qty,
-          newQuantity: qty,
-          result: 'TEM',
-          locations: [{ location: prodCorridor, quantity: qty }],
-          photo_proof: null,
-          userId: getCurrentUser()?.id || session?.responsible_user_id || session?.user_id || 'ana_luiza',
-          userName: getCurrentUser()?.name || session?.responsible_user_name || session?.user_name || 'Ana Luiza'
-        });
-
-        // 10. PRODUTO VERIFICADO: Muda status para VERIFICADO
-        await updateProductStatus(product.id, 'VERIFICADO');
-        product.status = 'VERIFICADO';
-        triggerSyncNow().catch(err => console.warn('Sync error:', err));
-
-        // Atualiza card
-        const actionsEl = document.getElementById(`date-actions-${key}`);
-        const resolvedEl = document.getElementById(`date-resolved-${key}`);
-        if (actionsEl) actionsEl.classList.add('hidden');
-        if (resolvedEl) {
-          resolvedEl.innerHTML = `
-            <div style="background: rgba(16, 185, 129, 0.2); border: 1px solid #10b981; padding: 6px 10px; border-radius: 6px; color: #a7f3d0; font-weight: 800; font-size: 0.8rem; text-align: center;">
-              ✓ DATA CONFIRMADA (${qty} un)
-            </div>
-          `;
-          resolvedEl.classList.remove('hidden');
-        }
-
-        const evalItem = dateEvaluations.find(e => e.dateISO === targetDate);
-        if (evalItem) evalItem.resolved = true;
-        checkAllResolved();
-        showToast('✓ Data confirmada!', 'success', 1000);
-      } catch (err) {
-        console.error('Erro ao confirmar data:', err);
-        showToast('Erro ao salvar confirmação', 'warning');
-      }
+      promptBlitzQuantityAndHistoryStep(product, targetDate);
     });
   });
 

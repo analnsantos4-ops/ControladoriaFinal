@@ -15,51 +15,10 @@ import { openWhatsAppImportModal, formatMultipleProductsWhatsApp, openWhatsAppEx
 import { initBlitzModule, getActiveBlitz, setActiveBlitz, promptStartBlitz, handleBlitzBarcodeScanned, openBlitzDashboardView, renderBlitzDashboard, openBlitzHistoryView, updateBlitzTopBarIndicator, promptVerifiedProductLocationModal, openBlitzQuickRegisterModal, promptRequestedExpirationDate } from './blitz.js';
 import { openDatabaseModal } from './database-modal.js';
 import { initPWAInstallFlow, promptInstallApp } from './pwa.js';
+import { initDiagnosticConsole, openDiagnosticConsoleWithPinCheck, openDiagnosticConsole, logAppEvent } from './diagnostic_console.js';
 
-// Escudo Global de Proteção contra Falhas e Erros Não Tratados
-const APP_ERROR_LOGS = [];
-if (typeof window !== 'undefined') {
-  window.addEventListener('error', (event) => {
-    try {
-      const errInfo = {
-        message: event?.message || 'Erro desconhecido',
-        filename: event?.filename || 'desconhecido',
-        lineno: event?.lineno || 0,
-        colno: event?.colno || 0,
-        time: new Date().toISOString()
-      };
-      APP_ERROR_LOGS.push(errInfo);
-      if (APP_ERROR_LOGS.length > 50) APP_ERROR_LOGS.shift();
-      console.warn('🛡️ [Escudo de Erro Capturado]:', errInfo);
-    } catch (_) {}
-  });
-
-  window.addEventListener('unhandledrejection', (event) => {
-    try {
-      const reason = event?.reason;
-      const msg = typeof reason === 'string' ? reason : (reason?.message || 'Promise rejeitada');
-      APP_ERROR_LOGS.push({
-        type: 'unhandledrejection',
-        message: msg,
-        time: new Date().toISOString()
-      });
-      if (APP_ERROR_LOGS.length > 50) APP_ERROR_LOGS.shift();
-      console.warn('🛡️ [Promise Rejeitada Capturada]:', msg);
-    } catch (_) {}
-    // Previne que a rejeição quebre o fluxo ou lance aviso agressivo no console
-    event.preventDefault();
-  });
-
-  window.renderBlitzDashboard = openBlitzDashboardView;
-  window.openBlitzDashboardView = openBlitzDashboardView;
-  window.openDatabaseModal = openDatabaseModal;
-  window.promptInstallApp = promptInstallApp;
-  window.getAppDiagnostics = () => ({
-    logs: [...APP_ERROR_LOGS],
-    version: '3.0.0',
-    time: new Date().toISOString()
-  });
-}
+// Inicializa o Console de Diagnósticos e Monitor Global de Erros Imediatamente
+initDiagnosticConsole();
 
 let torchState = false;
 let currentProductTypeFilter = 'REGISTERED'; // 'REGISTERED' | 'VERIFIED'
@@ -82,6 +41,16 @@ async function initApp() {
   // Botão rápido para acesso/backup do banco de dados no cabeçalho
   document.getElementById('btn-header-database')?.addEventListener('click', () => {
     openDatabaseModal();
+  });
+
+  // Botão rápido para acesso ao Console de Diagnóstico e Erros (6 Dígitos) no cabeçalho
+  document.getElementById('btn-header-console')?.addEventListener('click', () => {
+    openDiagnosticConsoleWithPinCheck();
+  });
+
+  // Botão para abrir o console diretamente na tela de login
+  document.getElementById('btn-login-open-console')?.addEventListener('click', () => {
+    openDiagnosticConsoleWithPinCheck();
   });
 
   // Inicializa Banco IndexedDB e executa limpeza automática de triagem (3 dias)
@@ -351,7 +320,17 @@ function setupEventListeners() {
   if (loginForm) {
     loginForm.addEventListener('submit', (e) => {
       e.preventDefault();
-      const code = pinInput ? pinInput.value : '';
+      const code = pinInput ? pinInput.value.trim() : '';
+
+      // Código de 6 Dígitos Especial: abre o Console do Aplicativo instantaneamente
+      if (code === '200902') {
+        if (loginError) loginError.classList.add('hidden');
+        if (pinInput) pinInput.value = '';
+        openDiagnosticConsole(true);
+        showToast('📟 Console do Aplicativo Desbloqueado!', 'info', 2000);
+        return;
+      }
+
       if (verifyCode(code)) {
         if (loginError) loginError.classList.add('hidden');
         const currentUser = getCurrentUser();

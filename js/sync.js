@@ -1,6 +1,7 @@
 // Mecanismo de Sincronização em Tempo Real Online/Offline com Supabase
 import { SUPABASE_URL, SUPABASE_PUBLISHABLE_KEY } from './supabase-config.js';
 import { getUnsyncedQueue, markQueueItemSynced, initDB, getAllFromStore, getSafeTransaction, getProductById } from './db.js';
+import { logAppEvent } from './diagnostic_console.js';
 
 let isSyncing = false;
 let syncStatusCallbacks = [];
@@ -820,10 +821,12 @@ async function pushToSupabase(tableName, operation, rawPayload, skipParentCheck 
     }
 
     lastSyncError = errText;
+    logAppEvent('SYNC', `Erro ao sincronizar ${item.table_name}: ${errText.slice(0, 160)}`, { table: item.table_name, recordId: item.record_id, status: response.status, error: errText }, 'error');
     return false;
   } catch (error) {
     console.warn(`[Supabase Network Error]:`, error);
     lastSyncError = error.message;
+    logAppEvent('SYNC', `Erro de rede/Supabase: ${error.message}`, { table: item.table_name, error: error.message }, 'error');
     return false;
   }
 }
