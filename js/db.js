@@ -3686,150 +3686,156 @@ export async function getPreviousFinalizedBlitzConference({ currentBlitzId, barc
       };
     };
 
-    // Procura conferência deste produto na blitz anterior mais recente
-    for (const b of sortedPrior) {
-      const formattedDateStr = b.date ? (formatDateBR(b.date) || String(b.date).split('T')[0]) : 'Blitz anterior';
+    // 1. Prioridade Máxima: conferencias_blitz de qualquer Blitz anterior (blitz_id !== currentBlitzId)
+    const matchingConfs = allConfs.filter(c => {
+      if (c.blitz_id === currentBlitzId) return false;
+      const eanMatch = cleanBar && String(c.ean || '').trim() === cleanBar;
+      const idMatch = productId && c.produto_id === productId;
+      if (!eanMatch && !idMatch) return false;
+      if (cleanExp) {
+        const d = String(c.data_validade || '').split('T')[0];
+        return d === cleanExp || formatDateBR(c.data_validade) === cleanExpBR;
+      }
+      return true;
+    });
 
-      // 1. Prioridade: conferencias_blitz
-      const priorConfs = allConfs.filter(c => {
-        if (c.blitz_id !== b.id) return false;
-        const eanMatch = cleanBar && String(c.ean || '').trim() === cleanBar;
-        const idMatch = productId && c.produto_id === productId;
-        return eanMatch || idMatch;
+    if (matchingConfs.length > 0) {
+      matchingConfs.sort((a, b) => {
+        const dateA = new Date(a.conferido_em || a.updated_at || a.created_at || (priorBlitzMap.get(a.blitz_id)?.date) || 0);
+        const dateB = new Date(b.conferido_em || b.updated_at || b.created_at || (priorBlitzMap.get(b.blitz_id)?.date) || 0);
+        return dateB - dateA;
       });
 
-      if (priorConfs.length > 0) {
-        let matchConf = null;
-        if (cleanExp) {
-          matchConf = priorConfs.find(c => {
-            const d = String(c.data_validade || '').split('T')[0];
-            return d === cleanExp || formatDateBR(c.data_validade) === cleanExpBR;
-          });
-        } else {
-          matchConf = priorConfs[0];
-        }
+      const bestConf = matchingConfs[0];
+      const blitzMeta = priorBlitzMap.get(bestConf.blitz_id);
+      const qty = Number(bestConf.quantidade) || 0;
+      const locDetails = parseLocations(bestConf.locations || []);
+      const respId = normalizeUserId(bestConf.user_id || bestConf.responsible_user_id || blitzMeta?.responsible_user_id || 'ana_luiza');
+      const respUser = bestConf.usuario || bestConf.responsible_user_name || blitzMeta?.responsible_user_name || (respId === 'angelica' ? 'Angélica' : 'Ana Luiza');
+      const confDate = bestConf.conferido_em || blitzMeta?.date || bestConf.created_at;
+      const formattedDateStr = confDate ? (formatDateBR(confDate) || String(confDate).split('T')[0]) : 'Blitz anterior';
 
-        if (matchConf) {
-          const qty = Number(matchConf.quantidade) || 0;
-          const locDetails = parseLocations(matchConf.locations || []);
-          const respUser = matchConf.usuario || matchConf.responsible_user_name || b.responsible_user_name || 'Ana Luiza';
-          const respId = matchConf.user_id || matchConf.userId || b.responsible_user_id || 'ana_luiza';
-          return {
-            blitzId: b.id,
-            blitzLabel: b.label || 'Blitz anterior',
-            blitzDate: formattedDateStr,
-            date: b.date,
-            quantity: qty,
-            total: qty,
-            expirationDate: matchConf.data_validade || cleanExp,
-            locations: locDetails.locations,
-            shelfQty: locDetails.shelfQty,
-            depositQty: locDetails.depositQty,
-            fridgeQty: locDetails.fridgeQty,
-            otherLocations: locDetails.otherLocations,
-            responsible_user_id: respId,
-            responsible_user_name: respUser,
-            responsible: respUser,
-            tipo_conferencia: matchConf.tipo_conferencia || 'MANUAL',
-            sector: b.sector,
-            result: qty > 0 ? 'TEM' : 'NAO_TEM'
-          };
-        }
-      }
-
-      // 2. Prioridade: blitz_itens
-      const priorBItens = allBItens.filter(it => {
-        if (it.blitz_id !== b.id) return false;
-        const eanMatch = cleanBar && String(it.ean || '').trim() === cleanBar;
-        const idMatch = productId && it.produto_id === productId;
-        return (eanMatch || idMatch) && (it.status === 'CONFERIDO' || Boolean(it.conferido_em) || Number(it.quantidade) > 0);
-      });
-
-      if (priorBItens.length > 0) {
-        let matchBItem = null;
-        if (cleanExp) {
-          matchBItem = priorBItens.find(it => {
-            const d = String(it.data_validade || '').split('T')[0];
-            return d === cleanExp || formatDateBR(it.data_validade) === cleanExpBR;
-          });
-        } else {
-          matchBItem = priorBItens[0];
-        }
-
-        if (matchBItem) {
-          const qty = Number(matchBItem.quantidade != null ? matchBItem.quantidade : matchBItem.total_quantity) || 0;
-          const locDetails = parseLocations(matchBItem.locations || []);
-          const respUser = matchBItem.usuario || matchBItem.responsible_user_name || b.responsible_user_name || 'Ana Luiza';
-          const respId = matchBItem.user_id || matchBItem.userId || b.responsible_user_id || 'ana_luiza';
-          return {
-            blitzId: b.id,
-            blitzLabel: b.label || 'Blitz anterior',
-            blitzDate: formattedDateStr,
-            date: b.date,
-            quantity: qty,
-            total: qty,
-            expirationDate: matchBItem.data_validade || cleanExp,
-            locations: locDetails.locations,
-            shelfQty: locDetails.shelfQty,
-            depositQty: locDetails.depositQty,
-            fridgeQty: locDetails.fridgeQty,
-            otherLocations: locDetails.otherLocations,
-            responsible_user_id: respId,
-            responsible_user_name: respUser,
-            responsible: respUser,
-            tipo_conferencia: matchBItem.tipo_conferencia || 'MANUAL',
-            sector: b.sector,
-            result: qty > 0 ? 'TEM' : 'NAO_TEM'
-          };
-        }
-      }
-
-      // 3. Prioridade: blitz_items
-      const priorItems = allItems.filter(it => {
-        if (it.blitz_session_id !== b.id) return false;
-        const barMatch = cleanBar && String(it.barcode || '').trim() === cleanBar;
-        const idMatch = productId && it.product_id === productId;
-        const isChecked = Boolean(it.checked_at) || it.result === 'TEM' || it.result === 'NAO_TEM';
-        return (barMatch || idMatch) && isChecked;
-      });
-
-      if (priorItems.length > 0) {
-        let matchItem = null;
-        if (cleanExp) {
-          matchItem = priorItems.find(it => {
-            const itExp = String(it.requested_expiration_date || '').trim().split('T')[0];
-            return itExp === cleanExp || formatDateBR(itExp) === cleanExpBR;
-          });
-        } else {
-          matchItem = priorItems[0];
-        }
-
-        if (matchItem) {
-          const qty = Number(matchItem.total_quantity != null ? matchItem.total_quantity : matchItem.quantity) || 0;
-          const locDetails = parseLocations(matchItem.locations || []);
-          return {
-            blitzId: b.id,
-            blitzLabel: b.label || 'Blitz anterior',
-            blitzDate: formattedDateStr,
-            date: b.date,
-            quantity: qty,
-            total: qty,
-            expirationDate: matchItem.requested_expiration_date || cleanExp,
-            locations: locDetails.locations,
-            shelfQty: locDetails.shelfQty,
-            depositQty: locDetails.depositQty,
-            fridgeQty: locDetails.fridgeQty,
-            otherLocations: locDetails.otherLocations,
-            responsible_user_id: b.responsible_user_id,
-            responsible_user_name: b.responsible_user_name,
-            responsible: b.responsible_user_name,
-            sector: b.sector,
-            result: matchItem.result || (qty > 0 ? 'TEM' : 'NAO_TEM')
-          };
-        }
-      }
+      return {
+        blitzId: bestConf.blitz_id,
+        blitzLabel: blitzMeta?.label || 'Blitz anterior',
+        blitzDate: formattedDateStr,
+        date: confDate,
+        quantity: qty,
+        total: qty,
+        expirationDate: bestConf.data_validade || cleanExp,
+        locations: locDetails.locations,
+        shelfQty: locDetails.shelfQty,
+        depositQty: locDetails.depositQty,
+        fridgeQty: locDetails.fridgeQty,
+        otherLocations: locDetails.otherLocations,
+        responsible_user_id: respId,
+        responsible_user_name: respUser,
+        responsible: respUser,
+        tipo_conferencia: bestConf.tipo_conferencia || 'MANUAL',
+        sector: blitzMeta?.sector || 'MERCEARIA',
+        result: qty > 0 ? 'TEM' : 'NAO_TEM'
+      };
     }
 
+    // 2. Prioridade Secundária: blitz_itens de qualquer Blitz anterior
+    const matchingBItens = allBItens.filter(it => {
+      if (it.blitz_id === currentBlitzId) return false;
+      const eanMatch = cleanBar && String(it.ean || '').trim() === cleanBar;
+      const idMatch = productId && it.produto_id === productId;
+      if (!eanMatch && !idMatch) return false;
+      if (it.status !== 'CONFERIDO' && !it.conferido_em && Number(it.quantidade) <= 0) return false;
+      if (cleanExp) {
+        const d = String(it.data_validade || '').split('T')[0];
+        return d === cleanExp || formatDateBR(it.data_validade) === cleanExpBR;
+      }
+      return true;
+    });
+
+    if (matchingBItens.length > 0) {
+      matchingBItens.sort((a, b) => {
+        const dateA = new Date(a.conferido_em || a.updated_at || a.created_at || (priorBlitzMap.get(a.blitz_id)?.date) || 0);
+        const dateB = new Date(b.conferido_em || b.updated_at || b.created_at || (priorBlitzMap.get(b.blitz_id)?.date) || 0);
+        return dateB - dateA;
+      });
+
+      const bestItem = matchingBItens[0];
+      const blitzMeta = priorBlitzMap.get(bestItem.blitz_id);
+      const qty = Number(bestItem.quantidade != null ? bestItem.quantidade : bestItem.total_quantity) || 0;
+      const locDetails = parseLocations(bestItem.locations || []);
+      const respId = normalizeUserId(bestItem.user_id || bestItem.responsible_user_id || blitzMeta?.responsible_user_id || 'ana_luiza');
+      const respUser = bestItem.usuario || bestItem.responsible_user_name || blitzMeta?.responsible_user_name || (respId === 'angelica' ? 'Angélica' : 'Ana Luiza');
+      const confDate = bestItem.conferido_em || blitzMeta?.date || bestItem.created_at;
+      const formattedDateStr = confDate ? (formatDateBR(confDate) || String(confDate).split('T')[0]) : 'Blitz anterior';
+
+      return {
+        blitzId: bestItem.blitz_id,
+        blitzLabel: blitzMeta?.label || 'Blitz anterior',
+        blitzDate: formattedDateStr,
+        date: confDate,
+        quantity: qty,
+        total: qty,
+        expirationDate: bestItem.data_validade || cleanExp,
+        locations: locDetails.locations,
+        shelfQty: locDetails.shelfQty,
+        depositQty: locDetails.depositQty,
+        fridgeQty: locDetails.fridgeQty,
+        otherLocations: locDetails.otherLocations,
+        responsible_user_id: respId,
+        responsible_user_name: respUser,
+        responsible: respUser,
+        tipo_conferencia: bestItem.tipo_conferencia || 'MANUAL',
+        sector: blitzMeta?.sector || 'MERCEARIA',
+        result: qty > 0 ? 'TEM' : 'NAO_TEM'
+      };
+    }
+
+    // 3. Prioridade Terciária: blitz_items (itens de sessão)
+    const matchingSessionItems = allItems.filter(it => {
+      if (it.blitz_session_id === currentBlitzId) return false;
+      const bMatch = cleanBar && String(it.barcode || '').trim() === cleanBar;
+      const pMatch = productId && it.product_id === productId;
+      if (!bMatch && !pMatch) return false;
+      if (cleanExp) {
+        const d = String(it.requested_expiration_date || '').split('T')[0];
+        return d === cleanExp || formatDateBR(it.requested_expiration_date) === cleanExpBR;
+      }
+      return true;
+    });
+
+    if (matchingSessionItems.length > 0) {
+      matchingSessionItems.sort((a, b) => new Date(b.checked_at || b.created_at || 0) - new Date(a.checked_at || a.created_at || 0));
+      const bestSessionItem = matchingSessionItems[0];
+      const blitzMeta = priorBlitzMap.get(bestSessionItem.blitz_session_id);
+      const qty = Number(bestSessionItem.total_quantity != null ? bestSessionItem.total_quantity : bestSessionItem.previous_quantity) || 0;
+      const locDetails = parseLocations(bestSessionItem.locations || []);
+      const respId = normalizeUserId(bestSessionItem.user_id || bestSessionItem.responsible_user_id || blitzMeta?.responsible_user_id || 'ana_luiza');
+      const respUser = bestSessionItem.user_name || bestSessionItem.responsible_user_name || blitzMeta?.responsible_user_name || (respId === 'angelica' ? 'Angélica' : 'Ana Luiza');
+      const confDate = bestSessionItem.checked_at || blitzMeta?.date || bestSessionItem.created_at;
+      const formattedDateStr = confDate ? (formatDateBR(confDate) || String(confDate).split('T')[0]) : 'Blitz anterior';
+
+      return {
+        blitzId: bestSessionItem.blitz_session_id,
+        blitzLabel: blitzMeta?.label || 'Blitz anterior',
+        blitzDate: formattedDateStr,
+        date: confDate,
+        quantity: qty,
+        total: qty,
+        expirationDate: bestSessionItem.requested_expiration_date || cleanExp,
+        locations: locDetails.locations,
+        shelfQty: locDetails.shelfQty,
+        depositQty: locDetails.depositQty,
+        fridgeQty: locDetails.fridgeQty,
+        otherLocations: locDetails.otherLocations,
+        responsible_user_id: respId,
+        responsible_user_name: respUser,
+        responsible: respUser,
+        tipo_conferencia: 'MANUAL',
+        sector: blitzMeta?.sector || 'MERCEARIA',
+        result: qty > 0 ? 'TEM' : 'NAO_TEM'
+      };
+    }
+
+    // Se NÃO encontrou nenhuma conferência anterior desta validade específica em nenhuma blitz:
     return null;
   } catch (err) {
     console.warn('Erro ao consultar conferência em blitz anterior:', err);

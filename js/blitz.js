@@ -2452,32 +2452,34 @@ export function promptBlitzSelectMultipleDates(product, blitzItems) {
     <div class="modal-card" style="padding: 20px; max-width: 440px; width: 100%; box-sizing: border-box;">
       <div style="display: flex; align-items: center; justify-content: space-between; border-bottom: 1px solid #27272a; padding-bottom: 8px; margin-bottom: 12px;">
         <h3 style="font-size: 1.05rem; font-weight: 900; color: #fbbf24; margin: 0; display: flex; align-items: center; gap: 6px;">
-          <span>📅</span> <span>ESCOLHA A VALIDADE</span>
+          <span>📅</span> <span>PRODUTO COM VÁRIAS VALIDADES</span>
         </h3>
         <button type="button" id="btn-close-mult-dates" class="btn-icon-control" style="font-size: 1rem; width: 32px; height: 32px;">✕</button>
       </div>
 
-      <div style="background: #18181c; border: 1px solid #27272a; border-radius: 8px; padding: 10px; margin-bottom: 12px;">
-        <div style="font-size: 0.95rem; font-weight: 900; color: #f4f4f5; line-height: 1.3;">
+      <div style="background: #18181c; border: 1px solid #27272a; border-radius: 8px; padding: 12px; margin-bottom: 12px;">
+        <div style="font-size: 0.98rem; font-weight: 900; color: #f4f4f5; line-height: 1.35;">
           ${product.name}
         </div>
-        <div style="font-size: 0.75rem; color: #a1a1aa; margin-top: 4px;">
-          Código: <strong style="color: #fbbf24;">${product.barcode}</strong> • Setor: <strong>${product.sector || 'MERCEARIA'}</strong>
+        <div style="font-size: 0.78rem; color: #a1a1aa; margin-top: 6px;">
+          Código: <strong style="color: #fbbf24; font-family: monospace;">${product.barcode}</strong> • Setor: <strong>${product.sector || 'MERCEARIA'}</strong>
         </div>
       </div>
 
-      <div style="font-size: 0.84rem; color: #e4e4e7; font-weight: 700; margin-bottom: 10px;">
-        Existem <strong>${blitzItems.length} datas</strong> para este produto nesta Blitz. Qual validade você está conferindo agora?
+      <div style="background: rgba(245, 158, 11, 0.1); border: 1px solid rgba(245, 158, 11, 0.3); border-radius: 8px; padding: 10px 12px; font-size: 0.84rem; color: #fef08a; font-weight: 700; line-height: 1.4; margin-bottom: 12px;">
+        ℹ️ <strong>Mesmo produto com ${blitzItems.length} datas cadastradas.</strong><br>
+        Escolha qual data você deseja conferir:
       </div>
 
       <div style="display: flex; flex-direction: column; gap: 8px; max-height: 280px; overflow-y: auto; margin-bottom: 12px;">
         ${blitzItems.map(item => {
           const dateISO = item.data_validade || item.requested_expiration_date;
-          const isConferido = item.status === 'CONFERIDO';
+          const isConferido = item.status === 'CONFERIDO' || Boolean(item.conferido_em);
           const qty = Number(item.total_quantity != null ? item.total_quantity : item.quantidade) || 0;
           return `
             <button type="button" class="btn-select-blitz-date-item btn-secondary" data-date="${dateISO}" data-item-id="${item.id}" style="height: 54px; padding: 0 14px; display: flex; align-items: center; justify-content: space-between; border-radius: 8px; border-color: ${isConferido ? 'rgba(16, 185, 129, 0.4)' : '#3f3f46'};">
-              <div style="display: flex; align-items: center; gap: 8px;">
+              <div style="display: flex; align-items: center; gap: 10px;">
+                <span style="font-size: 1.2rem; color: #fbbf24;">○</span>
                 <span style="font-size: 1.15rem; font-weight: 900; color: #fbbf24; font-family: monospace;">
                   ${formatDateBR(dateISO)}
                 </span>
@@ -2485,7 +2487,7 @@ export function promptBlitzSelectMultipleDates(product, blitzItems) {
               <div>
                 ${isConferido
                   ? `<span style="font-size: 0.74rem; font-weight: 800; background: rgba(16, 185, 129, 0.2); color: #34d399; border: 1px solid #10b981; padding: 2px 8px; border-radius: 6px;">✓ CONFERIDO (${qty} un)</span>`
-                  : `<span style="font-size: 0.74rem; font-weight: 800; background: rgba(245, 158, 11, 0.2); color: #fbbf24; border: 1px solid #f59e0b; padding: 2px 8px; border-radius: 6px;">⏳ PENDENTE</span>`
+                  : `<span style="font-size: 0.74rem; font-weight: 800; background: rgba(245, 158, 11, 0.15); color: #fbbf24; border: 1px solid rgba(245, 158, 11, 0.4); padding: 2px 8px; border-radius: 6px;">⏳ NÃO CONFERIDO</span>`
                 }
               </div>
             </button>
@@ -3001,48 +3003,47 @@ export async function promptBlitzQuantityAndHistoryStep(product, targetDateISO, 
         </div>
       </div>
 
-      <!-- RESPOSTA DO SISTEMA SOBRE O HISTÓRICO DA DATA -->
+      <!-- STATUS DA CONFERÊNCIA ATUAL DESTA BLITZ (Item 16) -->
       ${isAlreadyInCurrentBlitz ? `
-        <!-- CENÁRIO 0: JÁ CONFERIDO NESTA BLITZ ATUAL -->
-        <div style="background: rgba(14, 165, 233, 0.14); border: 1.5px solid #0284c7; border-radius: 10px; padding: 12px; margin-bottom: 14px;">
-          <div style="font-size: 0.95rem; font-weight: 900; color: #38bdf8; margin-bottom: 4px; display: flex; align-items: center; justify-content: space-between;">
-            <span>🔄 JÁ CONFERIDO NESTA BLITZ</span>
-            <span style="font-size: 0.74rem; color: #bae6fd; font-weight: 700; background: rgba(2, 132, 199, 0.4); padding: 2px 6px; border-radius: 4px;">Sessão Atual</span>
+        <div style="background: rgba(14, 165, 233, 0.12); border: 1.5px solid #0284c7; border-radius: 10px; padding: 12px; margin-bottom: 12px;">
+          <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 4px;">
+            <span style="font-size: 0.86rem; font-weight: 900; color: #38bdf8;">🔄 CONFERÊNCIA ATUAL DESTA BLITZ</span>
+            <span style="font-size: 0.72rem; color: #bae6fd; font-weight: 800; background: rgba(2, 132, 199, 0.35); padding: 2px 6px; border-radius: 4px;">STATUS: CONFERIDO</span>
           </div>
-          <div style="font-size: 0.98rem; color: #f4f4f5; font-weight: 800; line-height: 1.4;">
-            Quantidade já registrada: <span style="font-size: 1.35rem; font-weight: 900; color: #38bdf8;">${currentQuantity}</span> unidades
+          <div style="font-size: 0.96rem; color: #f4f4f5; font-weight: 800;">
+            Quantidade registrada nesta Blitz: <strong style="font-size: 1.3rem; font-weight: 900; color: #38bdf8;">${currentQuantity}</strong> unidades
           </div>
           ${currentBlitzRecord.locations && currentBlitzRecord.locations.length > 0 ? `
             <div style="font-size: 0.76rem; color: #bae6fd; margin-top: 4px;">
               Locais registrados: ${currentBlitzRecord.locations.map(l => `${l.location}: ${l.quantity}`).join(' | ')}
             </div>
           ` : ''}
-          <div style="font-size: 0.74rem; color: #94a3b8; margin-top: 4px;">
-            💡 Os campos abaixo foram preenchidos com os locais salvos. Ajuste as quantidades e clique em Gravar para atualizar.
-          </div>
-        </div>
-      ` : (isFirstTime ? `
-        <!-- CENÁRIO 1: PRIMEIRO REGISTRO DESSA DATA -->
-        <div style="background: rgba(16, 185, 129, 0.12); border: 1.5px solid #10b981; border-radius: 10px; padding: 12px; margin-bottom: 14px;">
-          <div style="font-size: 0.95rem; font-weight: 900; color: #34d399; margin-bottom: 4px; display: flex; align-items: center; gap: 6px;">
-            <span>🆕</span> <span>PRIMEIRO REGISTRO DESTA DATA</span>
-          </div>
-          <div style="font-size: 0.84rem; color: #e4e4e7; line-height: 1.4;">
-            Esta data de validade (<strong>${formatDateBR(targetDateISO)}</strong>) nunca foi verificada antes em blitzes anteriores finalizadas.
-          </div>
         </div>
       ` : `
-        <!-- CENÁRIO 2: JÁ VERIFICADA NA BLITZ ANTERIOR FINALIZADA -->
+        <div style="background: #18181c; border: 1px solid #27272a; border-radius: 8px; padding: 10px 12px; margin-bottom: 12px; display: flex; align-items: center; justify-content: space-between;">
+          <span style="font-size: 0.82rem; font-weight: 800; color: #a1a1aa; text-transform: uppercase;">Conferência Atual Nesta Blitz:</span>
+          <span style="font-size: 0.78rem; font-weight: 900; color: #fbbf24; background: rgba(245, 158, 11, 0.18); border: 1px solid rgba(245, 158, 11, 0.4); padding: 3px 8px; border-radius: 6px;">
+            ⏳ NÃO CONFERIDO
+          </span>
+        </div>
+      `}
+
+      <!-- HISTÓRICO ANTERIOR DA DATA ESPECÍFICA (Item 16: Ausência de histórico != 0) -->
+      ${!isFirstTime && lastRecord ? `
         <div style="background: rgba(245, 158, 11, 0.12); border: 1.5px solid #f59e0b; border-radius: 10px; padding: 12px; margin-bottom: 14px;">
-          <div style="font-size: 0.92rem; font-weight: 900; color: #fbbf24; margin-bottom: 4px; display: flex; align-items: center; justify-content: space-between;">
-            <span>📋 JÁ VERIFICADA NA BLITZ ANTERIOR</span>
-            <span style="font-size: 0.76rem; color: #fef08a; font-weight: 700;">${previousDateStr}</span>
+          <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 6px;">
+            <span style="font-size: 0.86rem; font-weight: 900; color: #fbbf24; text-transform: uppercase; letter-spacing: 0.5px;">
+              📋 ÚLTIMA CONFERÊNCIA (REFERÊNCIA)
+            </span>
+            <span style="font-size: 0.74rem; color: #fef08a; font-weight: 800; background: rgba(245, 158, 11, 0.25); padding: 2px 6px; border-radius: 4px;">
+              ${previousDateStr}
+            </span>
           </div>
-          <div style="font-size: 0.98rem; color: #f4f4f5; font-weight: 800; line-height: 1.4;">
-            Quantidade na blitz anterior: <span style="font-size: 1.35rem; font-weight: 900; color: #38bdf8;">${previousQuantity}</span> unidades
+          <div style="font-size: 0.96rem; color: #f4f4f5; font-weight: 800; line-height: 1.4;">
+            Quantidade: <strong style="font-size: 1.25rem; font-weight: 900; color: #38bdf8;">${previousQuantity}</strong> unidades
           </div>
           ${lastRecord.responsible ? `
-            <div style="font-size: 0.76rem; color: #cbd5e1; margin-top: 3px;">
+            <div style="font-size: 0.8rem; color: #cbd5e1; margin-top: 4px;">
               👤 Conferido por: <strong style="color: #f1f5f9;">${lastRecord.responsible}</strong>
             </div>
           ` : ''}
@@ -3051,13 +3052,23 @@ export async function promptBlitzQuantityAndHistoryStep(product, targetDateISO, 
               Locais anteriores: ${lastRecord.locations.map(l => `${l.location}: ${l.quantity}`).join(' | ')}
             </div>
           ` : ''}
-          ${lastRecord.result === 'NAO_TEM' ? `
-            <div style="font-size: 0.78rem; color: #f87171; font-weight: 800; margin-top: 4px;">
-              ⚠️ Na blitz anterior constava como NÃO TEM (0 un).
-            </div>
-          ` : ''}
+          <div style="font-size: 0.74rem; color: #a1a1aa; margin-top: 6px; border-top: 1px dashed rgba(245, 158, 11, 0.3); padding-top: 5px;">
+            ℹ️ <em>Apenas referência histórica. Não é lançada automaticamente na Blitz atual.</em>
+          </div>
         </div>
-      `)}
+      ` : `
+        <div style="background: #18181c; border: 1.5px solid #3f3f46; border-radius: 10px; padding: 12px; margin-bottom: 14px;">
+          <div style="font-size: 0.82rem; font-weight: 900; color: #a1a1aa; margin-bottom: 4px; display: flex; align-items: center; gap: 6px; text-transform: uppercase;">
+            <span>📁</span> <span>HISTÓRICO</span>
+          </div>
+          <div style="font-size: 1.05rem; font-weight: 900; color: #f59e0b; margin-bottom: 4px;">
+            NUNCA CONFERIDO
+          </div>
+          <div style="font-size: 0.82rem; color: #94a3b8; line-height: 1.4;">
+            Este produto ainda não possui nenhuma conferência registrada para esta data (<strong>${formatDateBR(targetDateISO)}</strong>).
+          </div>
+        </div>
+      `}
 
       <!-- PERGUNTA: QUANTAS TEM NESTA BLITZ? -->
       <form id="form-blitz-quantity-step" style="display: flex; flex-direction: column; gap: 14px;">
@@ -5737,7 +5748,7 @@ export async function finishActiveBlitzSession(sessionId = null) {
     promptConfirmFinishBlitzModal(session, metrics, async () => {
       try {
         showToast('Finalizando e zerando pendências...', 'sync', 1500);
-        const finalStats = await finalizeBlitzWithAutoZeros(id, effectiveUserName);
+        const finalStats = await finalizeBlitzWithAutoZeros(id, effectiveUserName, effectiveUserId);
         const updated = await getBlitzSessionById(id);
         setActiveBlitz(null);
         triggerSyncNow().catch(e => console.warn('Sync error:', e));

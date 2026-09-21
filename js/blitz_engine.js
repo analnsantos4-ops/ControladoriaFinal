@@ -400,40 +400,24 @@ export async function importBlitzItemsWithHistory(blitzId, parsedItems, defaultS
       await saveProduct(product);
     }
 
-    // 2. Busca histórico anterior desta combinação EXATA: EAN + DATA_DE_VALIDADE (Item 15)
+    // 2. Busca histórico anterior desta combinação EXATA: EAN + DATA_DE_VALIDADE (Item 15, 7 e 16)
+    // Regra Obrigatória: NUNCA puxar quantidade de outra validade nem inventar estoque genérico
     let pastForThisItem = allPastConferences.filter(c => {
       const eanMatch = String(c.ean).trim() === String(item.ean).trim();
       const dateMatch = String(c.data_validade || '').split('T')[0] === String(item.dataValidade).split('T')[0];
       return eanMatch && dateMatch && c.blitz_id !== blitzId;
     });
 
-    // Se não encontrou conferência com a mesma data exata, verifica se o produto já teve conferência anterior em outra data
-    if (pastForThisItem.length === 0) {
-      pastForThisItem = allPastConferences.filter(c => {
-        const eanMatch = String(c.ean).trim() === String(item.ean).trim();
-        return eanMatch && c.blitz_id !== blitzId;
-      });
-    }
-
     // Ordena do mais recente para o mais antigo
     pastForThisItem.sort((a, b) => new Date(b.conferido_em || 0) - new Date(a.conferido_em || 0));
 
     let isNew = pastForThisItem.length === 0;
-    let previousQuantity = 0;
+    let previousQuantity = null;
     let hadQuantityPreviously = false;
     let hadZeroPreviously = false;
 
     if (isNew) {
-      // Se não havia conferência na blitz mas o produto já existia no estoque com unidades:
-      if (product && Number(product.total_quantity) > 0) {
-        isNew = false;
-        previousQuantity = Number(product.total_quantity);
-        hadQuantityPreviously = true;
-        tinhamQuantidadeCount++;
-        jaVerificadosCount++;
-      } else {
-        produtosNovosCount++;
-      }
+      produtosNovosCount++;
     } else {
       jaVerificadosCount++;
       previousQuantity = Number(pastForThisItem[0].quantidade || 0);
@@ -653,6 +637,10 @@ export async function saveBlitzConference({
   locations = [], // [{ location: 'Prateleira', quantity: 18 }, { location: 'Depósito', quantity: 42 }]
   fotoUrl = '',
   usuario = null,
+  user_id = null,
+  userId = null,
+  user_name = null,
+  userName = null,
   responsible_user_id = null,
   responsible_user_name = null,
   observacao = ''
@@ -662,8 +650,9 @@ export async function saveBlitzConference({
   const numQtd = Number(quantidade) || 0;
 
   const activeUser = typeof getCurrentUser === 'function' ? getCurrentUser() : null;
-  const effUserId = normalizeUserId(responsible_user_id || user_id || usuario || (activeUser ? activeUser.id : 'ana_luiza'));
-  const effUserName = responsible_user_name || user_name || (usuario && usuario !== 'Ana Luiza' && usuario !== 'Angélica' ? usuario : (effUserId === 'angelica' ? 'Angélica' : 'Ana Luiza'));
+  const rawUserId = responsible_user_id || user_id || userId || (typeof usuario === 'string' && (usuario === 'angelica' || usuario === 'ana_luiza') ? usuario : null) || (activeUser ? activeUser.id : 'ana_luiza');
+  const effUserId = normalizeUserId(rawUserId || (activeUser ? activeUser.id : 'ana_luiza'));
+  const effUserName = responsible_user_name || user_name || userName || (usuario && usuario !== 'ana_luiza' && usuario !== 'angelica' ? usuario : (effUserId === 'angelica' ? 'Angélica' : (activeUser?.name || 'Ana Luiza')));
 
   // 1. Busca o item da Blitz
   let blitzItem = null;
@@ -831,13 +820,14 @@ export async function saveBlitzConference({
  * Todos os itens PENDENTES viram quantidade = 0 e tipo_conferencia = 'ZERO_AUTOMATICO'.
  * Blitz vira 'FINALIZADA'.
  */
-export async function finalizeBlitzWithAutoZeros(blitzId, usuario = null) {
+export async function finalizeBlitzWithAutoZeros(blitzId, usuario = null, userId = null) {
   const db = await initDB();
   const now = new Date().toISOString();
 
-  const currentUser = getCurrentUser();
-  const effectiveUserId = normalizeUserId(usuario || currentUser?.id || 'ana_luiza');
-  const effectiveUserName = (usuario && usuario !== 'Ana Luiza' && usuario !== 'Angélica') ? usuario : (effectiveUserId === 'angelica' ? 'Angélica' : (currentUser?.name || 'Ana Luiza'));
+  const currentUser = typeof getCurrentUser === 'function' ? getCurrentUser() : null;
+  const rawUserId = userId || (typeof usuario === 'string' && (usuario === 'angelica' || usuario === 'ana_luiza') ? usuario : null) || currentUser?.id;
+  const effectiveUserId = normalizeUserId(rawUserId || usuario || 'ana_luiza');
+  const effectiveUserName = (usuario && usuario !== 'Ana Luiza' && usuario !== 'Angélica' && usuario !== 'ana_luiza' && usuario !== 'angelica') ? usuario : (effectiveUserId === 'angelica' ? 'Angélica' : (currentUser?.name || 'Ana Luiza'));
 
   let blitz = await getRecordById('blitz', blitzId);
   let session = await getRecordById('blitz_sessions', blitzId);
@@ -909,7 +899,11 @@ export async function finalizeBlitzWithAutoZeros(blitzId, usuario = null) {
       locations: [],
       usuario: effectiveUserName,
       userId: effectiveUserId,
+      user_id: effectiveUserId,
       userName: effectiveUserName,
+      user_name: effectiveUserName,
+      responsible_user_id: effectiveUserId,
+      responsible_user_name: effectiveUserName,
       observacao: 'Registrado automaticamente como 0 ao finalizar a Blitz'
     });
   }

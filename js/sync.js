@@ -112,8 +112,11 @@ CREATE TABLE IF NOT EXISTS public.blitz_sessions (
 );
 
 -- Adiciona colunas na blitz_sessions caso a tabela já exista
-ALTER TABLE public.blitz_sessions ADD COLUMN IF NOT EXISTS sector TEXT DEFAULT 'GERAL';
+ALTER TABLE public.blitz_sessions ADD COLUMN IF NOT EXISTS user_id TEXT DEFAULT 'ana_luiza';
 ALTER TABLE public.blitz_sessions ADD COLUMN IF NOT EXISTS user_name TEXT DEFAULT 'Ana Luiza';
+ALTER TABLE public.blitz_sessions ADD COLUMN IF NOT EXISTS responsible_user_id TEXT DEFAULT 'ana_luiza';
+ALTER TABLE public.blitz_sessions ADD COLUMN IF NOT EXISTS responsible_user_name TEXT DEFAULT 'Ana Luiza';
+ALTER TABLE public.blitz_sessions ADD COLUMN IF NOT EXISTS sector TEXT DEFAULT 'GERAL';
 ALTER TABLE public.blitz_sessions ADD COLUMN IF NOT EXISTS start_date TEXT;
 ALTER TABLE public.blitz_sessions ADD COLUMN IF NOT EXISTS end_date TEXT;
 ALTER TABLE public.blitz_sessions ADD COLUMN IF NOT EXISTS period_label TEXT;
@@ -256,6 +259,7 @@ ALTER TABLE public.conferencias_blitz ADD COLUMN IF NOT EXISTS foto_conferencia 
 ALTER TABLE public.conferencias_blitz ADD COLUMN IF NOT EXISTS foto_produto TEXT;
 ALTER TABLE public.conferencias_blitz ADD COLUMN IF NOT EXISTS locations JSONB DEFAULT '[]'::jsonb;
 ALTER TABLE public.conferencias_blitz ADD COLUMN IF NOT EXISTS corredor TEXT;
+ALTER TABLE public.conferencias_blitz ADD COLUMN IF NOT EXISTS user_id TEXT DEFAULT 'ana_luiza';
 
 -- 9. Tabela de Histórico de Alterações e Auditoria (Permanente e Inviolável)
 CREATE TABLE IF NOT EXISTS public.historico_alteracoes (
@@ -285,6 +289,7 @@ ALTER TABLE public.historico_alteracoes ADD COLUMN IF NOT EXISTS usuario TEXT DE
 ALTER TABLE public.historico_alteracoes ADD COLUMN IF NOT EXISTS registro_id TEXT;
 ALTER TABLE public.historico_alteracoes ADD COLUMN IF NOT EXISTS tabela TEXT;
 ALTER TABLE public.historico_alteracoes ADD COLUMN IF NOT EXISTS acao TEXT;
+ALTER TABLE public.historico_alteracoes ADD COLUMN IF NOT EXISTS user_id TEXT DEFAULT 'ana_luiza';
 ALTER TABLE public.historico_alteracoes ADD COLUMN IF NOT EXISTS novo_valor TEXT;
 ALTER TABLE public.historico_alteracoes ADD COLUMN IF NOT EXISTS descricao TEXT;
 ALTER TABLE public.historico_alteracoes ADD COLUMN IF NOT EXISTS created_at TIMESTAMPTZ DEFAULT NOW();
