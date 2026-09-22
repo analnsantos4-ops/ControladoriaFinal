@@ -106,129 +106,429 @@
       display: none !important;
     }
 
-    /* Top Bar com Safe Area e Altura Compacta */
+    /* ==========================================================================
+       NOVA HUD EXECUTIVA E PROFISSIONAL (DESIGN SYSTEM)
+       Padronização de tipografia, ícones SVG, safe-area, contraste e touch-targets
+       ========================================================================== */
     .app-top-bar {
       display: flex;
       align-items: center;
       justify-content: space-between;
-      min-height: calc(36px + env(safe-area-inset-top, 0px));
-      padding-top: max(env(safe-area-inset-top, 0px), 4px);
-      padding-bottom: 4px;
-      padding-left: 8px;
-      padding-right: 8px;
-      background: #121214;
-      border-bottom: 1px solid #2a2a30;
+      min-height: calc(52px + env(safe-area-inset-top, 0px));
+      padding-top: max(env(safe-area-inset-top, 0px), 8px);
+      padding-bottom: 8px;
+      padding-left: max(env(safe-area-inset-left, 0px), 12px);
+      padding-right: max(env(safe-area-inset-right, 0px), 12px);
+      background: rgba(13, 15, 23, 0.92);
+      backdrop-filter: blur(20px) saturate(180%);
+      -webkit-backdrop-filter: blur(20px) saturate(180%);
+      border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+      box-shadow: 0 4px 20px -2px rgba(0, 0, 0, 0.45);
       position: sticky;
       top: 0;
-      z-index: 50;
+      z-index: 100;
+      width: 100%;
+      box-sizing: border-box;
+    }
+
+    @media screen and (min-width: 900px) {
+      .app-top-bar {
+        padding-left: max(16px, calc((100vw - 880px) / 2));
+        padding-right: max(16px, calc((100vw - 880px) / 2));
+      }
+    }
+
+    .top-bar-left {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      min-width: 0;
+      flex-shrink: 1;
+    }
+
+    .hud-brand-mark {
+      width: 32px;
+      height: 32px;
+      border-radius: 9px;
+      background: linear-gradient(135deg, #059669, #0d9488);
+      border: 1px solid rgba(52, 211, 153, 0.4);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      color: #ffffff;
+      flex-shrink: 0;
+      box-shadow: 0 2px 8px rgba(16, 185, 129, 0.25);
+    }
+
+    .hud-brand-mark svg {
+      display: block;
+      flex-shrink: 0;
+    }
+
+    .hud-brand-info {
+      display: flex;
+      flex-direction: column;
+      line-height: 1.15;
+      min-width: 0;
     }
 
     .app-name-tag {
-      font-size: 0.74rem;
-      font-weight: 800;
-      letter-spacing: 0.8px;
-      color: #a1a1aa;
-    }
-
-    .top-bar-title {
       font-size: 0.84rem;
       font-weight: 800;
-      letter-spacing: 0.4px;
+      letter-spacing: 0.06em;
       color: #f4f4f5;
       white-space: nowrap;
       overflow: hidden;
       text-overflow: ellipsis;
     }
 
+    .app-subtitle-tag {
+      font-size: 0.68rem;
+      font-weight: 600;
+      color: #71717a;
+      letter-spacing: 0.02em;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    .top-bar-title {
+      font-size: 0.90rem;
+      font-weight: 800;
+      letter-spacing: 0.04em;
+      color: #f4f4f5;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      text-align: center;
+      flex: 1;
+      min-width: 0;
+      padding: 0 4px;
+    }
+
     .top-bar-right {
       display: flex;
       align-items: center;
-      gap: 4px;
+      gap: 6px;
+      flex-shrink: 0;
     }
 
-    .sync-badge {
-      font-size: 0.65rem;
-      font-weight: 800;
-      padding: 2px 6px;
-      border-radius: 9999px;
+    /* Espaçador de Equilíbrio para Centralização de Título */
+    .top-bar-balance-spacer {
+      width: 78px;
+      flex-shrink: 0;
+      pointer-events: none;
+    }
+
+    /* Regras Universais de Elementos Interativos da HUD (Touch Targets & Alinhamento) */
+    .btn-back,
+    .hud-btn,
+    .sync-badge,
+    .hud-user-btn,
+    .btn-icon-link,
+    .btn-topbar-action,
+    .btn-scanner-ctrl {
       display: inline-flex;
       align-items: center;
-      gap: 3px;
-      cursor: pointer;
+      justify-content: center;
+      height: 38px;
+      min-height: 38px;
+      border-radius: 9px;
+      position: relative;
+      box-sizing: border-box;
+      touch-action: manipulation;
       user-select: none;
-      white-space: nowrap;
+      -webkit-user-select: none;
+      line-height: 1;
+      transition: all 0.15s ease;
+      cursor: pointer;
     }
 
-    .status-online {
-      background: rgba(16, 185, 129, 0.15);
-      color: #10b981;
-      border: 1px solid #10b981;
+    /* Expansor de Área de Toque Invisível (Touch Boundary >= 44x44px no Mobile) */
+    .btn-back::before,
+    .hud-btn::before,
+    .sync-badge::before,
+    .hud-user-btn::before,
+    .btn-icon-link::before,
+    .btn-topbar-action::before,
+    .btn-scanner-ctrl::before {
+      content: '';
+      position: absolute;
+      top: -4px;
+      bottom: -4px;
+      left: -3px;
+      right: -3px;
+      z-index: 1;
     }
 
-    .status-syncing {
-      background: rgba(234, 179, 8, 0.15);
-      color: #eab308;
-      border: 1px solid #eab308;
+    /* Padronização de Ícones SVG nos Botões da HUD */
+    .btn-back svg,
+    .hud-btn svg,
+    .btn-icon-link svg,
+    .btn-topbar-action svg,
+    .btn-scanner-ctrl svg {
+      display: block;
+      flex-shrink: 0;
+      margin: 0;
     }
 
-    .status-offline {
-      background: #222226;
-      color: #ef4444;
-      border: 1px solid rgba(239, 68, 68, 0.4);
-    }
-
-    .btn-icon-link {
-      font-size: 0.72rem;
-      font-weight: 700;
-      color: #a1a1aa;
-      padding: 3px 7px;
-      border-radius: 5px;
-      background: #1a1a1e;
-      border: 1px solid #2a2a30;
-      white-space: nowrap;
-    }
-
+    /* Botão Voltar Padronizado para Todas as Telas */
     .btn-back {
-      font-size: 0.75rem;
+      gap: 6px;
+      padding: 0 12px;
+      font-size: 0.80rem;
       font-weight: 700;
-      color: #a1a1aa;
-      padding: 4px 8px;
-      background: #1a1a1e;
-      border-radius: 5px;
-      border: 1px solid #2a2a30;
+      color: #d4d4d8;
+      background: rgba(255, 255, 255, 0.05);
+      border: 1px solid rgba(255, 255, 255, 0.1);
       white-space: nowrap;
     }
 
-    .btn-topbar-action {
-      font-size: 0.72rem;
-      font-weight: 800;
+    .btn-back:hover {
+      background: rgba(255, 255, 255, 0.1);
       color: #ffffff;
-      background: #128c7e;
-      border: 1px solid #25d366;
-      padding: 3px 7px;
-      border-radius: 5px;
-      white-space: nowrap;
+      border-color: rgba(255, 255, 255, 0.2);
     }
 
-    .btn-header-db {
+    .btn-back:active {
+      transform: scale(0.97);
+    }
+
+    /* Botões Utilitários da HUD (Console, Banco, Instalar) */
+    .hud-btn {
+      gap: 6px;
+      padding: 0 10px;
+      font-size: 0.78rem;
+      font-weight: 700;
+      white-space: nowrap;
+      background: rgba(255, 255, 255, 0.04);
+      border: 1px solid rgba(255, 255, 255, 0.08);
+      color: #e4e4e7;
+    }
+
+    .hud-btn:hover {
+      background: rgba(255, 255, 255, 0.08);
+      border-color: rgba(255, 255, 255, 0.16);
+      color: #ffffff;
+    }
+
+    .hud-btn:active {
+      transform: scale(0.97);
+    }
+
+    /* Botão Específico do Console no HUD */
+    .btn-header-console {
+      background: rgba(168, 85, 247, 0.08);
+      border: 1px solid rgba(168, 85, 247, 0.25);
+      color: #c084fc;
+    }
+
+    .btn-header-console:hover {
+      background: rgba(168, 85, 247, 0.16);
+      border-color: rgba(168, 85, 247, 0.45);
+      color: #e9d5ff;
+    }
+
+    .btn-header-console.has-errors {
+      border-color: rgba(239, 68, 68, 0.5);
+      background: rgba(239, 68, 68, 0.1);
+      color: #fca5a5;
+    }
+
+    .console-error-badge {
       display: inline-flex;
       align-items: center;
-      gap: 3px;
-      background: rgba(56, 189, 248, 0.12);
-      border: 1px solid rgba(56, 189, 248, 0.35);
+      justify-content: center;
+      min-width: 18px;
+      height: 18px;
+      padding: 0 5px;
+      border-radius: 9999px;
+      background: #ef4444;
+      color: #ffffff;
+      font-size: 0.65rem;
+      font-weight: 900;
+      line-height: 1;
+      box-shadow: 0 0 10px rgba(239, 68, 68, 0.6);
+      animation: pulse-danger 2s infinite;
+      box-sizing: border-box;
+    }
+
+    @keyframes pulse-danger {
+      0%, 100% { opacity: 1; transform: scale(1); }
+      50% { opacity: 0.85; transform: scale(1.08); }
+    }
+
+    /* Botão Banco e Instalar */
+    .btn-header-db {
+      background: rgba(56, 189, 248, 0.08);
+      border: 1px solid rgba(56, 189, 248, 0.25);
       color: #38bdf8;
-      padding: 3px 6px;
-      border-radius: 5px;
-      font-size: 0.72rem;
-      font-weight: 800;
-      cursor: pointer;
-      white-space: nowrap;
-      transition: all 0.15s ease;
     }
 
     .btn-header-db:hover {
-      background: rgba(56, 189, 248, 0.22);
+      background: rgba(56, 189, 248, 0.16);
+      border-color: rgba(56, 189, 248, 0.45);
       color: #7dd3fc;
+    }
+
+    .btn-header-install {
+      background: rgba(16, 185, 129, 0.08);
+      border: 1px solid rgba(16, 185, 129, 0.25);
+      color: #34d399;
+    }
+
+    .btn-header-install:hover {
+      background: rgba(16, 185, 129, 0.16);
+      border-color: rgba(16, 185, 129, 0.45);
+      color: #6ee7b7;
+    }
+
+    /* Sync Badge */
+    .sync-badge {
+      font-size: 0.74rem;
+      font-weight: 700;
+      padding: 0 10px;
+      gap: 6px;
+      white-space: nowrap;
+    }
+
+    .sync-badge:hover {
+      opacity: 0.9;
+      transform: scale(1.02);
+    }
+
+    .sync-dot {
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      flex-shrink: 0;
+    }
+
+    .status-online {
+      background: rgba(16, 185, 129, 0.12);
+      color: #34d399;
+      border: 1px solid rgba(16, 185, 129, 0.3);
+    }
+
+    .status-online .sync-dot {
+      background: #10b981;
+      box-shadow: 0 0 8px #10b981;
+    }
+
+    .status-syncing {
+      background: rgba(234, 179, 8, 0.12);
+      color: #fbbf24;
+      border: 1px solid rgba(234, 179, 8, 0.35);
+    }
+
+    .status-syncing .sync-dot {
+      background: #f59e0b;
+      box-shadow: 0 0 8px #f59e0b;
+      animation: spin 1s linear infinite;
+    }
+
+    .status-offline {
+      background: rgba(239, 68, 68, 0.12);
+      color: #f87171;
+      border: 1px solid rgba(239, 68, 68, 0.35);
+    }
+
+    .status-offline .sync-dot {
+      background: #ef4444;
+      box-shadow: 0 0 8px #ef4444;
+    }
+
+    /* Usuária Ativa Pill */
+    .hud-user-btn {
+      gap: 6px;
+      padding: 0 10px 0 5px;
+      border-radius: 9999px;
+      font-size: 0.78rem;
+      font-weight: 700;
+      white-space: nowrap;
+      background: rgba(255, 255, 255, 0.05);
+      border: 1px solid rgba(255, 255, 255, 0.12);
+      color: #f4f4f5;
+    }
+
+    .hud-user-btn:hover {
+      background: rgba(255, 255, 255, 0.09);
+      border-color: rgba(255, 255, 255, 0.22);
+    }
+
+    .hud-user-avatar {
+      width: 28px;
+      height: 28px;
+      border-radius: 50%;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-weight: 800;
+      font-size: 0.75rem;
+      color: #ffffff;
+      box-shadow: 0 1px 4px rgba(0, 0, 0, 0.4);
+      flex-shrink: 0;
+      line-height: 1;
+    }
+
+    /* Botão Sair */
+    .btn-icon-link {
+      gap: 5px;
+      padding: 0 10px;
+      font-size: 0.76rem;
+      font-weight: 700;
+      color: #a1a1aa;
+      background: rgba(255, 255, 255, 0.03);
+      border: 1px solid rgba(255, 255, 255, 0.08);
+      white-space: nowrap;
+    }
+
+    .btn-icon-link:hover {
+      background: rgba(239, 68, 68, 0.12);
+      color: #f87171;
+      border-color: rgba(239, 68, 68, 0.3);
+    }
+
+    /* Ações de Topbar WhatsApp */
+    .btn-topbar-action {
+      gap: 6px;
+      padding: 0 12px;
+      font-size: 0.78rem;
+      font-weight: 700;
+      color: #ffffff;
+      background: #059669;
+      border: 1px solid #10b981;
+      white-space: nowrap;
+    }
+
+    .btn-topbar-action:hover {
+      background: #047857;
+    }
+
+    /* Scanner Top Controls */
+    .scanner-controls-top {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+
+    .btn-scanner-ctrl {
+      width: 38px;
+      height: 38px;
+      background: rgba(0, 0, 0, 0.65);
+      border: 1px solid rgba(255, 255, 255, 0.15);
+      color: #f4f4f5;
+    }
+
+    .btn-scanner-ctrl:hover {
+      background: rgba(0, 0, 0, 0.85);
+      border-color: rgba(255, 255, 255, 0.3);
+    }
+
+    .btn-scanner-ctrl.active {
+      background: rgba(245, 158, 11, 0.25);
+      border-color: #f59e0b;
+      color: #fbbf24;
     }
 
     /* 1. Tela de Login Fluida e Responsiva */
@@ -1678,20 +1978,6 @@
        - Desktop / Telas Grandes (>= 1024px): Layout profissional centralizado
        =================================================================== */
 
-    /* Regras Globais de Fluidez e Centralização do Top Bar */
-    .app-top-bar {
-      width: 100% !important;
-      display: flex !important;
-      align-items: center !important;
-      justify-content: space-between !important;
-      box-sizing: border-box !important;
-      min-height: calc(44px + env(safe-area-inset-top, 0px)) !important;
-      padding-top: max(env(safe-area-inset-top, 0px), 6px) !important;
-      padding-bottom: 6px !important;
-      padding-left: max(12px, calc((100vw - 880px) / 2)) !important;
-      padding-right: max(12px, calc((100vw - 880px) / 2)) !important;
-    }
-
     /* Todos os Containers Principais Unificados */
     .dashboard-main-content,
     .conference-main-content,
@@ -1750,26 +2036,154 @@
       max-width: min(96vw, 840px) !important;
     }
 
-    /* Breakpoint Mobile Estreito (<= 440px) */
-    @media screen and (max-width: 440px) {
-      .app-name-tag {
-        font-size: 0.72rem !important;
+    /* Breakpoint Mobile Estreito (<= 640px) */
+    @media screen and (max-width: 640px) {
+      .app-top-bar {
+        padding-left: max(env(safe-area-inset-left, 0px), 10px) !important;
+        padding-right: max(env(safe-area-inset-right, 0px), 10px) !important;
       }
-      .btn-header-db span {
-        display: none !important; /* Mostra apenas o ícone economizando espaço vital */
+      .app-subtitle-tag {
+        display: none !important;
       }
-      .btn-header-db {
-        padding: 3px 5px !important;
-        font-size: 0.74rem !important;
+      .hud-btn span.hud-btn-text,
+      .btn-header-db span,
+      .btn-header-install span,
+      .btn-header-console span.hud-btn-text {
+        display: none !important;
+      }
+      .hud-btn,
+      .btn-header-db,
+      .btn-header-install,
+      .btn-header-console {
+        width: 38px !important;
+        height: 38px !important;
+        min-width: 38px !important;
+        padding: 0 !important;
+        justify-content: center !important;
+      }
+      .btn-header-console {
+        position: relative !important;
+      }
+      .btn-header-console .console-error-badge {
+        position: absolute !important;
+        top: -3px !important;
+        right: -3px !important;
+        min-width: 16px !important;
+        height: 16px !important;
+        padding: 0 4px !important;
+        font-size: 0.60rem !important;
+        z-index: 2 !important;
+      }
+      .hud-user-name {
+        display: none !important;
+      }
+      .hud-user-btn {
+        padding: 0 !important;
+        width: 38px !important;
+        height: 38px !important;
+        min-width: 38px !important;
+        border-radius: 50% !important;
+        justify-content: center !important;
+      }
+      .sync-badge span.sync-text {
+        display: none !important;
       }
       .sync-badge {
-        font-size: 0.62rem !important;
-        padding: 2px 5px !important;
+        width: 38px !important;
+        height: 38px !important;
+        min-width: 38px !important;
+        padding: 0 !important;
+        justify-content: center !important;
+      }
+      .btn-icon-link span.hud-btn-text {
+        display: none !important;
       }
       .btn-icon-link {
-        font-size: 0.68rem !important;
-        padding: 2px 5px !important;
+        width: 38px !important;
+        height: 38px !important;
+        min-width: 38px !important;
+        padding: 0 !important;
+        justify-content: center !important;
       }
+    }
+
+    /* Breakpoint Mobile Confortável para iPhone (<= 480px) */
+    @media screen and (max-width: 480px) {
+      .btn-back span {
+        display: none !important;
+      }
+      .btn-back {
+        width: 38px !important;
+        height: 38px !important;
+        min-width: 38px !important;
+        padding: 0 !important;
+        justify-content: center !important;
+      }
+      .btn-topbar-action span {
+        display: none !important;
+      }
+      .btn-topbar-action {
+        width: 38px !important;
+        height: 38px !important;
+        min-width: 38px !important;
+        padding: 0 !important;
+        justify-content: center !important;
+      }
+      .top-bar-balance-spacer {
+        width: 38px !important;
+      }
+      .scanner-controls-top {
+        gap: 4px !important;
+      }
+      .top-bar-right {
+        gap: 4px !important;
+      }
+    }
+
+    /* Breakpoint Mobile Estreito / iPhone SE (<= 380px) */
+    @media screen and (max-width: 380px) {
+      .app-top-bar {
+        padding-left: max(env(safe-area-inset-left, 0px), 8px) !important;
+        padding-right: max(env(safe-area-inset-right, 0px), 8px) !important;
+      }
+      .hud-brand-mark {
+        width: 28px !important;
+        height: 28px !important;
+        border-radius: 7px !important;
+      }
+      .hud-brand-mark svg {
+        width: 15px !important;
+        height: 15px !important;
+      }
+      .app-name-tag {
+        font-size: 0.74rem !important;
+        max-width: 78px !important;
+      }
+      .top-bar-left {
+        gap: 6px !important;
+      }
+      .top-bar-right {
+        gap: 3px !important;
+      }
+      .hud-btn,
+      .btn-header-db,
+      .btn-header-install,
+      .btn-header-console,
+      .sync-badge,
+      .hud-user-btn,
+      .btn-icon-link,
+      .btn-back,
+      .btn-scanner-ctrl,
+      .btn-topbar-action {
+        width: 35px !important;
+        height: 35px !important;
+        min-width: 35px !important;
+        min-height: 35px !important;
+      }
+      .top-bar-balance-spacer {
+        width: 35px !important;
+      }
+    }
       .btn-login-user-card {
         padding: 8px 6px !important;
       }
@@ -2048,17 +2462,67 @@
   <div id="view-dashboard" class="app-view">
     <!-- Top Header Bar -->
     <header class="app-top-bar">
-      <div class="top-bar-left" style="display: flex; align-items: center; gap: 8px;">
-        <img src="/icons/icon-192.png" alt="Controladoria" style="width: 26px; height: 26px; border-radius: 7px; border: 1px solid rgba(16, 185, 129, 0.4); object-fit: cover;" referrerPolicy="no-referrer" />
-        <span class="app-name-tag" id="app-header-brand-title">CONTROLADORIA</span>
+      <div class="top-bar-left">
+        <div class="hud-brand-mark" title="Controladoria de Estoque">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.3" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"></path>
+            <polyline points="9 12 11 14 15 10"></polyline>
+          </svg>
+        </div>
+        <div class="hud-brand-info">
+          <span class="app-name-tag" id="app-header-brand-title">CONTROLADORIA</span>
+          <span class="app-subtitle-tag" id="app-header-user-tag">Auditoria de Estoque</span>
+        </div>
       </div>
-      <div class="top-bar-right" style="display: flex; align-items: center; gap: 6px;">
-        <button type="button" id="btn-header-install-app" class="btn-header-db" title="Instalar Aplicativo na Tela Inicial">📲 <span>Instalar</span></button>
-        <button type="button" id="btn-header-database" class="btn-header-db" title="Acessar e Baixar Banco de Dados">💾 <span>Banco</span></button>
-        <button type="button" id="btn-header-console" class="btn-header-console" title="Console de Erros e Diagnóstico (PIN 6 Dígitos)">📟 <span>Console</span><span id="console-error-pill" class="console-error-badge hidden">0</span></button>
+      <div class="top-bar-right">
+        <!-- Live Sync Pill -->
+        <span id="sync-status-badge" class="sync-badge status-offline" title="Toque para sincronizar com a nuvem Supabase">
+          <span class="sync-dot"></span>
+          <span class="sync-text">Offline</span>
+        </span>
+
+        <!-- Console Popup Trigger -->
+        <button type="button" id="btn-header-console" class="hud-btn btn-header-console" title="Console de Diagnóstico e Erros (Abre em Popup)">
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+            <polyline points="4 17 10 11 4 5"></polyline>
+            <line x1="12" y1="19" x2="20" y2="19"></line>
+          </svg>
+          <span class="hud-btn-text">Console</span>
+          <span id="console-error-pill" class="console-error-badge hidden">0</span>
+        </button>
+
+        <!-- Banco de Dados Button -->
+        <button type="button" id="btn-header-database" class="hud-btn btn-header-db" title="Acessar e Baixar Banco de Dados">
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+            <ellipse cx="12" cy="5" rx="9" ry="3"></ellipse>
+            <path d="M21 12c0 1.66-4 3-9 3s-9-1.34-9-3"></path>
+            <path d="M3 5v14c0 1.66 4 3 9 3s9-1.34 9-3V5"></path>
+          </svg>
+          <span class="hud-btn-text">Banco</span>
+        </button>
+
+        <!-- Instalar App Button -->
+        <button type="button" id="btn-header-install-app" class="hud-btn btn-header-install" title="Instalar Aplicativo no Aparelho">
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
+            <polyline points="7 10 12 15 17 10"></polyline>
+            <line x1="12" y1="15" x2="12" y2="3"></line>
+          </svg>
+          <span class="hud-btn-text">Instalar</span>
+        </button>
+
+        <!-- User Profile Pill -->
         <div id="header-user-badge-container"></div>
-        <span id="sync-status-badge" class="sync-badge status-offline">● Offline</span>
-        <button id="btn-header-logout" class="btn-icon-link" title="Sair">Sair</button>
+
+        <!-- Sair Button -->
+        <button type="button" id="btn-header-logout" class="btn-icon-link" title="Encerrar Sessão / Trocar Usuária">
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"></path>
+            <polyline points="16 17 21 12 16 7"></polyline>
+            <line x1="21" y1="12" x2="9" y2="12"></line>
+          </svg>
+          <span class="hud-btn-text">Sair</span>
+        </button>
       </div>
     </header>
 
@@ -2397,13 +2861,34 @@
   <!-- ========================================== -->
   <div id="view-scanner" class="app-view">
     <header class="app-top-bar">
-      <button type="button" id="btn-scanner-back" class="btn-back">← Voltar</button>
-      <span class="top-bar-title">ESCANEAR PRODUTO</span>
+      <button type="button" id="btn-scanner-back" class="btn-back">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round">
+          <line x1="19" y1="12" x2="5" y2="12"></line>
+          <polyline points="12 19 5 12 12 5"></polyline>
+        </svg>
+        <span>Voltar</span>
+      </button>
+      <span class="top-bar-title">ESCANEAR CÓDIGO</span>
       <div class="scanner-controls-top">
-        <button type="button" id="btn-scanner-zoom" class="btn-icon-control" title="Zoom da Câmera (1x / 2x)" style="font-size: 0.8rem; font-weight: 800; min-width: 34px;">1x</button>
-        <button type="button" id="btn-scanner-torch" class="btn-icon-control" title="Lanterna">⚡</button>
-        <button type="button" id="btn-scanner-photo" class="btn-icon-control" title="Ler Código de Foto ou Galeria">📁</button>
-        <button type="button" id="btn-scanner-switch" class="btn-icon-control" title="Alternar Câmera">🔄</button>
+        <button type="button" id="btn-scanner-zoom" class="btn-scanner-ctrl" title="Alternar Zoom (1x / 2x)" style="font-size: 0.78rem; font-weight: 800;">1x</button>
+        <button type="button" id="btn-scanner-torch" class="btn-scanner-ctrl" title="Lanterna">
+          <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+            <polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"></polygon>
+          </svg>
+        </button>
+        <button type="button" id="btn-scanner-photo" class="btn-scanner-ctrl" title="Ler Código de Foto ou Galeria">
+          <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+            <rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect>
+            <circle cx="8.5" cy="8.5" r="1.5"></circle>
+            <polyline points="21 15 16 10 5 21"></polyline>
+          </svg>
+        </button>
+        <button type="button" id="btn-scanner-switch" class="btn-scanner-ctrl" title="Alternar Câmera">
+          <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M20 10c0-4.418-3.582-8-8-8s-8 3.582-8 8H1l4 4 4-4H6c0-3.314 2.686-6 6-6s6 2.686 6 6h2z"></path>
+            <path d="M4 14c0 4.418 3.582 8 8 8s8-3.582 8-8h3l-4-4-4 4h3c0 3.314-2.686 6-6 6s-6-2.686-6-6H4z"></path>
+          </svg>
+        </button>
       </div>
     </header>
 
@@ -2461,9 +2946,15 @@
   <!-- ========================================== -->
   <div id="view-conference" class="app-view">
     <header class="app-top-bar">
-      <button type="button" id="btn-conf-back" class="btn-back">← Voltar</button>
+      <button type="button" id="btn-conf-back" class="btn-back">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round">
+          <line x1="19" y1="12" x2="5" y2="12"></line>
+          <polyline points="12 19 5 12 12 5"></polyline>
+        </svg>
+        <span>Voltar</span>
+      </button>
       <span class="top-bar-title">CONFERÊNCIA</span>
-      <div style="width: 50px;"></div>
+      <div class="top-bar-balance-spacer" aria-hidden="true"></div>
     </header>
 
     <main class="conference-main-content">
@@ -2503,9 +2994,15 @@
   <!-- ========================================== -->
   <div id="view-product-new" class="app-view">
     <header class="app-top-bar">
-      <button type="button" id="btn-new-prod-back" class="btn-back">← Voltar</button>
+      <button type="button" id="btn-new-prod-back" class="btn-back">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round">
+          <line x1="19" y1="12" x2="5" y2="12"></line>
+          <polyline points="12 19 5 12 12 5"></polyline>
+        </svg>
+        <span>Voltar</span>
+      </button>
       <span class="top-bar-title">NOVO PRODUTO</span>
-      <div style="width: 50px;"></div>
+      <div class="top-bar-balance-spacer" aria-hidden="true"></div>
     </header>
 
     <main class="new-product-main-content">
@@ -2617,9 +3114,15 @@
   <!-- ========================================== -->
   <div id="view-product-detail" class="app-view">
     <header class="app-top-bar">
-      <button type="button" id="btn-detail-header-back" class="btn-back">← Produtos</button>
+      <button type="button" id="btn-detail-header-back" class="btn-back">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round">
+          <line x1="19" y1="12" x2="5" y2="12"></line>
+          <polyline points="12 19 5 12 12 5"></polyline>
+        </svg>
+        <span>Produtos</span>
+      </button>
       <span class="top-bar-title">DETALHES DO PRODUTO</span>
-      <div style="width: 50px;"></div>
+      <div class="top-bar-balance-spacer" aria-hidden="true"></div>
     </header>
 
     <main id="product-detail-content" class="product-detail-main-content">
@@ -2632,10 +3135,17 @@
   <!-- ========================================== -->
   <div id="view-corridor-audit" class="app-view">
     <header class="app-top-bar">
-      <button type="button" id="btn-corridor-audit-back" class="btn-back">← Início</button>
+      <button type="button" id="btn-corridor-audit-back" class="btn-back">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round">
+          <line x1="19" y1="12" x2="5" y2="12"></line>
+          <polyline points="12 19 5 12 12 5"></polyline>
+        </svg>
+        <span>Início</span>
+      </button>
       <span class="top-bar-title">CONFERIR CORREDOR</span>
-      <button type="button" id="btn-corridor-wa-export" class="btn-topbar-action btn-topbar-wa" title="Exportar Corredor para WhatsApp">
-        📲 WhatsApp
+      <button type="button" id="btn-corridor-wa-export" class="btn-topbar-action" title="Exportar Corredor para WhatsApp">
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="currentColor"><path d="M12.031 6.172c-3.181 0-5.767 2.586-5.768 5.766-.001 1.298.38 2.27 1.019 3.287l-.582 2.128 2.182-.573c.978.58 1.911.928 3.145.929 3.178 0 5.767-2.587 5.768-5.766.001-3.187-2.575-5.771-5.764-5.771zm3.392 8.244c-.144.405-.837.774-1.17.824-.299.045-.677.063-1.092-.069-.252-.08-.575-.187-.988-.365-1.739-.751-2.874-2.502-2.961-2.617-.087-.116-.708-.94-.708-1.793s.448-1.273.607-1.446c.159-.173.346-.217.462-.217l.332.007c.106.005.249-.04.39.299.144.347.491 1.199.534 1.286.043.087.072.188.014.304-.058.116-.087.188-.173.289l-.26.304c-.087.086-.177.18-.076.354.101.174.449.741.964 1.201.662.591 1.221.774 1.394.861.174.086.275.072.376-.044.102-.115.434-.506.549-.68.116-.173.232-.144.39-.086.159.058 1.011.477 1.184.564.173.086.289.13.332.202.043.072.043.419-.101.824z"/></svg>
+        <span>WhatsApp</span>
       </button>
     </header>
 
@@ -2665,9 +3175,15 @@
   <!-- ========================================== -->
   <div id="view-search" class="app-view">
     <header class="app-top-bar">
-      <button type="button" id="btn-search-back" class="btn-back">← Início</button>
+      <button type="button" id="btn-search-back" class="btn-back">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round">
+          <line x1="19" y1="12" x2="5" y2="12"></line>
+          <polyline points="12 19 5 12 12 5"></polyline>
+        </svg>
+        <span>Início</span>
+      </button>
       <span class="top-bar-title">CONSULTAR PRODUTOS</span>
-      <div style="width: 50px;"></div>
+      <div class="top-bar-balance-spacer" aria-hidden="true"></div>
     </header>
 
     <main class="search-main-content">
@@ -2721,10 +3237,17 @@
   <!-- ========================================== -->
   <div id="view-expirations" class="app-view">
     <header class="app-top-bar">
-      <button type="button" id="btn-exp-back" class="btn-back">← Início</button>
+      <button type="button" id="btn-exp-back" class="btn-back">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round">
+          <line x1="19" y1="12" x2="5" y2="12"></line>
+          <polyline points="12 19 5 12 12 5"></polyline>
+        </svg>
+        <span>Início</span>
+      </button>
       <span class="top-bar-title">VENCIMENTOS</span>
-      <button type="button" id="btn-expirations-wa-export" class="btn-topbar-action btn-topbar-wa" title="Exportar Lista para WhatsApp">
-        📲 WhatsApp
+      <button type="button" id="btn-expirations-wa-export" class="btn-topbar-action" title="Exportar Lista para WhatsApp">
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="currentColor"><path d="M12.031 6.172c-3.181 0-5.767 2.586-5.768 5.766-.001 1.298.38 2.27 1.019 3.287l-.582 2.128 2.182-.573c.978.58 1.911.928 3.145.929 3.178 0 5.767-2.587 5.768-5.766.001-3.187-2.575-5.771-5.764-5.771zm3.392 8.244c-.144.405-.837.774-1.17.824-.299.045-.677.063-1.092-.069-.252-.08-.575-.187-.988-.365-1.739-.751-2.874-2.502-2.961-2.617-.087-.116-.708-.94-.708-1.793s.448-1.273.607-1.446c.159-.173.346-.217.462-.217l.332.007c.106.005.249-.04.39.299.144.347.491 1.199.534 1.286.043.087.072.188.014.304-.058.116-.087.188-.173.289l-.26.304c-.087.086-.177.18-.076.354.101.174.449.741.964 1.201.662.591 1.221.774 1.394.861.174.086.275.072.376-.044.102-.115.434-.506.549-.68.116-.173.232-.144.39-.086.159.058 1.011.477 1.184.564.173.086.289.13.332.202.043.072.043.419-.101.824z"/></svg>
+        <span>WhatsApp</span>
       </button>
     </header>
 

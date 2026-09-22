@@ -68,9 +68,10 @@ async function initApp() {
   registerSyncStatusListener((status) => {
     const badge = document.getElementById('sync-status-badge');
     if (badge) {
-      badge.textContent = status.label;
-      badge.className = `sync-badge ${status.className}`;
-      badge.title = status.lastError ? `Detalhes: ${status.lastError} (Toque para tentar novamente)` : 'Toque para sincronizar com a nuvem';
+      const cleanLabel = (status.label || '').replace(/^[●↻\s]+/, '') || 'Offline';
+      badge.innerHTML = `<span class="sync-dot"></span><span class="sync-text">${cleanLabel}</span>`;
+      badge.className = `sync-badge ${status.className || 'status-offline'}`;
+      badge.title = status.lastError ? `Detalhes: ${status.lastError} (Toque para sincronizar)` : 'Toque para sincronizar com a nuvem';
     }
   });
 
@@ -139,6 +140,7 @@ export function updateAppUserInterface(user = null) {
   const badgeContainer = document.getElementById('header-user-badge-container');
   const greetingEl = document.getElementById('dashboard-greeting');
   const brandTitleEl = document.getElementById('app-header-brand-title');
+  const userTagEl = document.getElementById('app-header-user-tag');
 
   // Atualiza atributo no HTML e classes de tema no body para identidade visual
   document.documentElement.setAttribute('data-active-user', currentUser.id);
@@ -147,7 +149,11 @@ export function updateAppUserInterface(user = null) {
   document.title = `Controladoria — ${currentUser.name}`;
 
   if (brandTitleEl) {
-    brandTitleEl.textContent = `CONTROLADORIA — ${currentUser.name.toUpperCase()}`;
+    brandTitleEl.textContent = 'CONTROLADORIA';
+  }
+
+  if (userTagEl) {
+    userTagEl.textContent = currentUser.name;
   }
 
   if (greetingEl) {
@@ -156,22 +162,9 @@ export function updateAppUserInterface(user = null) {
 
   if (badgeContainer) {
     badgeContainer.innerHTML = `
-      <button type="button" id="btn-header-active-user" style="
-        background: ${currentUser.badgeColor};
-        border: 1px solid ${currentUser.color}66;
-        color: ${currentUser.textColor};
-        padding: 3px 9px;
-        border-radius: 9999px;
-        font-size: 0.72rem;
-        font-weight: 800;
-        cursor: pointer;
-        display: flex;
-        align-items: center;
-        gap: 5px;
-        white-space: nowrap;
-      " title="Usuária ativa: ${currentUser.name}. Toque para ver detalhes da sessão.">
-        <span>${currentUser.icon}</span>
-        <span>${currentUser.name}</span>
+      <button type="button" id="btn-header-active-user" class="hud-user-btn" style="border-color: ${currentUser.color}66;" title="Usuária ativa: ${currentUser.name}. Toque para ver detalhes da sessão.">
+        <span class="hud-user-avatar" style="background: ${currentUser.color};">${currentUser.name.charAt(0)}</span>
+        <span class="hud-user-name">${currentUser.name.split(' ')[0]}</span>
       </button>
     `;
 

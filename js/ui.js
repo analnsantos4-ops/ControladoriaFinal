@@ -517,7 +517,12 @@ export function promptTriageBarcodeConfirmation({ product, expiration, onConfirm
   });
 }
 
-// Modal de Confirmação Genérico e Amigável (Evita bloqueios de window.confirm em iframes)
+// ==============================================================================
+// SISTEMA ÚNICO E ROBUSTO DE DIÁLOGOS MODAIS (Regras 27 e 28 do Prompt Master)
+// Prevenção de duplo clique, mesmo design mobile-first, suporte a teclado e iframes
+// ==============================================================================
+
+// 1. Modal de Confirmação Genérico
 export function promptConfirmDialog(optionsOrTitle, maybeMessage = '', maybeOptions = {}) {
   let opts = {};
   if (typeof optionsOrTitle === 'string') {
@@ -577,10 +582,10 @@ export function promptConfirmDialog(optionsOrTitle, maybeMessage = '', maybeOpti
         </div>
 
         <div style="display: flex; gap: 8px;">
-          <button type="button" id="btn-generic-cancel" class="btn-secondary" style="flex: 1; height: 44px; justify-content: center; font-weight: 800; font-size: 0.82rem;">
+          <button type="button" id="btn-generic-cancel" class="btn-secondary" style="flex: 1; height: 46px; justify-content: center; font-weight: 800; font-size: 0.84rem; border-radius: 8px;">
             ${cancelText}
           </button>
-          <button type="button" id="btn-generic-confirm" class="btn-primary" style="flex: 1.2; height: 44px; justify-content: center; background: ${confirmBtnBg}; color: ${confirmBtnColor}; border: 1px solid ${confirmBorder}; font-weight: 900; font-size: 0.82rem;">
+          <button type="button" id="btn-generic-confirm" class="btn-primary" style="flex: 1.2; height: 46px; justify-content: center; background: ${confirmBtnBg}; color: ${confirmBtnColor}; border: 1px solid ${confirmBorder}; font-weight: 900; font-size: 0.84rem; border-radius: 8px;">
             ${confirmText}
           </button>
         </div>
@@ -589,23 +594,248 @@ export function promptConfirmDialog(optionsOrTitle, maybeMessage = '', maybeOpti
 
     modal.classList.add('open');
 
-    const closeModal = () => modal.classList.remove('open');
+    let isResolved = false;
+    const closeModal = () => {
+      modal.classList.remove('open');
+      window.removeEventListener('keydown', handleKeyDown);
+    };
 
     const handleCancel = () => {
+      if (isResolved) return;
+      isResolved = true;
       closeModal();
       if (typeof onCancel === 'function') onCancel();
       resolve(false);
     };
 
     const handleConfirm = () => {
+      if (isResolved) return;
+      isResolved = true;
+      const confirmBtn = document.getElementById('btn-generic-confirm');
+      if (confirmBtn) {
+        confirmBtn.disabled = true;
+        confirmBtn.style.opacity = '0.5';
+      }
       closeModal();
       if (typeof onConfirm === 'function') onConfirm();
       resolve(true);
     };
 
+    const handleKeyDown = (e) => {
+      if (e.key === 'Escape') handleCancel();
+      if (e.key === 'Enter') handleConfirm();
+    };
+    window.addEventListener('keydown', handleKeyDown);
+
     document.getElementById('generic-confirm-backdrop')?.addEventListener('click', handleCancel);
     document.getElementById('btn-generic-cancel')?.addEventListener('click', handleCancel);
     document.getElementById('btn-generic-confirm')?.addEventListener('click', handleConfirm);
+
+    setTimeout(() => {
+      document.getElementById('btn-generic-confirm')?.focus();
+    }, 50);
+  });
+}
+
+// 2. Modal de Alerta Informativo (AlertDialog)
+export function promptAlertDialog(optionsOrTitle, maybeMessage = '') {
+  let opts = {};
+  if (typeof optionsOrTitle === 'string') {
+    opts = { title: optionsOrTitle, message: maybeMessage };
+  } else if (optionsOrTitle && typeof optionsOrTitle === 'object') {
+    opts = { ...optionsOrTitle };
+  }
+
+  const {
+    title = 'Aviso',
+    message = '',
+    confirmText = 'ENTENDI',
+    icon = 'ℹ️'
+  } = opts;
+
+  return new Promise((resolve) => {
+    let modal = document.getElementById('generic-alert-modal');
+    if (!modal) {
+      modal = document.createElement('div');
+      modal.id = 'generic-alert-modal';
+      modal.className = 'custom-modal';
+      document.body.appendChild(modal);
+    }
+
+    modal.innerHTML = `
+      <div class="modal-backdrop" id="generic-alert-backdrop"></div>
+      <div class="modal-card" style="padding: 20px; max-width: 400px; width: 100%; box-sizing: border-box;">
+        <div style="display: flex; align-items: center; gap: 12px; margin-bottom: 12px;">
+          <span style="font-size: 1.6rem;">${icon}</span>
+          <div>
+            <h3 style="font-size: 1.05rem; font-weight: 900; color: #f4f4f5; margin: 0;">${title}</h3>
+          </div>
+        </div>
+
+        <div style="font-size: 0.88rem; color: #d4d4d8; line-height: 1.45; margin-bottom: 20px;">
+          ${message}
+        </div>
+
+        <div>
+          <button type="button" id="btn-generic-alert-ok" class="btn-primary" style="width: 100%; height: 46px; justify-content: center; background: #3b82f6; color: #ffffff; font-weight: 900; font-size: 0.88rem; border-radius: 8px;">
+            ${confirmText}
+          </button>
+        </div>
+      </div>
+    `;
+
+    modal.classList.add('open');
+
+    const handleOk = () => {
+      modal.classList.remove('open');
+      resolve(true);
+    };
+
+    document.getElementById('generic-alert-backdrop')?.addEventListener('click', handleOk);
+    document.getElementById('btn-generic-alert-ok')?.addEventListener('click', handleOk);
+
+    setTimeout(() => {
+      document.getElementById('btn-generic-alert-ok')?.focus();
+    }, 50);
+  });
+}
+
+// 3. Modal de Entrada de Dados (CustomInputDialog - Regra 27)
+export function promptCustomInputDialog(options = {}) {
+  const {
+    title = 'Informação',
+    message = '',
+    placeholder = '',
+    defaultValue = '',
+    type = 'text', // 'text' | 'number' | 'date'
+    confirmText = 'CONFIRMAR',
+    cancelText = 'CANCELAR',
+    icon = '✏️',
+    required = false,
+    onConfirm,
+    onCancel
+  } = options;
+
+  return new Promise((resolve) => {
+    let modal = document.getElementById('generic-input-modal');
+    if (!modal) {
+      modal = document.createElement('div');
+      modal.id = 'generic-input-modal';
+      modal.className = 'custom-modal';
+      document.body.appendChild(modal);
+    }
+
+    modal.innerHTML = `
+      <div class="modal-backdrop" id="generic-input-backdrop"></div>
+      <div class="modal-card" style="padding: 20px; max-width: 420px; width: 100%; box-sizing: border-box;">
+        <div style="display: flex; align-items: center; gap: 12px; margin-bottom: 12px;">
+          <span style="font-size: 1.6rem;">${icon}</span>
+          <div>
+            <h3 style="font-size: 1.05rem; font-weight: 900; color: #f4f4f5; margin: 0;">${title}</h3>
+          </div>
+        </div>
+
+        ${message ? `<div style="font-size: 0.85rem; color: #d4d4d8; line-height: 1.45; margin-bottom: 14px;">${message}</div>` : ''}
+
+        <div style="margin-bottom: 16px;">
+          <input
+            type="${type}"
+            id="generic-input-field"
+            class="form-input"
+            value="${defaultValue}"
+            placeholder="${placeholder}"
+            style="width: 100%; height: 46px; font-size: 1rem; border-radius: 8px; box-sizing: border-box; padding: 0 12px;"
+            autocomplete="off"
+          />
+          <div id="generic-input-error" style="color: #ef4444; font-size: 0.78rem; font-weight: 700; margin-top: 4px; display: none;"></div>
+        </div>
+
+        <div style="display: flex; gap: 8px;">
+          <button type="button" id="btn-generic-input-cancel" class="btn-secondary" style="flex: 1; height: 46px; justify-content: center; font-weight: 800; font-size: 0.84rem; border-radius: 8px;">
+            ${cancelText}
+          </button>
+          <button type="button" id="btn-generic-input-confirm" class="btn-primary" style="flex: 1.2; height: 46px; justify-content: center; background: #10b981; color: #022c22; font-weight: 900; font-size: 0.84rem; border-radius: 8px;">
+            ${confirmText}
+          </button>
+        </div>
+      </div>
+    `;
+
+    modal.classList.add('open');
+
+    const inputField = document.getElementById('generic-input-field');
+    const errorBox = document.getElementById('generic-input-error');
+
+    let isResolved = false;
+    const closeModal = () => {
+      modal.classList.remove('open');
+      window.removeEventListener('keydown', handleKeyDown);
+    };
+
+    const handleCancel = () => {
+      if (isResolved) return;
+      isResolved = true;
+      closeModal();
+      if (typeof onCancel === 'function') onCancel();
+      resolve(null);
+    };
+
+    const handleConfirm = () => {
+      if (isResolved) return;
+      const val = inputField ? inputField.value.trim() : '';
+
+      if (required && !val) {
+        if (errorBox) {
+          errorBox.textContent = 'Este campo é obrigatório.';
+          errorBox.style.display = 'block';
+        }
+        inputField?.focus();
+        return;
+      }
+
+      isResolved = true;
+      const confirmBtn = document.getElementById('btn-generic-input-confirm');
+      if (confirmBtn) {
+        confirmBtn.disabled = true;
+        confirmBtn.style.opacity = '0.5';
+      }
+      closeModal();
+      if (typeof onConfirm === 'function') onConfirm(val);
+      resolve(val);
+    };
+
+    const handleKeyDown = (e) => {
+      if (e.key === 'Escape') handleCancel();
+      if (e.key === 'Enter') {
+        e.preventDefault();
+        handleConfirm();
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+
+    document.getElementById('generic-input-backdrop')?.addEventListener('click', handleCancel);
+    document.getElementById('btn-generic-input-cancel')?.addEventListener('click', handleCancel);
+    document.getElementById('btn-generic-input-confirm')?.addEventListener('click', handleConfirm);
+
+    setTimeout(() => {
+      if (inputField) {
+        inputField.focus();
+        if (defaultValue) inputField.select();
+      }
+    }, 100);
+  });
+}
+
+// 4. Modal de Proteção para Quantidades Grandes (Regra 31: >= 5000 unidades)
+export async function promptQuantityHighConfirmDialog(locationName, quantity) {
+  const formattedQty = Number(quantity).toLocaleString('pt-BR');
+  return promptConfirmDialog({
+    title: 'Confirmação de Quantidade Alta',
+    message: `Você informou <strong style="color: #fbbf24; font-size: 1.05rem;">${formattedQty} unidades</strong> para o local <strong style="color: #38bdf8;">${locationName}</strong>.<br><br>Deseja confirmar esta quantidade?`,
+    confirmText: 'SIM, CONFIRMAR',
+    cancelText: 'CORRIGIR',
+    confirmStyle: 'warning',
+    icon: '⚠️'
   });
 }
 

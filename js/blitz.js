@@ -76,7 +76,7 @@ import {
   repairBlitzSessionData
 } from './blitz_engine.js';
 
-import { showView, showToast, promptConfirmDialog } from './ui.js';
+import { showView, showToast, promptConfirmDialog, promptCustomInputDialog, promptAlertDialog, promptQuantityHighConfirmDialog } from './ui.js';
 import { startCameraScanner, stopCameraScanner } from './scanner.js';
 import { openWhatsAppExportModal } from './whatsapp.js';
 import { triggerSyncNow } from './sync.js';
@@ -1562,15 +1562,20 @@ export async function openBlitzDashboardView() {
 
   container.innerHTML = `
     <header class="app-top-bar">
-      <button type="button" id="btn-blitz-dash-back" class="btn-back" style="color: #a1a1aa; font-weight: 700; font-size: 0.88rem; background: none; border: none; cursor: pointer;">
-        ← Início
+      <button type="button" id="btn-blitz-dash-back" class="btn-back">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round">
+          <line x1="19" y1="12" x2="5" y2="12"></line>
+          <polyline points="12 19 5 12 12 5"></polyline>
+        </svg>
+        <span>Início</span>
       </button>
-      <div style="display: flex; align-items: center; gap: 6px;">
-        <span style="display: inline-block; width: 8px; height: 8px; border-radius: 9999px; background: #10b981; box-shadow: 0 0 8px #10b981;"></span>
-        <span class="top-bar-title" style="font-weight: 900; font-size: 0.95rem; color: #f4f4f5; letter-spacing: 0.5px;">BLITZ ATIVA</span>
+      <div style="display: flex; align-items: center; justify-content: center; gap: 8px; flex: 1; min-width: 0;">
+        <span style="display: inline-block; width: 8px; height: 8px; border-radius: 9999px; background: #10b981; box-shadow: 0 0 8px #10b981; flex-shrink: 0;"></span>
+        <span class="top-bar-title" style="flex: initial;">BLITZ ATIVA</span>
       </div>
-      <button type="button" id="btn-blitz-dash-history" class="btn-icon-link" style="color: #38bdf8; font-weight: 800; font-size: 0.82rem; background: none; border: none; cursor: pointer;">
-        📋 Histórico
+      <button type="button" id="btn-blitz-dash-history" class="hud-btn btn-header-db" title="Histórico da Blitz">
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><polyline points="14 2 14 8 20 8"></polyline><line x1="16" y1="13" x2="8" y2="13"></line><line x1="16" y1="17" x2="8" y2="17"></line><polyline points="10 9 9 9 8 9"></polyline></svg>
+        <span class="hud-btn-text">Histórico</span>
       </button>
     </header>
 
@@ -2957,20 +2962,21 @@ export async function promptBlitzQuantityAndHistoryStep(product, targetDateISO, 
   const previousQuantity = lastRecord ? (Number(lastRecord.quantity != null ? lastRecord.quantity : lastRecord.total) || 0) : 0;
   const previousDateStr = lastRecord ? (lastRecord.blitzDate || (lastRecord.date ? formatDateBR(lastRecord.date) : 'Blitz anterior')) : '';
 
-  const defaultLocs = ['DEPÓSITO', 'GELADEIRA', 'PRATELEIRA', 'PONTA DE GÔNDOLA', 'ORELHA', 'ILHA', 'CARRINHO NA FRENTE DE LOJA'];
-
-  // Resgata todos os locais já gravados nesta mesma Blitz para esta validade específica
-  const existingLocsList = (isAlreadyInCurrentBlitz && currentBlitzRecord?.locations && Array.isArray(currentBlitzRecord.locations))
-    ? currentBlitzRecord.locations.map(l => String(l.location || '').trim().toUpperCase()).filter(Boolean)
-    : [];
-
-  // Unifica preservando a ordem padrão e incluindo eventuais locais já registrados
-  const allLocs = Array.from(new Set([...defaultLocs, ...existingLocsList]));
+  // Regras 3 e 4: OS 7 LOCAIS SÃO FIXOS E OBRIGATÓRIOS EM TODA CONFERÊNCIA
+  const FIXED_LOCATIONS_META = [
+    { id: 'DEPÓSITO', label: 'Depósito', icon: '📦' },
+    { id: 'GELADEIRA', label: 'Geladeira', icon: '🧊' },
+    { id: 'PRATELEIRA', label: 'Prateleira', icon: '🛒' },
+    { id: 'PONTA DE GÔNDOLA', label: 'Ponta de Gôndola', icon: '📍' },
+    { id: 'ORELHA', label: 'Orelha', icon: '👂' },
+    { id: 'ILHA', label: 'Ilha', icon: '🏝️' },
+    { id: 'CARRINHO NA FRENTE DE LOJA', label: 'Carrinho na frente de loja', icon: '🛒' }
+  ];
 
   // Função para resgatar a contagem já existente por local (nesta mesma blitz)
-  const getInitialQtyForLoc = (loc) => {
+  const getInitialQtyForLoc = (locId) => {
     if (isAlreadyInCurrentBlitz && currentBlitzRecord?.locations && Array.isArray(currentBlitzRecord.locations)) {
-      const found = currentBlitzRecord.locations.find(l => String(l.location || '').trim().toUpperCase() === loc);
+      const found = currentBlitzRecord.locations.find(l => String(l.location || '').trim().toUpperCase() === locId);
       return found ? (Number(found.quantity) || 0) : 0;
     }
     return 0;
@@ -3011,7 +3017,7 @@ export async function promptBlitzQuantityAndHistoryStep(product, targetDateISO, 
         </div>
       </div>
 
-      <!-- STATUS DA CONFERÊNCIA ATUAL DESTA BLITZ (Item 16) -->
+      <!-- STATUS DA CONFERÊNCIA ATUAL DESTA BLITZ (Regra 16) -->
       ${isAlreadyInCurrentBlitz ? `
         <div style="background: rgba(14, 165, 233, 0.12); border: 1.5px solid #0284c7; border-radius: 10px; padding: 12px; margin-bottom: 12px;">
           <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 4px;">
@@ -3036,7 +3042,7 @@ export async function promptBlitzQuantityAndHistoryStep(product, targetDateISO, 
         </div>
       `}
 
-      <!-- HISTÓRICO ANTERIOR DA DATA ESPECÍFICA (Item 16: Ausência de histórico != 0) -->
+      <!-- HISTÓRICO ANTERIOR DA DATA ESPECÍFICA (Regra 2: HISTÓRICO NÃO É ESTOQUE ATUAL) -->
       ${!isFirstTime && lastRecord ? `
         <div style="background: rgba(245, 158, 11, 0.12); border: 1.5px solid #f59e0b; border-radius: 10px; padding: 12px; margin-bottom: 14px;">
           <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 6px;">
@@ -3061,7 +3067,7 @@ export async function promptBlitzQuantityAndHistoryStep(product, targetDateISO, 
             </div>
           ` : ''}
           <div style="font-size: 0.74rem; color: #a1a1aa; margin-top: 6px; border-top: 1px dashed rgba(245, 158, 11, 0.3); padding-top: 5px;">
-            ℹ️ <em>Apenas referência histórica. Não é lançada automaticamente na Blitz atual.</em>
+            ℹ️ <em>Apenas referência histórica. Não é somada automaticamente à Blitz atual.</em>
           </div>
         </div>
       ` : `
@@ -3078,7 +3084,7 @@ export async function promptBlitzQuantityAndHistoryStep(product, targetDateISO, 
         </div>
       `}
 
-      <!-- PERGUNTA: QUANTAS TEM NESTA BLITZ? -->
+      <!-- PERGUNTA: QUANTAS TEM NESTA BLITZ? (Regra 29) -->
       <form id="form-blitz-quantity-step" style="display: flex; flex-direction: column; gap: 14px;">
         
         <!-- Opção de registrar direto como NÃO TEM -->
@@ -3091,7 +3097,7 @@ export async function promptBlitzQuantityAndHistoryStep(product, targetDateISO, 
           </button>
         </div>
 
-        <!-- Se tiver unidades: Quantidades por local -->
+        <!-- Se tiver unidades: Quantidades por local (Regra 4 e 29: Os 7 Locais Fixos) -->
         <div>
           <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px;">
             <label style="font-size: 0.86rem; font-weight: 900; color: #fbbf24; text-transform: uppercase;">
@@ -3102,47 +3108,46 @@ export async function promptBlitzQuantityAndHistoryStep(product, targetDateISO, 
             </div>
           </div>
 
-          <div id="step-locations-list" style="display: flex; flex-direction: column; gap: 8px; max-height: 280px; overflow-y: auto; padding-right: 4px;">
-            ${allLocs.map(loc => {
-              const initVal = getInitialQtyForLoc(loc);
+          <div id="step-locations-list" style="display: flex; flex-direction: column; gap: 8px; max-height: 320px; overflow-y: auto; padding-right: 4px;">
+            ${FIXED_LOCATIONS_META.map(loc => {
+              const initVal = getInitialQtyForLoc(loc.id);
               return `
-                <div class="loc-card-row" data-loc="${loc}" style="background: #18181c; border: 1px solid #27272a; border-radius: 8px; padding: 8px 10px; display: flex; flex-direction: column; gap: 6px;">
+                <div class="loc-card-row" data-loc="${loc.id}" style="background: #18181c; border: 1px solid #27272a; border-radius: 8px; padding: 8px 10px; display: flex; flex-direction: column; gap: 6px;">
                   <div style="display: flex; align-items: center; justify-content: space-between;">
                     <div style="display: flex; align-items: center; gap: 6px;">
-                      <span style="font-size: 0.82rem; font-weight: 800; color: #e4e4e7;">${loc}</span>
+                      <span style="font-size: 1.05rem;">${loc.icon}</span>
+                      <span style="font-size: 0.84rem; font-weight: 800; color: #e4e4e7;">${loc.label}</span>
                       ${initVal > 0 ? `
                         <span style="font-size: 0.65rem; font-weight: 800; color: #38bdf8; background: rgba(56, 189, 248, 0.15); border: 1px solid rgba(56, 189, 248, 0.3); padding: 1px 5px; border-radius: 4px;">
                           Nesta Blitz: ${initVal} un
                         </span>
                       ` : ''}
                     </div>
-                    <button type="button" class="btn-step-add-more btn-secondary" data-loc="${loc}" title="Somar mais unidades a este local" style="height: 28px; padding: 0 8px; font-size: 0.72rem; font-weight: 800; color: #38bdf8; border-color: rgba(56, 189, 248, 0.35); border-radius: 6px; display: inline-flex; align-items: center; gap: 3px;">
+                    <button type="button" class="btn-step-add-more btn-secondary" data-loc="${loc.id}" data-label="${loc.label}" title="Somar mais unidades a este local" style="height: 28px; padding: 0 8px; font-size: 0.72rem; font-weight: 800; color: #38bdf8; border-color: rgba(56, 189, 248, 0.35); border-radius: 6px; display: inline-flex; align-items: center; gap: 3px;">
                       <span>➕ Somar</span>
                     </button>
                   </div>
                   <div style="display: flex; align-items: center; justify-content: space-between; gap: 8px;">
                     <span style="font-size: 0.72rem; color: #a1a1aa;">Contagem neste local:</span>
                     <div style="display: flex; align-items: center; gap: 6px;">
-                      <button type="button" class="btn-step-qty btn-secondary" data-loc="${loc}" data-delta="-1" style="min-width: 44px; min-height: 44px; width: 44px; height: 44px; padding: 0; font-size: 1.25rem; font-weight: 900; justify-content: center; border-radius: 8px;">-</button>
+                      <button type="button" class="btn-step-qty btn-secondary" data-loc="${loc.id}" data-delta="-1" style="min-width: 44px; min-height: 44px; width: 44px; height: 44px; padding: 0; font-size: 1.25rem; font-weight: 900; justify-content: center; border-radius: 8px;">-</button>
                       <input
                         type="number"
                         class="input-loc-qty form-input"
-                        data-loc="${loc}"
+                        data-loc="${loc.id}"
                         min="0"
                         step="1"
                         value="${initVal}"
-                        style="width: 64px; height: 44px; text-align: center; font-size: 1.15rem; font-weight: 900; padding: 2px; border-radius: 8px;"
+                        style="width: 72px; height: 44px; text-align: center; font-size: 1.15rem; font-weight: 900; padding: 2px; border-radius: 8px;"
+                        autocomplete="off"
                       />
-                      <button type="button" class="btn-step-qty btn-secondary" data-loc="${loc}" data-delta="1" style="min-width: 44px; min-height: 44px; width: 44px; height: 44px; padding: 0; font-size: 1.25rem; font-weight: 900; justify-content: center; border-radius: 8px;">+</button>
+                      <button type="button" class="btn-step-qty btn-secondary" data-loc="${loc.id}" data-delta="1" style="min-width: 44px; min-height: 44px; width: 44px; height: 44px; padding: 0; font-size: 1.25rem; font-weight: 900; justify-content: center; border-radius: 8px;">+</button>
                     </div>
                   </div>
                 </div>
               `;
             }).join('')}
           </div>
-          <button type="button" id="btn-step-add-custom-loc" class="btn-secondary" style="width: 100%; height: 38px; font-size: 0.8rem; font-weight: 800; justify-content: center; border: 1.5px dashed #3f3f46; color: #a1a1aa; border-radius: 8px; margin-top: 6px;">
-            ➕ Adicionar Outro Local (ex: Corredor, Check-out)
-          </button>
         </div>
 
         <!-- FOTO DO PRODUTO (OPCIONAL) -->
@@ -3204,7 +3209,7 @@ export async function promptBlitzQuantityAndHistoryStep(product, targetDateISO, 
     });
   });
 
-  // Cálculo automático do total ao vivo
+  // Cálculo automático do total ao vivo (Regra 9: Somente a soma dos 7 locais desta conferência)
   const totalSpan = document.getElementById('step-calc-total');
 
   const updateTotal = () => {
@@ -3215,7 +3220,7 @@ export async function promptBlitzQuantityAndHistoryStep(product, targetDateISO, 
     });
     if (totalSpan) totalSpan.textContent = tot;
     const submitBtn = document.getElementById('btn-submit-blitz-conference');
-    if (submitBtn) {
+    if (submitBtn && !submitBtn.disabled) {
       submitBtn.textContent = `💾 GRAVAR CONFERÊNCIA (${tot} un)`;
     }
     return tot;
@@ -3242,20 +3247,31 @@ export async function promptBlitzQuantityAndHistoryStep(product, targetDateISO, 
     container.querySelectorAll('.input-loc-qty').forEach(inp => {
       if (inp.dataset.bound) return;
       inp.dataset.bound = 'true';
-      inp.addEventListener('input', updateTotal);
-      inp.addEventListener('change', updateTotal);
+      // Regra 8: Digitar no campo substitui a quantidade diretamente
+      inp.addEventListener('input', () => {
+        let val = inp.value.replace(/[^0-9]/g, '');
+        if (val !== inp.value) inp.value = val;
+        updateTotal();
+      });
+      inp.addEventListener('change', () => {
+        let n = parseInt(inp.value, 10);
+        inp.value = isNaN(n) || n < 0 ? '0' : String(n);
+        updateTotal();
+      });
     });
 
     container.querySelectorAll('.btn-step-add-more').forEach(btn => {
       if (btn.dataset.bound) return;
       btn.dataset.bound = 'true';
       btn.addEventListener('click', () => {
-        const loc = btn.getAttribute('data-loc');
-        const inp = modal.querySelector(`.input-loc-qty[data-loc="${loc}"]`);
+        const locId = btn.getAttribute('data-loc');
+        const locLabel = btn.getAttribute('data-label') || locId;
+        const inp = modal.querySelector(`.input-loc-qty[data-loc="${locId}"]`);
         const current = inp ? (parseInt(inp.value, 10) || 0) : 0;
+
         promptCustomInputDialog({
-          title: `Somar à contagem: ${loc}`,
-          message: `Quantas unidades adicionais você deseja somar à ${loc}? (Atualmente: ${current} un)`,
+          title: `Somar à contagem: ${locLabel}`,
+          message: `Quantas unidades adicionais você deseja somar ao local <strong>${locLabel}</strong>? (Atualmente: ${current} un)`,
           placeholder: 'Ex: 3',
           type: 'number',
           confirmText: 'Somar',
@@ -3266,7 +3282,7 @@ export async function promptBlitzQuantityAndHistoryStep(product, targetDateISO, 
               inp.value = current + toAdd;
               updateTotal();
               triggerHaptic(30);
-              showToast(`✓ Somadas +${toAdd} un na ${loc} (Total: ${current + toAdd} un)`, 'success', 1500);
+              showToast(`✓ Somadas +${toAdd} un em ${locLabel} (Total: ${current + toAdd} un)`, 'success', 1500);
             }
           }
         });
@@ -3274,69 +3290,9 @@ export async function promptBlitzQuantityAndHistoryStep(product, targetDateISO, 
     });
   };
 
-  // Liga eventos dos locais iniciais
+  // Liga eventos dos 7 locais
   bindLocationEvents();
   updateTotal();
-
-  // Botão para adicionar outro local customizado
-  document.getElementById('btn-step-add-custom-loc')?.addEventListener('click', () => {
-    promptCustomInputDialog({
-      title: 'Adicionar Local de Conferência',
-      message: 'Digite o nome do local onde o produto foi encontrado (ex: Check-out 3, Corredor 4, Ponta 2):',
-      placeholder: 'Nome do local...',
-      confirmText: 'Adicionar Local',
-      cancelText: 'Cancelar',
-      onConfirm: (locName) => {
-        const cleanName = String(locName || '').trim().toUpperCase();
-        if (!cleanName) return;
-        const exists = modal.querySelector(`.input-loc-qty[data-loc="${cleanName}"]`);
-        if (exists) {
-          exists.focus();
-          showToast(`Local ${cleanName} já está na lista`, 'info', 1500);
-          return;
-        }
-        const listEl = document.getElementById('step-locations-list');
-        if (listEl) {
-          const newCard = document.createElement('div');
-          newCard.className = 'loc-card-row';
-          newCard.setAttribute('data-loc', cleanName);
-          newCard.style.cssText = 'background: #18181c; border: 1px solid #27272a; border-radius: 8px; padding: 8px 10px; display: flex; flex-direction: column; gap: 6px;';
-          newCard.innerHTML = `
-            <div style="display: flex; align-items: center; justify-content: space-between;">
-              <span style="font-size: 0.82rem; font-weight: 800; color: #38bdf8;">${cleanName}</span>
-              <button type="button" class="btn-step-add-more btn-secondary" data-loc="${cleanName}" title="Somar mais unidades a este local" style="height: 28px; padding: 0 8px; font-size: 0.72rem; font-weight: 800; color: #38bdf8; border-color: rgba(56, 189, 248, 0.35); border-radius: 6px; display: inline-flex; align-items: center; gap: 3px;">
-                <span>➕ Somar</span>
-              </button>
-            </div>
-            <div style="display: flex; align-items: center; justify-content: space-between; gap: 8px;">
-              <span style="font-size: 0.72rem; color: #a1a1aa;">Contagem neste local:</span>
-              <div style="display: flex; align-items: center; gap: 6px;">
-                <button type="button" class="btn-step-qty btn-secondary" data-loc="${cleanName}" data-delta="-1" style="min-width: 44px; min-height: 44px; width: 44px; height: 44px; padding: 0; font-size: 1.25rem; font-weight: 900; justify-content: center; border-radius: 8px;">-</button>
-                <input
-                  type="number"
-                  class="input-loc-qty form-input"
-                  data-loc="${cleanName}"
-                  min="0"
-                  step="1"
-                  value="0"
-                  style="width: 64px; height: 44px; text-align: center; font-size: 1.15rem; font-weight: 900; padding: 2px; border-radius: 8px;"
-                />
-                <button type="button" class="btn-step-qty btn-secondary" data-loc="${cleanName}" data-delta="1" style="min-width: 44px; min-height: 44px; width: 44px; height: 44px; padding: 0; font-size: 1.25rem; font-weight: 900; justify-content: center; border-radius: 8px;">+</button>
-              </div>
-            </div>
-          `;
-          listEl.appendChild(newCard);
-          bindLocationEvents(newCard);
-          const inp = newCard.querySelector('.input-loc-qty');
-          if (inp) {
-            inp.focus();
-            inp.select();
-          }
-          showToast(`✓ Local ${cleanName} adicionado!`, 'success', 1500);
-        }
-      }
-    });
-  });
 
   // Handlers de Foto
   const btnCam = document.getElementById('btn-step-cam');
@@ -3418,8 +3374,14 @@ export async function promptBlitzQuantityAndHistoryStep(product, targetDateISO, 
     if (fileGal) fileGal.value = '';
   });
 
-  // CASO 1: NÃO TEM NESTA BLITZ (0 UNIDADES)
+  // CASO 1: NÃO TEM NESTA BLITZ (0 UNIDADES) - Regra 4: grava todos os 7 locais com 0
   document.getElementById('btn-blitz-step-nao-tem')?.addEventListener('click', async () => {
+    const btnNaoTem = document.getElementById('btn-blitz-step-nao-tem');
+    if (btnNaoTem) {
+      btnNaoTem.disabled = true;
+      btnNaoTem.style.opacity = '0.5';
+    }
+
     closeModal();
     showToast('Gravando NÃO TEM...', 'sync', 600);
 
@@ -3437,6 +3399,12 @@ export async function promptBlitzQuantityAndHistoryStep(product, targetDateISO, 
         });
       }
 
+      // Regra 4: Toda conferência de produto deve possuir os 7 locais padronizados
+      const zeroLocations = FIXED_LOCATIONS_META.map(l => ({
+        location: l.id,
+        quantity: 0
+      }));
+
       await saveBlitzConferenceRecord({
         sessionId: session?.id,
         productId: product.id,
@@ -3448,7 +3416,7 @@ export async function promptBlitzQuantityAndHistoryStep(product, targetDateISO, 
         newQuantity: 0,
         difference: 0 - (isAlreadyInCurrentBlitz ? currentQuantity : previousQuantity),
         result: 'NAO_TEM',
-        locations: [],
+        locations: zeroLocations,
         photo_proof: productPhoto || null,
         foto_url: productPhoto || null,
         userId: getCurrentUser()?.id || session?.responsible_user_id || session?.user_id || 'ana_luiza',
@@ -3479,80 +3447,103 @@ export async function promptBlitzQuantityAndHistoryStep(product, targetDateISO, 
     }
   });
 
-  // CASO 2: GRAVAR CONFERÊNCIA COM AS QUANTIDADES
+  // CASO 2: GRAVAR CONFERÊNCIA COM AS QUANTIDADES (Regras 4, 30, 31, 32)
   document.getElementById('form-blitz-quantity-step')?.addEventListener('submit', async (e) => {
     e.preventDefault();
     const totalQty = updateTotal();
 
+    // Regra 31: Confirmação para quantidades grandes (>= 5000)
+    for (const loc of FIXED_LOCATIONS_META) {
+      const inp = modal.querySelector(`.input-loc-qty[data-loc="${loc.id}"]`);
+      const val = inp ? (parseInt(inp.value, 10) || 0) : 0;
+      if (val >= 5000) {
+        const ok = await promptQuantityHighConfirmDialog(loc.label, val);
+        if (!ok) return;
+      }
+    }
+
     if (totalQty === 0) {
-      promptConfirmDialog({
+      const proceedZero = await promptConfirmDialog({
         title: 'Quantidade zero',
         message: 'A quantidade total é 0. Deseja registrar esta data como NÃO TEM na blitz?',
         confirmText: 'Sim, registrar NÃO TEM',
-        cancelText: 'Cancelar',
-        onConfirm: async () => {
-          closeModal();
-          try {
-            if (productPhoto) {
-              product.image = productPhoto;
-              product.photo_url = productPhoto;
-              await saveProduct(product);
-              await saveProductPhotoRecord({
-                productId: product.id,
-                barcode: product.barcode,
-                photoBase64: productPhoto,
-                expirationDate: targetDateISO,
-                type: 'CONFERENCIA'
-              });
-            }
-
-            await saveBlitzConferenceRecord({
-              sessionId: session?.id,
-              productId: product.id,
-              barcode: product.barcode,
-              sector: prodSector,
-              corridor: prodCorridor,
-              requestedDate: targetDateISO,
-              previousQuantity: isAlreadyInCurrentBlitz ? currentQuantity : previousQuantity,
-              newQuantity: 0,
-              difference: 0 - (isAlreadyInCurrentBlitz ? currentQuantity : previousQuantity),
-              result: 'NAO_TEM',
-              locations: [],
-              photo_proof: productPhoto || null,
-              foto_url: productPhoto || null,
-              userId: getCurrentUser()?.id || session?.responsible_user_id || session?.user_id || 'ana_luiza',
-              userName: getCurrentUser()?.name || session?.responsible_user_name || session?.user_name || 'Ana Luiza'
-            });
-            await updateProductStatus(product.id, 'VERIFICADO');
-            product.status = 'VERIFICADO';
-            triggerSyncNow().catch(err => console.warn('Sync error:', err));
-            showBlitzNextProductModal(
-              product.name, 
-              `Validade <strong>${formatDateBR(targetDateISO)}</strong> gravada como <strong style="color: #ef4444;">NÃO TEM</strong>.`,
-              productPhoto || product.image || product.photo_url
-            );
-          } catch (err) {
-            showToast('Erro ao gravar conferência', 'warning');
-            startBlitzScanning();
-          }
-        }
+        cancelText: 'Cancelar'
       });
+
+      if (!proceedZero) return;
+
+      closeModal();
+      try {
+        if (productPhoto) {
+          product.image = productPhoto;
+          product.photo_url = productPhoto;
+          await saveProduct(product);
+          await saveProductPhotoRecord({
+            productId: product.id,
+            barcode: product.barcode,
+            photoBase64: productPhoto,
+            expirationDate: targetDateISO,
+            type: 'CONFERENCIA'
+          });
+        }
+
+        const zeroLocations = FIXED_LOCATIONS_META.map(l => ({
+          location: l.id,
+          quantity: 0
+        }));
+
+        await saveBlitzConferenceRecord({
+          sessionId: session?.id,
+          productId: product.id,
+          barcode: product.barcode,
+          sector: prodSector,
+          corridor: prodCorridor,
+          requestedDate: targetDateISO,
+          previousQuantity: isAlreadyInCurrentBlitz ? currentQuantity : previousQuantity,
+          newQuantity: 0,
+          difference: 0 - (isAlreadyInCurrentBlitz ? currentQuantity : previousQuantity),
+          result: 'NAO_TEM',
+          locations: zeroLocations,
+          photo_proof: productPhoto || null,
+          foto_url: productPhoto || null,
+          userId: getCurrentUser()?.id || session?.responsible_user_id || session?.user_id || 'ana_luiza',
+          userName: getCurrentUser()?.name || session?.responsible_user_name || session?.user_name || 'Ana Luiza'
+        });
+        await updateProductStatus(product.id, 'VERIFICADO');
+        product.status = 'VERIFICADO';
+        triggerSyncNow().catch(err => console.warn('Sync error:', err));
+        showBlitzNextProductModal(
+          product.name, 
+          `Validade <strong>${formatDateBR(targetDateISO)}</strong> gravada como <strong style="color: #ef4444;">NÃO TEM</strong>.`,
+          productPhoto || product.image || product.photo_url
+        );
+      } catch (err) {
+        showToast('Erro ao gravar conferência', 'warning');
+        startBlitzScanning();
+      }
       return;
+    }
+
+    // Regra 32: Prevenção de duplo clique ao salvar
+    const submitBtn = document.getElementById('btn-submit-blitz-conference');
+    if (submitBtn) {
+      submitBtn.disabled = true;
+      submitBtn.style.opacity = '0.5';
+      submitBtn.textContent = 'Salvando conferência...';
     }
 
     closeModal();
     showToast('Gravando conferência da blitz...', 'sync', 600);
 
     try {
-      const locations = [];
-      modal.querySelectorAll('.input-loc-qty').forEach(inp => {
-        const q = parseInt(inp.value, 10);
-        if (!isNaN(q) && q > 0) {
-          locations.push({
-            location: inp.getAttribute('data-loc'),
-            quantity: q
-          });
-        }
+      // Regra 4: Toda conferência de produto deve possuir os 7 locais padronizados
+      const locations = FIXED_LOCATIONS_META.map(loc => {
+        const inp = modal.querySelector(`.input-loc-qty[data-loc="${loc.id}"]`);
+        const q = inp ? Math.max(0, parseInt(inp.value, 10) || 0) : 0;
+        return {
+          location: loc.id,
+          quantity: q
+        };
       });
 
       // 1. Atualiza produto e grava foto
@@ -3602,7 +3593,7 @@ export async function promptBlitzQuantityAndHistoryStep(product, targetDateISO, 
         newQuantity: totalQty,
         difference: totalQty - (isAlreadyInCurrentBlitz ? currentQuantity : previousQuantity),
         result: 'TEM',
-        locations: locations.length > 0 ? locations : [{ location: prodCorridor, quantity: totalQty }],
+        locations: locations,
         photo_proof: productPhoto || null,
         foto_url: productPhoto || null,
         userId: getCurrentUser()?.id || session?.responsible_user_id || session?.user_id || 'ana_luiza',
@@ -6609,10 +6600,17 @@ export async function openBlitzHistoryView() {
 
   container.innerHTML = `
     <header class="app-top-bar">
-      <button type="button" id="btn-blitz-history-back" class="btn-back">← Voltar</button>
+      <button type="button" id="btn-blitz-history-back" class="btn-back">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round">
+          <line x1="19" y1="12" x2="5" y2="12"></line>
+          <polyline points="12 19 5 12 12 5"></polyline>
+        </svg>
+        <span>Voltar</span>
+      </button>
       <span class="top-bar-title">HISTÓRICO DA BLITZ</span>
-      <button type="button" id="btn-history-new-blitz" class="btn-primary" style="padding: 4px 10px; font-size: 0.76rem; font-weight: 900; background: #f59e0b; color: #000;">
-        ➕ Nova Blitz
+      <button type="button" id="btn-history-new-blitz" class="btn-topbar-action" style="background: #f59e0b; border-color: #d97706; color: #000;" title="Nova Blitz">
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="5" x2="12" y2="19"></line><line x1="5" y1="12" x2="19" y2="12"></line></svg>
+        <span>Nova Blitz</span>
       </button>
     </header>
 

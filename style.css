@@ -4146,7 +4146,7 @@ html, body {
 
 /* Safe areas para iPhone (Dynamic Island / Notch e Home Indicator) */
 .app-top-bar {
-  padding-top: max(10px, env(safe-area-inset-top)) !important;
+  padding-top: max(env(safe-area-inset-top, 0px), 8px);
 }
 
 main, .dashboard-main-content, .scanner-manual-box, .conference-main-content {

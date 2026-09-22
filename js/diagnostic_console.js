@@ -1,7 +1,7 @@
 // ==============================================================================
 // CONSOLE DE DIAGNÓSTICO, ERROS E AUDITORIA EM TEMPO REAL DO APLICATIVO
-// Acessado exclusivamente via Código de Segurança de 6 Dígitos (200902)
-// Permite captura contínua de erros, logs do sistema e cópia completa com 1 clique
+// Acessado via PIN ou Botão de Console com visualização limpa e compacta
+// Agrupa eventos repetidos, classifica câmera como INFO/DEBUG e abre como modal
 // ==============================================================================
 
 import { triggerHaptic } from './utils.js';
@@ -13,14 +13,59 @@ const DIAGNOSTIC_LOGS = [];
 let totalErrorsCount = 0;
 let totalWarningsCount = 0;
 let isConsoleSessionAuthorized = false;
-let activeFilter = 'all';
+let activeFilter = 'error'; // Por padrão mostrar: ERROS (Regra 50)
 let searchQuery = '';
 let autoScroll = true;
 
 // Referência aos elementos da UI
 let consoleModalEl = null;
 let pinModalEl = null;
-let hudBadgeEl = null;
+
+// ==============================================================================
+// 1. CLASSIFICAÇÃO INTELIGENTE DE LOGS (Evita classificar avisos de câmera como erro)
+// ==============================================================================
+function classifyLogEntry(rawLevel, rawCategory, rawMsg) {
+  const msg = String(rawMsg || '').trim();
+  const lowerMsg = msg.toLowerCase();
+
+  // Diagnóstico de Câmera (Regra 51): avisos como InputStreamBrowser createLiveStream são DEBUG/INFO
+  if (
+    lowerMsg.includes('inputstreambrowser') ||
+    lowerMsg.includes('createlivestream') ||
+    lowerMsg.includes('createvideostream') ||
+    lowerMsg.includes('quagga') ||
+    lowerMsg.includes('the play() request was interrupted') ||
+    lowerMsg.includes('getusermedia')
+  ) {
+    return {
+      level: 'debug',
+      category: 'CAMERA',
+      isRealError: false
+    };
+  }
+
+  // Erros críticos de sistema
+  if (
+    lowerMsg.includes('referenceerror') ||
+    lowerMsg.includes('typeerror') ||
+    lowerMsg.includes('unhandled promise rejection') ||
+    lowerMsg.includes('fatal') ||
+    lowerMsg.includes('uncaught')
+  ) {
+    return {
+      level: rawLevel === 'warn' ? 'warn' : 'critical',
+      category: rawCategory || 'JS_ERROR',
+      isRealError: rawLevel !== 'warn'
+    };
+  }
+
+  const isRealError = rawLevel === 'error';
+  return {
+    level: rawLevel || 'info',
+    category: rawCategory || 'APP',
+    isRealError
+  };
+}
 
 // ==============================================================================
 // 1. CAPTURA GLOBAL E AUTOMÁTICA DE ERROS E EVENTOS (INICIALIZAÇÃO IMEDIATA)
@@ -48,10 +93,12 @@ export function initDiagnosticConsole() {
   // 1.1 Captura Global de Erros JavaScript Não Tratados
   window.addEventListener('error', (event) => {
     try {
-      totalErrorsCount++;
+      const classification = classifyLogEntry('error', 'JS_ERROR', event?.message);
+      if (classification.isRealError) totalErrorsCount++;
+
       const logEntry = {
-        level: 'error',
-        category: 'JS_ERROR',
+        level: classification.level,
+        category: classification.category,
         message: event?.message || 'Erro JavaScript desconhecido',
         details: {
           filename: event?.filename || 'desconhecido',
@@ -68,7 +115,6 @@ export function initDiagnosticConsole() {
   // 1.2 Captura Global de Promises Rejeitadas (Assíncronas)
   window.addEventListener('unhandledrejection', (event) => {
     try {
-      totalErrorsCount++;
       const reason = event?.reason;
       let msg = 'Promise rejeitada';
       let stack = null;
@@ -80,9 +126,12 @@ export function initDiagnosticConsole() {
         stack = reason.stack || null;
       }
 
+      const classification = classifyLogEntry('error', 'PROMISE_REJECTION', msg);
+      if (classification.isRealError) totalErrorsCount++;
+
       const logEntry = {
-        level: 'error',
-        category: 'PROMISE_REJECTION',
+        level: classification.level,
+        category: classification.category,
         message: msg,
         details: {
           stack: stack,
@@ -98,12 +147,14 @@ export function initDiagnosticConsole() {
   const originalConsoleError = console.error;
   console.error = function (...args) {
     try {
-      totalErrorsCount++;
-      const msg = args.map(arg => (typeof arg === 'object' ? safeStringify(arg) : String(arg))).join(' ');
+      const rawMsg = args.map(arg => (typeof arg === 'object' ? safeStringify(arg) : String(arg))).join(' ');
+      const classification = classifyLogEntry('error', 'CONSOLE_ERROR', rawMsg);
+      if (classification.isRealError) totalErrorsCount++;
+
       addDiagnosticLog({
-        level: 'error',
-        category: 'CONSOLE_ERROR',
-        message: msg,
+        level: classification.level,
+        category: classification.category,
+        message: rawMsg,
         details: args.length > 1 ? args : (args[0] instanceof Error ? { stack: args[0].stack } : null)
       });
       updateHeaderPillBadge();
@@ -114,14 +165,17 @@ export function initDiagnosticConsole() {
   const originalConsoleWarn = console.warn;
   console.warn = function (...args) {
     try {
-      totalWarningsCount++;
-      const msg = args.map(arg => (typeof arg === 'object' ? safeStringify(arg) : String(arg))).join(' ');
+      const rawMsg = args.map(arg => (typeof arg === 'object' ? safeStringify(arg) : String(arg))).join(' ');
+      const classification = classifyLogEntry('warn', 'CONSOLE_WARN', rawMsg);
+      if (classification.level === 'warn') totalWarningsCount++;
+
       addDiagnosticLog({
-        level: 'warn',
-        category: 'CONSOLE_WARN',
-        message: msg,
+        level: classification.level,
+        category: classification.category,
+        message: rawMsg,
         details: args.length > 1 ? args : null
       });
+      updateHeaderPillBadge();
     } catch (_) {}
     originalConsoleWarn.apply(console, args);
   };
@@ -154,12 +208,13 @@ export function initDiagnosticConsole() {
 // 2. FUNÇÃO PÚBLICA PARA REGISTRAR EVENTOS CHAVE DO SISTEMA
 // ==============================================================================
 export function logAppEvent(category, message, details = null, level = 'info') {
-  if (level === 'error') totalErrorsCount++;
-  if (level === 'warn') totalWarningsCount++;
+  const classification = classifyLogEntry(level, category, message);
+  if (classification.isRealError) totalErrorsCount++;
+  if (classification.level === 'warn') totalWarningsCount++;
 
   addDiagnosticLog({
-    level: level || 'info',
-    category: category || 'APP',
+    level: classification.level,
+    category: classification.category,
     message: message || '',
     details: details || null
   });
@@ -181,8 +236,25 @@ function addDiagnosticLog(entry) {
     level: entry.level || 'info',
     category: entry.category || 'GERAL',
     message: entry.message || '',
-    details: entry.details || null
+    details: entry.details || null,
+    repeatCount: 1
   };
+
+  // Regra 50: Agrupa eventos repetidos consecutivos (ex: InputStreamBrowser createLiveStream x 8)
+  const last = DIAGNOSTIC_LOGS[DIAGNOSTIC_LOGS.length - 1];
+  if (
+    last &&
+    last.message === fullEntry.message &&
+    last.level === fullEntry.level &&
+    last.category === fullEntry.category
+  ) {
+    last.repeatCount = (last.repeatCount || 1) + 1;
+    last.timestamp = timeFormatted;
+    if (consoleModalEl && !consoleModalEl.classList.contains('hidden')) {
+      renderAllLogs();
+    }
+    return;
+  }
 
   DIAGNOSTIC_LOGS.push(fullEntry);
   if (DIAGNOSTIC_LOGS.length > MAX_LOG_ENTRIES) {
@@ -485,6 +557,19 @@ function showConsoleModal() {
 
   consoleModalEl = container.querySelector('#modal-diagnostic-console');
 
+  // Fecha clicando no backdrop do popup
+  consoleModalEl?.addEventListener('click', (e) => {
+    if (e.target.id === 'modal-diagnostic-console') closeDiagnosticConsole();
+  });
+
+  const onEscapeConsole = (e) => {
+    if (e.key === 'Escape') {
+      window.removeEventListener('keydown', onEscapeConsole);
+      closeDiagnosticConsole();
+    }
+  };
+  window.addEventListener('keydown', onEscapeConsole);
+
   // Event Listeners da UI do Console
   container.querySelector('#btn-close-console-modal')?.addEventListener('click', closeDiagnosticConsole);
   container.querySelector('#btn-copy-console-report')?.addEventListener('click', copyDiagnosticReportToClipboard);
@@ -643,7 +728,10 @@ function createLogElement(log) {
     <div style="display: flex; align-items: flex-start; gap: 8px;">
       <span style="color: #64748b; font-size: 0.72rem; flex-shrink: 0; margin-top: 1px;">${log.timestamp}</span>
       <span style="color: ${catColor}; font-weight: 700; font-size: 0.72rem; flex-shrink: 0;">[${log.category}]</span>
-      <span style="color: ${levelColor}; word-break: break-word; flex: 1;">${escapeHtml(log.message)}</span>
+      <span style="color: ${levelColor}; word-break: break-word; flex: 1;">
+        ${escapeHtml(log.message)}
+        ${log.repeatCount > 1 ? `<span style="display: inline-block; background: #3f3f46; color: #f4f4f5; font-size: 0.68rem; font-weight: 800; padding: 1px 6px; border-radius: 9999px; margin-left: 6px; border: 1px solid #52525b;">x ${log.repeatCount}</span>` : ''}
+      </span>
       ${hasDetails ? `<button type="button" class="btn-toggle-log-details" data-target="${detailsId}" style="background: #1e202e; border: 1px solid #33364d; color: #94a3b8; font-size: 0.68rem; padding: 1px 6px; border-radius: 4px; cursor: pointer; flex-shrink: 0;">+ Detalhes</button>` : ''}
     </div>
     ${hasDetails ? `
@@ -800,15 +888,32 @@ export function clearDiagnosticLogs() {
 function updateHeaderPillBadge() {
   if (typeof document === 'undefined') return;
   const pill = document.getElementById('console-error-pill');
-  if (!pill) return;
-
-  if (totalErrorsCount > 0) {
+  if (pill) {
     pill.textContent = totalErrorsCount;
-    pill.classList.remove('hidden');
-    pill.style.display = 'inline-flex';
-  } else {
-    pill.classList.add('hidden');
-    pill.style.display = 'none';
+    if (totalErrorsCount > 0) {
+      pill.classList.remove('hidden');
+      pill.style.display = 'inline-flex';
+    } else {
+      pill.classList.add('hidden');
+      pill.style.display = 'none';
+    }
+  }
+
+  // Regra 49: Mostrar contador "Console 4" ou "Console 0"
+  const headerBtn = document.getElementById('btn-header-console');
+  if (headerBtn) {
+    const textSpan = headerBtn.querySelector('span');
+    if (textSpan) {
+      textSpan.textContent = `Console ${totalErrorsCount}`;
+    }
+  }
+
+  const floatingBtn = document.getElementById('btn-floating-console');
+  if (floatingBtn) {
+    const textSpan = floatingBtn.querySelector('.console-count-text');
+    if (textSpan) {
+      textSpan.textContent = `Console ${totalErrorsCount}`;
+    }
   }
 }
 
